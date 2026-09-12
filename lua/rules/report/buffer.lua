@@ -24,6 +24,12 @@ function M.render(results)
       manual[#manual + 1] = res
     elseif res.status == "pass" then
       lines[#lines + 1] = ("%s %s -- ok"):format(icon, res.rule.id)
+    elseif res.status == "waived" then
+      lines[#lines + 1] = ("⚪ %s -- waived (%s): %d finding(s) suppressed"):format(
+        res.rule.id,
+        res.waiver_reason,
+        #res.findings
+      )
     elseif res.status == "error" then
       local msg = res.findings[1] and res.findings[1].text or "?"
       lines[#lines + 1] = ("%s %s -- check errored (%s)"):format(icon, res.rule.id, msg)

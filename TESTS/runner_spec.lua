@@ -59,4 +59,31 @@ describe("rules.engine.runner.check_family", function()
     assert.are.equal("fail", dep01.status)
     assert.are.equal(1, #dep01.findings)
   end)
+
+  it("reports a waived rule as 'waived' with its reason, not as fail", function()
+    local dir = tmp_dir()
+    vim.fn.writefile({ "vim.loop.new_timer()" }, dir .. "/a.lua")
+
+    local results = runner.check_family(rules, "DEP", dir, { ["DEP-01"] = "tracked in JIRA-123" })
+
+    local dep01 = vim.tbl_filter(function(r)
+      return r.rule.id == "DEP-01"
+    end, results)[1]
+
+    assert.are.equal("waived", dep01.status)
+    assert.are.equal("tracked in JIRA-123", dep01.waiver_reason)
+    assert.are.equal(1, #dep01.findings)
+  end)
+
+  it("leaves a waiver for a rule that actually passes with no effect", function()
+    local dir = tmp_dir()
+
+    local results = runner.check_family(rules, "DEP", dir, { ["DEP-01"] = "unused waiver" })
+
+    local dep01 = vim.tbl_filter(function(r)
+      return r.rule.id == "DEP-01"
+    end, results)[1]
+
+    assert.are.equal("pass", dep01.status)
+  end)
 end)

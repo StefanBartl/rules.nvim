@@ -5,6 +5,7 @@
 local config = require("rules.config")
 local loader = require("rules.engine.loader")
 local runner = require("rules.engine.runner")
+local waivers = require("rules.engine.waivers")
 
 local M = {}
 
@@ -25,14 +26,28 @@ function M.load_rules()
   return rules
 end
 
+--- Shared by `check_family`/`check_family_json`: load rules and this root's
+--- waivers (`.rules-waivers.json`, see `docs/BINDINGS.md`), then run one
+--- family.
+---@param family_prefix string
+---@param path string|nil
+---@return Rules.Result[]
+local function run_family(family_prefix, path)
+  local root = path or vim.fn.getcwd()
+  local rules = M.load_rules()
+  local repo_waivers, err = waivers.load(root)
+  if err then
+    vim.notify("[rules.nvim] " .. err, vim.log.levels.WARN)
+  end
+  return runner.check_family(rules, family_prefix, root, repo_waivers)
+end
+
 --- Run one rule family against a path and report it (quickfix + buffer).
 ---@param family_prefix string
 ---@param path string|nil  defaults to the current working directory
 ---@return Rules.Result[]
 function M.check_family(family_prefix, path)
-  local root = path or vim.fn.getcwd()
-  local rules = M.load_rules()
-  local results = runner.check_family(rules, family_prefix, root)
+  local results = run_family(family_prefix, path)
   require("rules.report.quickfix").set(results)
   require("rules.report.buffer").open(results)
   return results
@@ -49,9 +64,7 @@ end
 ---@return 0|1 exit_code
 ---@return Rules.Result[] results
 function M.check_family_json(family_prefix, path)
-  local root = path or vim.fn.getcwd()
-  local rules = M.load_rules()
-  local results = runner.check_family(rules, family_prefix, root)
+  local results = run_family(family_prefix, path)
   local json = require("rules.report.json")
   return json.encode(results), json.exit_code(results), results
 end

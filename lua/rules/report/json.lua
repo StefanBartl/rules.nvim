@@ -13,8 +13,9 @@ local M = {}
 ---@class Rules.Report.JsonEntry
 ---@field id string
 ---@field severity "critical"|"recommended"|"nice-to-have"
----@field status "pass"|"fail"|"error"|"manual"
+---@field status "pass"|"fail"|"error"|"manual"|"waived"
 ---@field findings Rules.Finding[]
+---@field waiver_reason string|nil  set only when status is "waived"
 
 --- Turn a run's results into a plain array of JSON-encodable entries.
 ---@param results Rules.Result[]
@@ -27,6 +28,7 @@ function M.to_entries(results)
       severity = res.rule.severity,
       status = res.status,
       findings = res.findings,
+      waiver_reason = res.waiver_reason,
     }
   end
   return entries
@@ -40,7 +42,8 @@ function M.encode(results)
 end
 
 --- The exit code a headless/CI run should use: 1 if any "critical" rule
---- failed or errored, 0 otherwise.
+--- failed or errored, 0 otherwise. A "waived" rule never counts here either
+--- — that is the entire point of a waiver.
 ---@param results Rules.Result[]
 ---@return 0|1
 function M.exit_code(results)

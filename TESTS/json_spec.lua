@@ -1,7 +1,12 @@
 local json = require("rules.report.json")
 
-local function result(id, severity, status, findings)
-  return { rule = { id = id, severity = severity }, status = status, findings = findings or {} }
+local function result(id, severity, status, findings, waiver_reason)
+  return {
+    rule = { id = id, severity = severity },
+    status = status,
+    findings = findings or {},
+    waiver_reason = waiver_reason,
+  }
 end
 
 describe("rules.report.json.to_entries", function()
@@ -17,6 +22,17 @@ describe("rules.report.json.to_entries", function()
     assert.are.equal("recommended", entries[1].severity)
     assert.are.equal("fail", entries[1].status)
     assert.are.equal("a.lua", entries[1].findings[1].file)
+  end)
+
+  it("carries waiver_reason through for a waived entry", function()
+    local results = {
+      result("SEC-01", "critical", "waived", { { file = "a", line = 1, text = "x" } }, "tracked in JIRA-123"),
+    }
+
+    local entries = json.to_entries(results)
+
+    assert.are.equal("waived", entries[1].status)
+    assert.are.equal("tracked in JIRA-123", entries[1].waiver_reason)
   end)
 end)
 
@@ -54,6 +70,13 @@ describe("rules.report.json.exit_code", function()
 
   it("ignores a critical rule with no automated check (manual)", function()
     local results = { result("SEC-01", "critical", "manual") }
+    assert.are.equal(0, json.exit_code(results))
+  end)
+
+  it("ignores a waived critical rule, even though it originally failed", function()
+    local results = {
+      result("SEC-01", "critical", "waived", { { file = "a", line = 1, text = "x" } }, "tracked in JIRA-123"),
+    }
     assert.are.equal(0, json.exit_code(results))
   end)
 end)

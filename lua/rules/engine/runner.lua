@@ -13,8 +13,9 @@ local M = {}
 
 ---@class Rules.Result
 ---@field rule Rules.ParsedRule
----@field status "pass"|"fail"|"error"|"manual"
+---@field status "pass"|"fail"|"error"|"manual"|"waived"
 ---@field findings Rules.Finding[]
+---@field waiver_reason string|nil  set only when status is "waived"
 
 --- The family of a rule id: its leading letters, e.g. "DEP" for "DEP-01".
 ---@param id string
@@ -27,13 +28,21 @@ end
 ---@param rules Rules.ParsedRule[]
 ---@param family_prefix string
 ---@param root string
+---@param waivers Rules.Waivers|nil  `{ [rule_id] = reason }`; a waived rule
+---   that would otherwise fail or error reports as "waived" instead
 ---@return Rules.Result[]
-function M.check_family(rules, family_prefix, root)
+function M.check_family(rules, family_prefix, root, waivers)
+  waivers = waivers or {}
   local results = {}
   for _, rule in ipairs(rules) do
     if M.family_of(rule.id) == family_prefix then
       local status, findings = checks.run(rule.check, root)
-      results[#results + 1] = { rule = rule, status = status, findings = findings }
+      local reason = waivers[rule.id]
+      if reason and (status == "fail" or status == "error") then
+        results[#results + 1] = { rule = rule, status = "waived", findings = findings, waiver_reason = reason }
+      else
+        results[#results + 1] = { rule = rule, status = status, findings = findings }
+      end
     end
   end
   return results

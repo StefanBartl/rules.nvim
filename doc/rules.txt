@@ -6,6 +6,7 @@ CONTENTS                                                       *rules-contents*
     Introduction ....... |rules-introduction|
     Setup .............. |rules-setup|
     Commands ........... |rules-commands|
+    Waivers ............ |rules-waivers|
     Ruleset format ...... |rules-ruleset-format|
 
 ==============================================================================
@@ -42,6 +43,18 @@ COMMANDS                                                        *rules-commands*
 
     --family={PREFIX}     required, e.g. --family=DEP
     --format={FORMAT}     optional, only "json" is recognized
+
+==============================================================================
+WAIVERS                                                          *rules-waivers*
+
+A `.rules-waivers.json` at the checked root records consciously accepted
+findings so a re-run doesn't keep flagging them: >json
+    { "DEP-04": "legacy call site, ticket JIRA-123 tracks the actual fix" }
+<
+A waived rule that would otherwise fail or error reports as "waived"
+instead of "fail" — visible in the buffer report with its reason, excluded
+from the quickfix worklist, and never counted by `check_family_json`'s exit
+code. See docs/BINDINGS.md in the plugin's repository for detail.
 
 ==============================================================================
 RULESET FORMAT                                            *rules-ruleset-format*
