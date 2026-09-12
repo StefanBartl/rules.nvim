@@ -2,16 +2,21 @@
 
 ## v1
 
-- [ ] Engine: ruleset loader, ID-collision check across loaded rulesets
-- [ ] Check primitives: `grep`, `file_exists`/`file_absent`, `json_key_absent`, `lua_predicate`
-- [ ] Fenced `rule`-block parser (Markdown → rule table via `load()`)
+- [x] Engine: ruleset loader, ID-collision check across loaded rulesets
+- [x] Check primitives: `grep` (with `patterns` any-of), `file_exists`/`file_absent`, `json_key_absent`, `lua_predicate`
+- [x] Fenced `rule`-block parser (Markdown → rule table via `load()`)
 - [ ] Gates: `new_project`, `review` (`--diff=<git-ref>`, defaults to diff-scoped), `release`
-- [ ] `:Rules check --family=<PREFIX> [path]`
-- [ ] Report: quickfix list + readable buffer with severity icons and a link back to the rule
-- [ ] `:checkhealth rules`
+- [x] `:Rules check --family=<PREFIX> [path]`
+- [x] Report: quickfix list + readable buffer with severity icons and a link back to the rule
+- [x] `:checkhealth rules`
 - [ ] `--format=json` for headless/CI use, non-zero exit on a critical finding
-- [ ] One pilot rule family, fully wired end to end, to prove the format and the check
-      primitives before any larger rule set gets migrated to it
+- [x] One pilot rule family (`DEP-*`, 7 rules), fully wired end to end in
+      `Checklists/regeln/LUA_NVIM.md` and checked against this plugin's own
+      source as the first real dry run
+
+Not yet done from the above: the three gates and `--format=json`. Both are
+straightforward once a second rule family exists to exercise them against —
+deferred rather than built speculatively against only `DEP-*`.
 
 ## Deliberately not in v1
 

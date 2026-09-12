@@ -1,0 +1,60 @@
+*rules.txt*    A rule/checklist engine for Neovim
+
+==============================================================================
+CONTENTS                                                       *rules-contents*
+
+    Introduction ....... |rules-introduction|
+    Setup .............. |rules-setup|
+    Commands ........... |rules-commands|
+    Ruleset format ...... |rules-ruleset-format|
+
+==============================================================================
+INTRODUCTION                                                *rules-introduction*
+
+rules.nvim reads a set of rules you point it at, runs whichever of them can
+be checked mechanically against a repo, and reports the rest as a worklist.
+It ships with no bundled rules of its own — see the README's "Why no bundled
+rules".
+
+==============================================================================
+SETUP                                                              *rules-setup*
+>lua
+    require("rules").setup({
+      rulesets = { "~/path/to/your/checklists" },
+    })
+<
+`rulesets` is a list of files or directories; every `.md` file reachable from
+each entry is scanned for fenced ```rule blocks.
+
+==============================================================================
+COMMANDS                                                        *rules-commands*
+
+                                                                  *:Rules_check*
+:Rules check [{path}]
+    Runs every rule whose ID prefix matches the required |--family| flag
+    against {path} (default: the current working directory). Findings go to
+    the quickfix list; a readable report opens in a new tab.
+
+    --family={PREFIX}     required, e.g. --family=DEP
+
+==============================================================================
+RULESET FORMAT                                            *rules-ruleset-format*
+
+See docs/RULESET-FORMAT.md in the plugin's repository for the full format —
+this is the reference for a Lua project's own `:h` request, not a duplicate
+of that document's detail.
+
+A rule is a Markdown section with a fenced ```rule code block:
+>markdown
+    ### `DEP-06` — `vim.tbl_flatten()` is deprecated
+
+    ```rule
+    id = "DEP-06",
+    severity = "recommended",
+    check = { type = "grep", pattern = "vim%.tbl_flatten%(" },
+    ```
+<
+`check` is optional. A rule without one is never given an automatic
+pass/fail — it appears as a worklist entry instead.
+
+ vim:tw=78:ts=8:noet:ft=help:norl:
