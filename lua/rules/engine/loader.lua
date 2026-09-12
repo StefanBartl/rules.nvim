@@ -29,24 +29,35 @@ function M.load(ruleset_paths)
   local by_id = {}
   local rules = {}
   local errors = {}
+  -- Two `ruleset_paths` entries can reach the same file (a directory and a
+  -- file inside it, or the same directory listed twice) -- dedupe on the
+  -- canonical absolute path so that isn't reported as a real duplicate id.
+  local seen_files = {}
 
   for _, path in ipairs(ruleset_paths or {}) do
     for _, file in ipairs(md_files_under(path)) do
-      local file_rules, file_errors = parser.extract_rules(file)
-      vim.list_extend(errors, file_errors)
-      for _, rule in ipairs(file_rules) do
-        local existing = by_id[rule.id]
-        if existing then
-          errors[#errors + 1] = ("duplicate rule id %s: %s:%d and %s:%d"):format(
-            rule.id,
-            existing.source_file,
-            existing.source_line,
-            rule.source_file,
-            rule.source_line
-          )
-        else
-          by_id[rule.id] = rule
-          rules[#rules + 1] = rule
+      -- `:p` makes it absolute; `vim.fs.normalize` forces "/"-separators --
+      -- needed on Windows, where `globpath` and a hand-built path can name
+      -- the same file with different slash directions and compare unequal.
+      local canonical = vim.fs.normalize(vim.fn.fnamemodify(file, ":p"))
+      if not seen_files[canonical] then
+        seen_files[canonical] = true
+        local file_rules, file_errors = parser.extract_rules(file)
+        vim.list_extend(errors, file_errors)
+        for _, rule in ipairs(file_rules) do
+          local existing = by_id[rule.id]
+          if existing then
+            errors[#errors + 1] = ("duplicate rule id %s: %s:%d and %s:%d"):format(
+              rule.id,
+              existing.source_file,
+              existing.source_line,
+              rule.source_file,
+              rule.source_line
+            )
+          else
+            by_id[rule.id] = rule
+            rules[#rules + 1] = rule
+          end
         end
       end
     end

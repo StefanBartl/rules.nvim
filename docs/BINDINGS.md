@@ -48,3 +48,9 @@ waiver for a rule that currently passes has no effect; it just sits unused
 until the rule fails again. This is deliberately different from deleting the
 rule or the ruleset entry: the record that a specific finding was seen and
 accepted survives.
+
+A `.rules-waivers.json` that isn't a `{"RULE-ID": "reason"}` object — a list,
+or a value that isn't a string — is a load error, notified the same way a
+bad ruleset file is, not a silent zero-waivers file. Same reasoning as
+`docs/RULESET-FORMAT.md`'s check primitives: a malformed input fails loudly
+instead of quietly doing nothing.

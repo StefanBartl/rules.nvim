@@ -62,6 +62,66 @@ describe("rules.engine.checks.grep", function()
     assert.are.equal("pass", status) -- default include is "%.lua$", so a.txt is skipped
   end)
 
+  it("fails (not a silent skip) when a matching file cannot be read", function()
+    local dir = tmp_dir()
+    write_file(dir, "a.lua", { "irrelevant content" })
+
+    local original_readfile = vim.fn.readfile
+    vim.fn.readfile = function(path)
+      if path:match("a%.lua$") then
+        error("EACCES: permission denied")
+      end
+      return original_readfile(path)
+    end
+
+    local ok, status, findings = pcall(grep.run, { type = "grep", pattern = "irrelevant" }, dir)
+    vim.fn.readfile = original_readfile
+
+    assert.is_true(ok)
+    assert.are.equal("fail", status)
+    assert.are.equal(1, #findings)
+    assert.matches("could not read file", findings[1].text)
+  end)
+
+  it("reuses a shared ctx's file listing across two calls instead of re-walking", function()
+    local dir = tmp_dir()
+    write_file(dir, "a.lua", { "x" })
+
+    local fswalk = require("rules.engine.fswalk")
+    local calls = 0
+    local original_files = fswalk.files
+    fswalk.files = function(...)
+      calls = calls + 1
+      return original_files(...)
+    end
+
+    local ctx = {}
+    grep.run({ type = "grep", pattern = "x" }, dir, ctx)
+    grep.run({ type = "grep", pattern = "y" }, dir, ctx)
+    fswalk.files = original_files
+
+    assert.are.equal(1, calls)
+  end)
+
+  it("without a shared ctx, each call walks independently", function()
+    local dir = tmp_dir()
+    write_file(dir, "a.lua", { "x" })
+
+    local fswalk = require("rules.engine.fswalk")
+    local calls = 0
+    local original_files = fswalk.files
+    fswalk.files = function(...)
+      calls = calls + 1
+      return original_files(...)
+    end
+
+    grep.run({ type = "grep", pattern = "x" }, dir)
+    grep.run({ type = "grep", pattern = "y" }, dir)
+    fswalk.files = original_files
+
+    assert.are.equal(2, calls)
+  end)
+
   it("`patterns` matches any of several calls (DEP-04's two deprecated names)", function()
     local dir = tmp_dir()
     write_file(dir, "a.lua", { "nvim_out_write('x')" })

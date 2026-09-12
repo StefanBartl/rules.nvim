@@ -49,6 +49,18 @@ describe("rules.engine.loader", function()
     assert.matches("duplicate rule id DEP%-01", errors[1])
   end)
 
+  it("does not double-count a file reachable through two overlapping ruleset paths", function()
+    local dir = tmp_dir()
+    write_file(dir, "a.md", { "```rule", 'id = "DEP-01",', 'severity = "recommended",', "```" })
+
+    -- The directory and an explicit path to a file already inside it --
+    -- a plausible config mistake, not two genuinely different rulesets.
+    local rules, errors = loader.load({ dir, dir .. "/a.md" })
+
+    assert.are.equal(1, #rules)
+    assert.are.equal(0, #errors)
+  end)
+
   it("returns nothing for an empty or missing path, without erroring", function()
     local rules, errors = loader.load({ "/definitely/does/not/exist" })
 

@@ -52,19 +52,69 @@ local function line_hits(line, spec)
   return false
 end
 
+--- Read `file`'s lines, memoized in `ctx` for the lifetime of one
+--- `check_family` run -- most rules in a family default to `include` and so
+--- end up reading the same files. `false` in the cache means "read already
+--- failed", distinct from "not yet attempted" (a `nil` entry).
+---@param file string
+---@param ctx table|nil
+---@return string[]|false lines  false when the file could not be read
+---@return string|nil read_err
+local function cached_readfile(file, ctx)
+  if ctx then
+    ctx.file_contents = ctx.file_contents or {}
+    ctx.file_errors = ctx.file_errors or {}
+    local cached = ctx.file_contents[file]
+    if cached ~= nil then
+      return cached, ctx.file_errors[file]
+    end
+  end
+
+  local ok, lines = pcall(vim.fn.readfile, file)
+  local result = ok and lines or false
+  local err = ok and nil or tostring(lines)
+
+  if ctx then
+    ctx.file_contents[file] = result
+    ctx.file_errors[file] = err
+  end
+  return result, err
+end
+
 --- Run a `grep` check against every matching file under `root`.
 ---@param spec Rules.Check.Grep
 ---@param root string
+---@param ctx table|nil  shared cache for the current `check_family` run --
+---   memoizes the file listing and file contents across rules in the same
+---   family so a multi-rule sweep doesn't re-walk/re-read the whole tree
+---   once per rule; see `runner.lua#check_family`
 ---@return "pass"|"fail" status
 ---@return Rules.Finding[] findings
-function M.run(spec, root)
+function M.run(spec, root, ctx)
   local include = spec.include or "%.lua$"
   local findings = {}
 
-  for _, file in ipairs(fswalk.files(root)) do
+  local files
+  if ctx then
+    ctx.file_list = ctx.file_list or {}
+    files = ctx.file_list[root]
+    if not files then
+      files = fswalk.files(root)
+      ctx.file_list[root] = files
+    end
+  else
+    files = fswalk.files(root)
+  end
+
+  for _, file in ipairs(files) do
     if file:match(include) then
-      local ok, lines = pcall(vim.fn.readfile, file)
-      if ok then
+      local lines, read_err = cached_readfile(file, ctx)
+      if lines == false then
+        -- A matching file that can't be read (permissions, deleted between the
+        -- listing and this read, ...) is a fail, not a silent skip -- an
+        -- unreadable file could be hiding the exact thing this rule checks for.
+        findings[#findings + 1] = { file = file, line = 1, text = "could not read file: " .. tostring(read_err) }
+      else
         for lnum, line in ipairs(lines) do
           if line_hits(line, spec) and not (spec.unless and line:find(spec.unless)) then
             findings[#findings + 1] = { file = file, line = lnum, text = vim.trim(line) }

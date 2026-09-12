@@ -33,4 +33,35 @@ describe("rules.engine.waivers.load", function()
     assert.are.same({}, w)
     assert.is_not_nil(err)
   end)
+
+  it("accepts an empty object as zero waivers, not an error", function()
+    local dir = tmp_dir()
+    vim.fn.writefile({ "{}" }, dir .. "/.rules-waivers.json")
+
+    local w, err = waivers.load(dir)
+
+    assert.are.same({}, w)
+    assert.is_nil(err)
+  end)
+
+  it("rejects a JSON array instead of silently waiving nothing", function()
+    local dir = tmp_dir()
+    vim.fn.writefile({ '["DEP-01", "DEP-02"]' }, dir .. "/.rules-waivers.json")
+
+    local w, err = waivers.load(dir)
+
+    assert.are.same({}, w)
+    assert.is_not_nil(err)
+    assert.matches("not a list", err)
+  end)
+
+  it("rejects a non-string reason instead of silently waiving with garbage", function()
+    local dir = tmp_dir()
+    vim.fn.writefile({ '{"DEP-01": true}' }, dir .. "/.rules-waivers.json")
+
+    local w, err = waivers.load(dir)
+
+    assert.are.same({}, w)
+    assert.is_not_nil(err)
+  end)
 end)

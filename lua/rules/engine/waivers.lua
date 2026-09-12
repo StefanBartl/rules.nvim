@@ -30,6 +30,19 @@ function M.load(root)
     return {}, path .. ": could not parse as JSON"
   end
 
+  -- `{}` decodes ambiguously (empty object or empty list) -- only reject a
+  -- genuinely non-empty list, e.g. `["DEP-01", "DEP-02"]`, a natural mistake
+  -- for "these are waived" that would otherwise silently waive nothing.
+  if next(decoded) ~= nil and vim.islist(decoded) then
+    return {}, path .. ': must be a JSON object of {"RULE-ID": "reason"}, not a list'
+  end
+
+  for id, reason in pairs(decoded) do
+    if type(id) ~= "string" or type(reason) ~= "string" then
+      return {}, path .. ": every entry must be a string rule id mapped to a string reason"
+    end
+  end
+
   return decoded, nil
 end
 

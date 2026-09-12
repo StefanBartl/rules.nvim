@@ -34,9 +34,13 @@ end
 function M.check_family(rules, family_prefix, root, waivers)
   waivers = waivers or {}
   local results = {}
+  -- Shared across every rule in this run so a `grep` check (the common
+  -- case) doesn't re-walk the filesystem and re-read the same files once
+  -- per rule -- see `checks/grep.lua`'s `ctx` parameter.
+  local ctx = {}
   for _, rule in ipairs(rules) do
     if M.family_of(rule.id) == family_prefix then
-      local status, findings = checks.run(rule.check, root)
+      local status, findings = checks.run(rule.check, root, ctx)
       local reason = waivers[rule.id]
       if reason and (status == "fail" or status == "error") then
         results[#results + 1] = { rule = rule, status = "waived", findings = findings, waiver_reason = reason }

@@ -15,9 +15,12 @@ local BY_TYPE = {
 --- Run a rule's `check` against a root path.
 ---@param check table|nil
 ---@param root string
+---@param ctx table|nil  shared cache for one `check_family` run; only
+---   `grep` uses it today (memoized file listing/contents), other check
+---   types ignore the extra argument
 ---@return "pass"|"fail"|"error"|"manual" status
 ---@return Rules.Finding[] findings
-function M.run(check, root)
+function M.run(check, root, ctx)
   if check == nil then
     return "manual", {}
   end
@@ -25,7 +28,7 @@ function M.run(check, root)
   if not impl then
     return "error", { { file = root, line = 1, text = "unknown check type: " .. tostring(check.type) } }
   end
-  return impl.run(check, root)
+  return impl.run(check, root, ctx)
 end
 
 return M

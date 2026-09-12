@@ -100,6 +100,21 @@ describe("rules.engine.parser", function()
     assert.matches("no string `id`", errors[1])
   end)
 
+  it("reports a block with an invalid `severity` as an error, not a rule", function()
+    local path = write_tmp({
+      "```rule",
+      'id = "DEP-01",',
+      'severity = "critial",', -- typo, not one of the three valid values
+      "```",
+    })
+
+    local rules, errors = parser.extract_rules(path)
+
+    assert.are.equal(0, #rules)
+    assert.are.equal(1, #errors)
+    assert.matches("invalid `severity`", errors[1])
+  end)
+
   it("reports an unterminated block as an error", function()
     local path = write_tmp({
       "```rule",

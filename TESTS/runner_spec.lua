@@ -75,6 +75,29 @@ describe("rules.engine.runner.check_family", function()
     assert.are.equal(1, #dep01.findings)
   end)
 
+  it("shares one file-listing cache across every grep rule in the same run", function()
+    local dir = tmp_dir()
+    vim.fn.writefile({ "vim.loop.new_timer()" }, dir .. "/a.lua")
+
+    local two_grep_rules = {
+      { id = "DEP-01", severity = "recommended", check = { type = "grep", pattern = "vim%.loop%." } },
+      { id = "DEP-03", severity = "recommended", check = { type = "grep", pattern = "os%.execute" } },
+    }
+
+    local fswalk = require("rules.engine.fswalk")
+    local calls = 0
+    local original_files = fswalk.files
+    fswalk.files = function(...)
+      calls = calls + 1
+      return original_files(...)
+    end
+
+    runner.check_family(two_grep_rules, "DEP", dir)
+    fswalk.files = original_files
+
+    assert.are.equal(1, calls)
+  end)
+
   it("leaves a waiver for a rule that actually passes with no effect", function()
     local dir = tmp_dir()
 

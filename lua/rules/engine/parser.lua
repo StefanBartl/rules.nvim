@@ -23,6 +23,9 @@ local M = {}
 ---@field source_file string
 ---@field source_line integer
 
+---@type table<string, true>
+local VALID_SEVERITIES = { critical = true, recommended = true, ["nice-to-have"] = true }
+
 --- Extract the fenced ```rule blocks from one Markdown file.
 ---@param file_path string
 ---@return Rules.ParsedRule[] rules
@@ -63,6 +66,13 @@ function M.extract_rules(file_path)
             errors[#errors + 1] = ("%s:%d: rule block has no string `id`"):format(file_path, block_start)
           elseif type(rule.severity) ~= "string" then
             errors[#errors + 1] = ("%s:%d: rule %s has no string `severity`"):format(file_path, block_start, rule.id)
+          elseif not VALID_SEVERITIES[rule.severity] then
+            errors[#errors + 1] = ("%s:%d: rule %s has invalid `severity` %q (want critical/recommended/nice-to-have)"):format(
+              file_path,
+              block_start,
+              rule.id,
+              rule.severity
+            )
           else
             rule.source_file = file_path
             rule.source_line = block_start
