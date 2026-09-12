@@ -7,8 +7,8 @@
 | `:Rules check` | `[path]` (defaults to cwd) | `--family=<PREFIX>` (required), `--format=json` (optional) | Runs every rule in the family against `path`. Default: reports into the quickfix list and a readable buffer. `--format=json` prints the results as JSON instead (`:messages`/stdout) and does not touch quickfix/buffer or quit Neovim — see below for headless/CI use |
 
 No default keymaps are bound — `:Rules check --family=<PREFIX>` is the whole
-surface for now. See [docs/ROADMAP.md](ROADMAP.md) for `new-project`/
-`review`/`release` gates, planned but not yet implemented.
+surface for now. `new-project`/`review`/`release` gates are designed but not
+implemented yet.
 
 ## Headless/CI use
 

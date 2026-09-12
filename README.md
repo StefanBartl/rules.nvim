@@ -1,7 +1,7 @@
 > **Alpha — small, working surface.** The engine, the four check types and
 > `:Rules check --family=<PREFIX>` are real and tested. Gates (`new-project`,
-> `review`, `release`) are designed but not implemented yet — see
-> [docs/ROADMAP.md](docs/ROADMAP.md). Pin a commit if you depend on this.
+> `review`, `release`) are designed but not implemented yet. Pin a commit if
+> you depend on this.
 
 # rules.nvim
 
@@ -49,7 +49,6 @@ provide — the same way you'd point ESLint at your own `.eslintrc`.
 
 - [Ruleset format](docs/RULESET-FORMAT.md) — how a rule and its `check` are written.
 - [Bindings](docs/BINDINGS.md) — the one command that exists so far.
-- [Roadmap](docs/ROADMAP.md) — what's built, what's planned, what was considered and rejected.
 
 `:help rules` is the same command reference inside the editor.
 
