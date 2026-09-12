@@ -38,4 +38,22 @@ function M.check_family(family_prefix, path)
   return results
 end
 
+--- Run one rule family against a path for headless/CI use: no quickfix, no
+--- buffer, just the results plus a ready-to-print JSON string and an exit
+--- code. Never quits Neovim itself — a CI script decides what to do with
+--- the exit code (e.g. `vim.cmd("cquit " .. code)`), so calling this
+--- interactively is harmless.
+---@param family_prefix string
+---@param path string|nil  defaults to the current working directory
+---@return string json
+---@return 0|1 exit_code
+---@return Rules.Result[] results
+function M.check_family_json(family_prefix, path)
+  local root = path or vim.fn.getcwd()
+  local rules = M.load_rules()
+  local results = runner.check_family(rules, family_prefix, root)
+  local json = require("rules.report.json")
+  return json.encode(results), json.exit_code(results), results
+end
+
 return M

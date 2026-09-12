@@ -116,6 +116,10 @@ Then:
 :Rules check --family=DEP
 ```
 
+Add `--format=json` for machine-readable output (see
+[docs/BINDINGS.md](docs/BINDINGS.md) for the headless/CI recipe with a real
+exit code).
+
 Verify your setup any time with:
 
 ```vim

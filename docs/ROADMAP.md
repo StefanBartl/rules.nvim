@@ -9,14 +9,16 @@
 - [x] `:Rules check --family=<PREFIX> [path]`
 - [x] Report: quickfix list + readable buffer with severity icons and a link back to the rule
 - [x] `:checkhealth rules`
-- [ ] `--format=json` for headless/CI use, non-zero exit on a critical finding
+- [x] `--format=json` for headless/CI use, non-zero exit on a critical finding
 - [x] One pilot rule family (`DEP-*`, 7 rules), fully wired end to end in
       `Checklists/regeln/LUA_NVIM.md` and checked against this plugin's own
       source as the first real dry run
 
-Not yet done from the above: the three gates and `--format=json`. Both are
-straightforward once a second rule family exists to exercise them against —
-deferred rather than built speculatively against only `DEP-*`.
+Not yet done from the above: the three gates. Deferred until a second rule
+family exists to exercise them against, rather than built speculatively
+against only `DEP-*`. `--format=json` didn't need that — it only serializes
+the same `check_family` results the buffer/quickfix reports already render,
+so it carries no risk of over-fitting to one family's shape.
 
 ## Deliberately not in v1
 

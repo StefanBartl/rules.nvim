@@ -16,14 +16,20 @@ function M.setup()
         args = { { name = "path", type = "DIR", optional = true } },
         flags = {
           { name = "family", type = "STRING" },
+          { name = "format", type = "STRING" },
         },
-        desc = "Sweep one rule family (--family=PREFIX) across PATH (default: cwd)",
+        desc = "Sweep one rule family (--family=PREFIX) across PATH (default: cwd), --format=json for machine-readable output",
         run = function(ctx)
           if not ctx.flags.family then
             vim.notify("[rules.nvim] :Rules check needs --family=<PREFIX>, e.g. --family=DEP", vim.log.levels.ERROR)
             return
           end
-          require("rules").check_family(ctx.flags.family, ctx.args.path)
+          if ctx.flags.format == "json" then
+            local json = require("rules").check_family_json(ctx.flags.family, ctx.args.path)
+            print(json)
+          else
+            require("rules").check_family(ctx.flags.family, ctx.args.path)
+          end
         end,
       },
     },
