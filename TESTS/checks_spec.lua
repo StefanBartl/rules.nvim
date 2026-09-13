@@ -1,3 +1,8 @@
+-- Several cases below monkey-patch `vim.fn.readfile` and `fswalk.files` at
+-- runtime to simulate a read failure / count calls -- see NEW-42 in this
+-- ecosystem's own rule catalog for the reasoning; confirmed firing via a live
+-- lua_ls gegenprobe (2026-09-13), unlike a guessed-at suppression.
+---@diagnostic disable: duplicate-set-field
 local grep = require("rules.engine.checks.grep")
 local file_exists = require("rules.engine.checks.file_exists")
 local json_key = require("rules.engine.checks.json_key")
