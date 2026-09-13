@@ -6,6 +6,7 @@
 --- `Checklists/README.md`'s own rule: "IDs werden nie wiederverwendet."
 
 local parser = require("rules.engine.parser")
+local fswalk = require("rules.engine.fswalk")
 
 local M = {}
 
@@ -14,7 +15,20 @@ local M = {}
 ---@return string[] md_files
 local function md_files_under(path)
   if vim.fn.isdirectory(path) == 1 then
-    return vim.fn.globpath(path, "**/*.md", false, true)
+    -- `fswalk.files` (a literal `uv.fs_scandir` walk), not `vim.fn.globpath`:
+    -- glob-family functions interpret `~`/`[`/`?`/`*`/`{}` in their PATH
+    -- argument too, not just the pattern -- a ruleset path containing any of
+    -- those (a Windows 8.3 short-name segment under a long-username `%TEMP%`
+    -- is the classic real-world case) would silently glob-match nothing,
+    -- despite `isdirectory` above confirming the directory genuinely exists.
+    -- `fswalk` never interprets `path`, only lists what is actually there.
+    local files = {}
+    for _, file in ipairs(fswalk.files(path)) do
+      if file:match("%.md$") then
+        files[#files + 1] = file
+      end
+    end
+    return files
   elseif path:match("%.md$") and vim.fn.filereadable(path) == 1 then
     return { path }
   end

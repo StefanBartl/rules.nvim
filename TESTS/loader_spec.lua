@@ -67,4 +67,21 @@ describe("rules.engine.loader", function()
     assert.are.equal(0, #rules)
     assert.are.equal(0, #errors)
   end)
+
+  it("finds .md files under a directory whose name contains glob-special characters", function()
+    -- XP-01: `vim.fn.globpath` interprets `~`/`[`/`?`/`*`/`{}` in its PATH
+    -- argument too, not just the pattern -- a ruleset directory containing
+    -- one of these would silently glob-match nothing under the old
+    -- globpath-based implementation, despite genuinely existing and
+    -- containing rules.
+    local parent = tmp_dir()
+    local dir = parent .. "/rules[v1]"
+    vim.fn.mkdir(dir, "p")
+    write_file(dir, "a.md", { "```rule", 'id = "DEP-01",', 'severity = "recommended",', "```" })
+
+    local rules, errors = loader.load({ dir })
+
+    assert.are.equal(0, #errors)
+    assert.are.equal(1, #rules)
+  end)
 end)
