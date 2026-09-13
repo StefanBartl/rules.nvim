@@ -9,6 +9,9 @@
 --- difference between waiving a finding and deleting the rule: the record
 --- of "this was seen and consciously accepted" survives.
 
+-- ERR-05/06: `lib.lua.error.safe_call` instead of a hand-rolled `pcall`.
+local safe_error = require("lib.lua.error")
+
 local M = {}
 
 ---@alias Rules.Waivers table<string, string>
@@ -25,7 +28,7 @@ function M.load(root)
   end
 
   local raw = table.concat(vim.fn.readfile(path), "\n")
-  local ok, decoded = pcall(vim.json.decode, raw)
+  local ok, decoded = safe_error.safe_call(vim.json.decode, raw)
   if not ok or type(decoded) ~= "table" then
     return {}, path .. ": could not parse as JSON"
   end

@@ -20,6 +20,7 @@
 --- to rediscover it.
 
 local fswalk = require("rules.engine.fswalk")
+local safe_error = require("lib.lua.error")
 
 local M = {}
 
@@ -70,9 +71,20 @@ local function cached_readfile(file, ctx)
     end
   end
 
-  local ok, lines = pcall(vim.fn.readfile, file)
-  local result = ok and lines or false
-  local err = ok and nil or tostring(lines)
+  -- ERR-05/06: `lib.lua.error.safe_call` instead of a hand-rolled `pcall`.
+  -- ERR-60: deliberately an explicit `if`, not `ok and X or Y` -- the success
+  -- value of `err` is `nil`, which is itself falsy, so that ternary shape
+  -- would silently fall through to the failure branch every time regardless
+  -- of `ok` (harmless today only because a caller never reads `err` unless
+  -- `result == false`, which is exactly the kind of landmine this rule
+  -- warns about).
+  local ok, lines = safe_error.safe_call(vim.fn.readfile, file)
+  local result, err
+  if ok then
+    result, err = lines, nil
+  else
+    result, err = false, lines.message
+  end
 
   if ctx then
     ctx.file_contents[file] = result

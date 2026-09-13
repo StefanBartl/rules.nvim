@@ -14,6 +14,11 @@
 --- reader's own rulesets. Fields need the usual Lua field separator (a comma
 --- or a semicolon) between them, same as any Lua table literal.
 
+-- ERR-05/06: `lib.lua.error.safe_call` instead of a hand-rolled `pcall` --
+-- traceback on failure instead of a bare error string, useful here since a
+-- rule author's own table-constructor body can fail arbitrarily deep.
+local safe_error = require("lib.lua.error")
+
 local M = {}
 
 ---@class Rules.ParsedRule
@@ -59,9 +64,9 @@ function M.extract_rules(file_path)
         if not chunk then
           errors[#errors + 1] = ("%s:%d: %s"):format(file_path, block_start, load_err)
         else
-          local rule_ok, rule = pcall(chunk)
+          local rule_ok, rule = safe_error.safe_call(chunk)
           if not rule_ok then
-            errors[#errors + 1] = ("%s:%d: %s"):format(file_path, block_start, tostring(rule))
+            errors[#errors + 1] = ("%s:%d: %s"):format(file_path, block_start, rule.message)
           elseif type(rule) ~= "table" or type(rule.id) ~= "string" or rule.id == "" then
             errors[#errors + 1] = ("%s:%d: rule block has no string `id`"):format(file_path, block_start)
           elseif type(rule.severity) ~= "string" then

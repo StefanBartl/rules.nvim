@@ -122,6 +122,25 @@ describe("rules.engine.checks.grep", function()
     assert.are.equal(2, calls)
   end)
 
+  it("ERR-60: caches no read error for a file that reads successfully, not a truthy garbage value", function()
+    -- Regression for `ok and nil or err` -- `nil` is itself falsy, so that
+    -- ternary shape silently ignores `ok` and always takes the error
+    -- branch. A Lua table can't actually store a `nil` value under a key
+    -- (assigning `nil` deletes it), so the broken version would have left
+    -- `file_errors[file]` set to the *stringified readfile result* instead
+    -- (`tostring(lines)`, a `"table: 0x..."` string) -- truthy garbage,
+    -- not absent and not nil.
+    local dir = tmp_dir()
+    local file = dir .. "/a.lua"
+    write_file(dir, "a.lua", { "x" })
+
+    local ctx = {}
+    grep.run({ type = "grep", pattern = "x" }, dir, ctx)
+
+    assert.is_not_nil(ctx.file_contents[file])
+    assert.is_nil(ctx.file_errors[file])
+  end)
+
   it("`patterns` matches any of several calls (DEP-04's two deprecated names)", function()
     local dir = tmp_dir()
     write_file(dir, "a.lua", { "nvim_out_write('x')" })
