@@ -1,0 +1,4 @@
+{
+  "DEP-01": "every finding is a TESTS/*.lua fixture string ('vim.loop.new_timer()' as literal test data verifying the DEP-01 grep check itself), not real vim.loop usage -- production code already uses the vim.uv-or-vim.loop fallback (fswalk.lua)",
+  "DEP-04": "the two findings are grep.lua's own doc comment naming nvim_err_writeln()/nvim_out_write() as the example this check exists for, and a TESTS/checks_spec.lua fixture verifying the check catches nvim_out_write() -- neither is a real call site"
+}
