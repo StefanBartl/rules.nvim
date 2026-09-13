@@ -71,6 +71,11 @@ function M.setup(opts)
   state = vim.tbl_deep_extend("force", vim.deepcopy(DEFAULTS), validate(opts or {}))
 end
 
+--- ERR-54: a live reference to the internal state, not a copy -- every
+--- current caller only reads it (`loader.load(config.get().rulesets)`,
+--- `config.get().gates`), never mutates it. Stays this way rather than
+--- `vim.deepcopy`-ing on every call: mutate it and you've mutated the
+--- plugin's live config for the rest of the session, so don't.
 ---@return Rules.Opts
 function M.get()
   return state
