@@ -30,6 +30,29 @@ function M.check()
     return
   end
 
+  -- LUA-05: lib.nvim itself is a hard dependency, but these two submodules
+  -- are recent enough (2026-07-16) that an older lib.nvim checkout could
+  -- plausibly predate them -- a bare `require` failure deep inside
+  -- fswalk.lua/parser.lua would otherwise surface as a cryptic
+  -- "module not found" at first actual use, not here where it's
+  -- actionable.
+  if pcall(require, "lib.nvim.fs.collect_recursive") then
+    ok("lib.nvim.fs.collect_recursive -- the ruleset/repo file walker")
+  else
+    error_(
+      "lib.nvim.fs.collect_recursive missing -- :Rules check/gate will fail on the first file walk",
+      { "Update lib.nvim (this submodule is required since rules.nvim's REL-31 fix)" }
+    )
+  end
+  if pcall(require, "lib.lua.error") then
+    ok("lib.lua.error -- pcall wrapping for ruleset/waiver parsing")
+  else
+    error_(
+      "lib.lua.error missing -- ruleset/waiver parsing will fail",
+      { "Update lib.nvim (this submodule is required since rules.nvim's ERR-05/06 fix)" }
+    )
+  end
+
   start("rules.nvim: rulesets")
   local config = require("rules.config").get()
   local rules = {}
