@@ -13,6 +13,12 @@ No default keymaps are bound. `--family=`, a gate's `<name>`, and `:Rules
 show`'s `<id>` all tab-complete against whatever is actually loaded/
 configured right now.
 
+`:Rules check`/`gate`/`stats`'s readable-buffer report reuses a still-open
+report window (any tab) instead of opening a fresh tab on every call — a
+repeated run replaces that window's content in place. Navigating the
+window away from the report (e.g. `:e` another file in it) makes the next
+run open a new tab again rather than hijacking it.
+
 ## Headless/CI use
 
 `:Rules check --format=json` is safe to run interactively (it never quits

@@ -3,6 +3,8 @@
 --- not a check run: no pass/fail, just how many rules exist per family and
 --- how many of them are automated.
 
+local window = require("rules.report.window")
+
 local M = {}
 
 --- Render a `Rules.Stats` table as plain text lines.
@@ -39,18 +41,13 @@ function M.render(stats)
   return lines
 end
 
---- Open the stats overview as a scratch buffer in a new tab -- same UX as
---- `report/buffer.lua`'s check/gate report.
+--- Open the stats overview as a scratch buffer -- reuses a still-open
+--- report window if one exists (see `rules.report.window`), same as
+--- `report/buffer.lua`'s check/gate report; opens a new tab otherwise.
 ---@param stats Rules.Stats
 ---@return nil
 function M.open(stats)
-  local lines = M.render(stats)
-  local buf = vim.api.nvim_create_buf(false, true)
-  vim.api.nvim_buf_set_lines(buf, 0, -1, false, lines)
-  vim.bo[buf].filetype = "rulesreport"
-  vim.bo[buf].modifiable = false
-  vim.cmd.tabnew()
-  vim.api.nvim_win_set_buf(0, buf)
+  window.open(M.render(stats))
 end
 
 return M

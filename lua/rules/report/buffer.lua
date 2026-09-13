@@ -6,6 +6,8 @@
 --- the fake verdict this plugin's whole concept exists to avoid. It gets a
 --- worklist entry instead, pointing back at its source file and line.
 
+local window = require("rules.report.window")
+
 local M = {}
 
 ---@type table<string, string>
@@ -53,17 +55,13 @@ function M.render(results)
   return lines
 end
 
---- Open the report as a scratch buffer in a new tab.
+--- Open the report as a scratch buffer -- reuses a still-open report
+--- window if one exists (see `rules.report.window`), opens a new tab
+--- otherwise.
 ---@param results Rules.Result[]
 ---@return nil
 function M.open(results)
-  local lines = M.render(results)
-  local buf = vim.api.nvim_create_buf(false, true)
-  vim.api.nvim_buf_set_lines(buf, 0, -1, false, lines)
-  vim.bo[buf].filetype = "rulesreport"
-  vim.bo[buf].modifiable = false
-  vim.cmd.tabnew()
-  vim.api.nvim_win_set_buf(0, buf)
+  window.open(M.render(results))
 end
 
 return M

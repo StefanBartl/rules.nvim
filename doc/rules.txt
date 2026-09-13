@@ -35,7 +35,8 @@ COMMANDS                                                        *rules-commands*
 :Rules check [{path}]
     Runs every rule whose ID prefix matches the required |--family| flag
     against {path} (default: the current working directory). Findings go to
-    the quickfix list; a readable report opens in a new tab. With
+    the quickfix list; a readable report opens in a tab, reusing a still-
+    open report window instead of piling up a new one on every run. With
     --format=json, prints JSON instead and skips the quickfix list/buffer;
     never quits Neovim, so it is safe to run interactively. For a headless
     CI run with a real exit code, call
