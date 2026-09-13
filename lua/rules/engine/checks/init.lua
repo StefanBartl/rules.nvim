@@ -3,7 +3,14 @@
 
 local M = {}
 
----@type table<string, { run: fun(spec: table, root: string): string, Rules.Finding[] }>
+--- LLS-11: a `fun(): T1, T2` multi-value return type inline inside a `{ ... }`
+--- table type reads the comma after the first return type as ending that
+--- field and starting an unnamed one, not as a second return value -- named
+--- here instead of inline, same reasoning as the rule's own example.
+---@class Rules.CheckImpl
+---@field run fun(spec: table, root: string, ctx: table|nil): ("pass"|"fail"|"error"), Rules.Finding[]
+
+---@type table<string, Rules.CheckImpl>
 local BY_TYPE = {
   grep = require("rules.engine.checks.grep"),
   file_exists = require("rules.engine.checks.file_exists"),

@@ -15,7 +15,9 @@ local M = {}
 ---@field rule Rules.ParsedRule
 ---@field status "pass"|"fail"|"error"|"manual"|"waived"
 ---@field findings Rules.Finding[]
----@field waiver_reason string|nil  set only when status is "waived"
+---@field waiver_reason? string  set only when status is "waived" -- LLS-15: the
+--- key is genuinely absent otherwise (see `check_family` below), not present
+--- with a `nil` value, so `?` is the accurate form, not `string|nil`
 
 --- The family of a rule id: its leading letters, e.g. "DEP" for "DEP-01".
 ---@param id string

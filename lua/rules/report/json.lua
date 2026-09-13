@@ -15,7 +15,9 @@ local M = {}
 ---@field severity "critical"|"recommended"|"nice-to-have"
 ---@field status "pass"|"fail"|"error"|"manual"|"waived"
 ---@field findings Rules.Finding[]
----@field waiver_reason string|nil  set only when status is "waived"
+---@field waiver_reason? string  set only when status is "waived" -- LLS-15,
+--- same reasoning as `Rules.Result.waiver_reason`: the key is genuinely
+--- absent otherwise, not present with a `nil` value
 
 --- Turn a run's results into a plain array of JSON-encodable entries.
 ---@param results Rules.Result[]
