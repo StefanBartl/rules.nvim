@@ -70,7 +70,7 @@ function M.setup()
         args = { { name = "path", type = "DIR", optional = true } },
         flags = {
           { name = "family", type = "RULES_FAMILY" },
-          { name = "format", type = "STRING" },
+          { name = "format", type = "STRING", values = { "json" } },
         },
         desc = "Sweep one rule family (--family=PREFIX) across PATH (default: cwd), --format=json for machine-readable output",
         run = function(ctx)
@@ -94,7 +94,7 @@ function M.setup()
         },
         flags = {
           { name = "diff", type = "STRING" },
-          { name = "format", type = "STRING" },
+          { name = "format", type = "STRING", values = { "json" } },
         },
         desc = "Run a configured gate (setup({ gates = {...} })), --diff=<git-ref> to scope to that diff",
         run = function(ctx)
@@ -130,7 +130,7 @@ function M.setup()
       },
       {
         path = { "stats" },
-        flags = { { name = "format", type = "STRING" } },
+        flags = { { name = "format", type = "STRING", values = { "json" } } },
         desc = "Structural overview of every loaded rule: per-family totals, automated-vs-manual, severity -- no check run",
         run = function(ctx)
           local stats = require("rules").stats()
