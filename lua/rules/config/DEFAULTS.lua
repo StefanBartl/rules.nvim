@@ -8,8 +8,10 @@
 
 ---@class Rules.Opts
 ---@field rulesets string[]  files or directories to load fenced `rule` blocks from
+---@field gates table<string, string[]>  named groups of family prefixes, e.g. `{ release = {"REL"} }`; see `:Rules gate`
 
 ---@type Rules.Opts
 return {
   rulesets = {},
+  gates = {},
 }

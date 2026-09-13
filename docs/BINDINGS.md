@@ -5,10 +5,10 @@
 | Command | Args | Flags | Does |
 | --- | --- | --- | --- |
 | `:Rules check` | `[path]` (defaults to cwd) | `--family=<PREFIX>` (required), `--format=json` (optional) | Runs every rule in the family against `path`. Default: reports into the quickfix list and a readable buffer. `--format=json` prints the results as JSON instead (`:messages`/stdout) and does not touch quickfix/buffer or quit Neovim — see below for headless/CI use |
+| `:Rules gate` | `<name>` (required), `[path]` (defaults to cwd) | `--diff=<git-ref>` (optional), `--format=json` (optional) | Runs every family configured for gate `name` (`setup({ gates = {...} })`) as one combined report. `--diff=<git-ref>` narrows findings to files changed since that ref (`git diff --name-only` + untracked files) — a rule with no findings inside the diff reports as `pass` even if the repo has standing issues elsewhere. `--format=json` behaves like `:Rules check`'s |
 
-No default keymaps are bound — `:Rules check --family=<PREFIX>` is the whole
-surface for now. `new-project`/`review`/`release` gates are designed but not
-implemented yet.
+No default keymaps are bound — `:Rules check`/`:Rules gate` is the whole
+surface for now.
 
 ## Headless/CI use
 
@@ -28,6 +28,40 @@ nvim --headless -u minimal_init.lua -c "
 `exit_code` is `1` only if a **critical**-severity rule failed or its check
 errored; `recommended`/`nice-to-have` findings, `manual` rules (no `check`
 field, no automated verdict) and `waived` rules (see below) never affect it.
+
+## Gates
+
+A gate is a named bundle of rule families, run together as one report — the
+one place in this plugin that checks more than one family at once, because a
+gate is a bundle *you* chose on purpose, not the whole-catalog sweep
+`:Rules check` deliberately never offers. This plugin ships no gates of its
+own (same "no bundled opinions" reasoning as everywhere else) — define them
+in `setup()`:
+
+```lua
+require("rules").setup({
+  rulesets = { "~/path/to/your/checklists" },
+  gates = {
+    new_project = { "NEW" },
+    release = { "REL" },
+    review = { "ERR", "LUA", "PRIN", "PERF", "UI", "SEC" },
+  },
+})
+```
+
+```vim
+:Rules gate release
+:Rules gate review --diff=main
+```
+
+`--diff=<git-ref>` scopes to that diff (tracked changes + untracked new
+files). A finding whose file the diff never touched is dropped, and a rule
+left with zero findings reports `pass` — a diff-scoped gate answers "did
+this change introduce a problem", not "does this repo have any standing
+problems" (that's what an unscoped gate, or `:Rules check`, is for). A
+finding that isn't tied to one specific file (e.g. a repo-wide `git status`
+check) can never be "inside" a diff, so `--diff` always reports it `pass` —
+scope a rule like that to an unscoped gate instead.
 
 ## Waivers
 

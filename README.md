@@ -1,7 +1,6 @@
-> **Alpha — small, working surface.** The engine, the four check types and
-> `:Rules check --family=<PREFIX>` are real and tested. Gates (`new-project`,
-> `review`, `release`) are designed but not implemented yet. Pin a commit if
-> you depend on this.
+> **Alpha — small, working surface.** The engine, the four check types,
+> `:Rules check --family=<PREFIX>`, waivers and `:Rules gate` are real and
+> tested. Pin a commit if you depend on this.
 
 # rules.nvim
 

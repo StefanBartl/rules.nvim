@@ -32,6 +32,34 @@ function M.setup()
           end
         end,
       },
+      {
+        path = { "gate" },
+        args = {
+          { name = "name", type = "STRING" },
+          { name = "path", type = "DIR", optional = true },
+        },
+        flags = {
+          { name = "diff", type = "STRING" },
+          { name = "format", type = "STRING" },
+        },
+        desc = "Run a configured gate (setup({ gates = {...} })), --diff=<git-ref> to scope to that diff",
+        run = function(ctx)
+          if not ctx.args.name then
+            vim.notify("[rules.nvim] :Rules gate needs a name, e.g. :Rules gate release", vim.log.levels.ERROR)
+            return
+          end
+          if ctx.flags.format == "json" then
+            local json, _, _, err = require("rules").run_gate_json(ctx.args.name, ctx.args.path, ctx.flags.diff)
+            if err then
+              vim.notify("[rules.nvim] " .. err, vim.log.levels.ERROR)
+            else
+              print(json)
+            end
+          else
+            require("rules").run_gate(ctx.args.name, ctx.args.path, ctx.flags.diff)
+          end
+        end,
+      },
     },
   })
 end

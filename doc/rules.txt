@@ -6,6 +6,7 @@ CONTENTS                                                       *rules-contents*
     Introduction ....... |rules-introduction|
     Setup .............. |rules-setup|
     Commands ........... |rules-commands|
+    Gates .............. |rules-gates|
     Waivers ............ |rules-waivers|
     Ruleset format ...... |rules-ruleset-format|
 
@@ -43,6 +44,32 @@ COMMANDS                                                        *rules-commands*
 
     --family={PREFIX}     required, e.g. --family=DEP
     --format={FORMAT}     optional, only "json" is recognized
+
+                                                                   *:Rules_gate*
+:Rules gate {name} [{path}]
+    Runs every family configured for gate {name} (see |rules-gates|) as one
+    combined report. --diff={ref} narrows findings to files changed since
+    that git ref (tracked + untracked); a rule left with no findings inside
+    the diff reports "pass". --format=json behaves like :Rules check's.
+
+    --diff={REF}          optional, e.g. --diff=main
+    --format={FORMAT}     optional, only "json" is recognized
+
+==============================================================================
+GATES                                                              *rules-gates*
+
+A gate is a named bundle of rule families, run together as one report — the
+one place in this plugin that checks more than one family at once. No gates
+are bundled; define them in `setup()`: >lua
+    require("rules").setup({
+      gates = {
+        release = { "REL" },
+        review = { "ERR", "LUA", "PRIN" },
+      },
+    })
+<
+See docs/BINDINGS.md in the plugin's repository for the `--diff` scoping
+semantics in detail.
 
 ==============================================================================
 WAIVERS                                                          *rules-waivers*
