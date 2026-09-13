@@ -34,6 +34,25 @@ describe("rules.engine.gate.run", function()
   end)
 end)
 
+describe("rules.engine.gate.unknown_families", function()
+  local rules = {
+    { id = "NEW-01", severity = "critical" },
+    { id = "REL-01", severity = "recommended" },
+  }
+
+  it("returns nothing when every configured family has a matching rule", function()
+    assert.are.same({}, gate.unknown_families(rules, { "NEW", "REL" }))
+  end)
+
+  it("names a configured family with zero matching rules -- a typo or an unmigrated family", function()
+    assert.are.same({ "LUA" }, gate.unknown_families(rules, { "NEW", "LUA" }))
+  end)
+
+  it("reports every unknown family, in the order they were configured", function()
+    assert.are.same({ "ERR", "SEC" }, gate.unknown_families(rules, { "ERR", "NEW", "SEC" }))
+  end)
+end)
+
 describe("rules.engine.gate.diff_files/scope_to_diff", function()
   ---@return string
   local function git_repo()

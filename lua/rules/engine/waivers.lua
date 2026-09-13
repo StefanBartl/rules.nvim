@@ -46,4 +46,26 @@ function M.load(root)
   return decoded, nil
 end
 
+--- Waiver ids that don't match any loaded rule -- a rule that was renamed,
+--- retired, or simply mistyped in `.rules-waivers.json` leaves an entry that
+--- silently protects nothing, forever, with no indication it stopped
+--- mattering. Pure data; see `health.lua` for where this surfaces.
+---@param waivers Rules.Waivers
+---@param rules Rules.ParsedRule[]
+---@return string[] orphaned  waiver ids with no matching rule, sorted
+function M.orphaned(waivers, rules)
+  local known = {}
+  for _, r in ipairs(rules) do
+    known[r.id] = true
+  end
+  local orphaned = {}
+  for id in pairs(waivers) do
+    if not known[id] then
+      orphaned[#orphaned + 1] = id
+    end
+  end
+  table.sort(orphaned)
+  return orphaned
+end
+
 return M

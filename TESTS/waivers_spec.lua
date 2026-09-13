@@ -65,3 +65,25 @@ describe("rules.engine.waivers.load", function()
     assert.is_not_nil(err)
   end)
 end)
+
+describe("rules.engine.waivers.orphaned", function()
+  local rules = {
+    { id = "DEP-01", severity = "recommended" },
+    { id = "DEP-02", severity = "recommended" },
+  }
+
+  it("returns nothing when every waiver matches a loaded rule", function()
+    local w = { ["DEP-01"] = "tracked", ["DEP-02"] = "tracked" }
+    assert.are.same({}, waivers.orphaned(w, rules))
+  end)
+
+  it("names a waiver id with no matching rule -- retired or mistyped", function()
+    local w = { ["DEP-01"] = "tracked", ["DEP-99"] = "stale" }
+    assert.are.same({ "DEP-99" }, waivers.orphaned(w, rules))
+  end)
+
+  it("returns every orphaned id, sorted", function()
+    local w = { ["DEP-99"] = "stale", ["DEP-50"] = "also stale" }
+    assert.are.same({ "DEP-50", "DEP-99" }, waivers.orphaned(w, rules))
+  end)
+end)

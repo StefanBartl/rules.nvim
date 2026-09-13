@@ -30,6 +30,31 @@ function M.run(rules, families, root, waivers)
   return results
 end
 
+--- Family prefixes in `families` that match zero rules in `rules` -- almost
+--- always a typo in `setup({ gates = {...} })` or a family that hasn't been
+--- migrated into fenced `rule` blocks yet. A gate silently running fewer
+--- families than configured is exactly the "no error, no warning, just a
+--- smaller result" failure mode this plugin's own rules (e.g. `LLS-31`)
+--- warn against -- so this is surfaced, not swallowed. Pure data, no
+--- `vim.notify` here: engine modules report facts, `init.lua` decides how
+--- to tell the user (same split as `loader.lua`/`waivers.lua`).
+---@param rules Rules.ParsedRule[]
+---@param families string[]
+---@return string[] unknown  family prefixes with 0 matching rules, in input order
+function M.unknown_families(rules, families)
+  local present = {}
+  for _, r in ipairs(rules) do
+    present[runner.family_of(r.id)] = true
+  end
+  local unknown = {}
+  for _, family in ipairs(families) do
+    if not present[family] then
+      unknown[#unknown + 1] = family
+    end
+  end
+  return unknown
+end
+
 --- The set of files changed relative to `git_ref`, as absolute normalized
 --- paths -- for scoping a gate to "just this diff" (`review`'s default).
 --- Includes brand-new untracked files too (`git diff` alone omits them,

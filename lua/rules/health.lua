@@ -32,16 +32,43 @@ function M.check()
 
   start("rules.nvim: rulesets")
   local config = require("rules.config").get()
+  local rules = {}
   if #config.rulesets == 0 then
     info("no rulesets configured -- setup({ rulesets = {...} }) to point at your own rules")
   else
-    local rules, errors = require("rules.engine.loader").load(config.rulesets)
+    local errors
+    rules, errors = require("rules.engine.loader").load(config.rulesets)
     if #errors == 0 then
       ok(("%d rule(s) loaded from %d ruleset path(s), no errors"):format(#rules, #config.rulesets))
     else
       warn(("%d rule(s) loaded, %d error(s)"):format(#rules, #errors))
       for _, e in ipairs(errors) do
         warn("  " .. e)
+      end
+    end
+  end
+
+  if #rules > 0 then
+    start("rules.nvim: waivers")
+    local waivers = require("rules.engine.waivers")
+    local repo_waivers, werr = waivers.load(vim.fn.getcwd())
+    if werr then
+      warn(werr)
+    elseif next(repo_waivers) == nil then
+      info("no .rules-waivers.json in cwd, or it has no entries")
+    else
+      local count = vim.tbl_count(repo_waivers)
+      local orphaned = waivers.orphaned(repo_waivers, rules)
+      if #orphaned == 0 then
+        ok(("%d waiver(s) in cwd, all match a loaded rule"):format(count))
+      else
+        warn(
+          ("%d waiver(s) in cwd, %d orphaned (no matching rule -- retired or mistyped id): %s"):format(
+            count,
+            #orphaned,
+            table.concat(orphaned, ", ")
+          )
+        )
       end
     end
   end

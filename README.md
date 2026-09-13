@@ -1,6 +1,6 @@
 > **Alpha — small, working surface.** The engine, the four check types,
-> `:Rules check --family=<PREFIX>`, waivers and `:Rules gate` are real and
-> tested. Pin a commit if you depend on this.
+> `:Rules check`/`gate`/`show`/`stats`, and waivers are real and tested.
+> Pin a commit if you depend on this.
 
 # rules.nvim
 
@@ -47,7 +47,7 @@ provide — the same way you'd point ESLint at your own `.eslintrc`.
 ## Documentation
 
 - [Ruleset format](docs/RULESET-FORMAT.md) — how a rule and its `check` are written.
-- [Bindings](docs/BINDINGS.md) — the one command that exists so far.
+- [Bindings](docs/BINDINGS.md) — the `:Rules` command and its subcommands.
 
 `:help rules` is the same command reference inside the editor.
 
@@ -68,6 +68,12 @@ Rules are grouped into **families** by their ID prefix (`SEC-`, `PERF-`, …).
 reports into the quickfix list plus a readable buffer, and never claims to
 have checked everything at once — checking a whole rule catalog against a
 whole repo is a multi-hour task in practice, not a single command.
+
+`:Rules stats` gives a structural overview of what's loaded (per-family
+totals, automated vs. manual, severity) without running anything. `:Rules
+show <id>` jumps straight to one rule's source. `--family=`, a gate's name,
+and a rule id all tab-complete against whatever is actually loaded right
+now.
 
 ## Why no bundled rules
 
@@ -99,8 +105,9 @@ installing it either.
 }
 ```
 
-`cmd = { "Rules" }`: the whole surface today is one command, run on demand —
-nothing here needs to run at startup.
+`cmd = { "Rules" }`: the whole surface today is one usercommand (`check`,
+`gate`, `show`, `stats`), run on demand — nothing here needs to run at
+startup.
 
 ## Quickstart
 

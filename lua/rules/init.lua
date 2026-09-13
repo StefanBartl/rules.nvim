@@ -8,6 +8,9 @@ local runner = require("rules.engine.runner")
 local waivers = require("rules.engine.waivers")
 local gate = require("rules.engine.gate")
 
+---@type table<"critical"|"recommended"|"nice-to-have", integer>
+local ZERO_SEVERITY = { critical = 0, recommended = 0, ["nice-to-have"] = 0 }
+
 local M = {}
 
 ---@param opts Rules.Opts|nil
@@ -65,7 +68,17 @@ local function run_gate_results(gate_name, path, diff_ref)
   end
 
   local root = path or vim.fn.getcwd()
-  local results = gate.run(M.load_rules(), families, root, load_waivers(root))
+  local rules = M.load_rules()
+  for _, family in ipairs(gate.unknown_families(rules, families)) do
+    vim.notify(
+      ("[rules.nvim] gate %q: family %q matches no loaded rule -- typo in gates config, or not migrated yet"):format(
+        gate_name,
+        family
+      ),
+      vim.log.levels.WARN
+    )
+  end
+  local results = gate.run(rules, families, root, load_waivers(root))
 
   if diff_ref then
     local changed, err = gate.diff_files(root, diff_ref)
@@ -141,6 +154,58 @@ function M.run_gate_json(gate_name, path, diff_ref)
   end
   local json = require("rules.report.json")
   return json.encode(results), json.exit_code(results), results, nil
+end
+
+--- Find one loaded rule by its exact id, for jumping straight to its source
+--- (`:Rules show <id>`) without running a whole family check.
+---@param id string
+---@return Rules.ParsedRule|nil
+function M.find_rule(id)
+  for _, rule in ipairs(M.load_rules()) do
+    if rule.id == id then
+      return rule
+    end
+  end
+  return nil
+end
+
+---@class Rules.FamilyStats
+---@field total integer
+---@field checked integer  rules with a `check` field
+---@field manual integer  rules with no `check` field
+---@field severity table<"critical"|"recommended"|"nice-to-have", integer>
+
+---@class Rules.Stats
+---@field total integer  every loaded rule, across every family
+---@field families table<string, Rules.FamilyStats>  keyed by family prefix
+
+--- A structural overview of every loaded rule -- no check runs, just catalog
+--- metadata (`:Rules stats`). Answers "how big is this ruleset, how much of
+--- it is automated" without the multi-hour whole-catalog sweep `:Rules
+--- check`/`:Rules gate` deliberately never offer.
+---@return Rules.Stats
+function M.stats()
+  local rules = M.load_rules()
+  ---@type table<string, Rules.FamilyStats>
+  local families = {}
+
+  for _, rule in ipairs(rules) do
+    local family = runner.family_of(rule.id)
+    local stats = families[family]
+    if not stats then
+      stats = { total = 0, checked = 0, manual = 0, severity = vim.deepcopy(ZERO_SEVERITY) }
+      families[family] = stats
+    end
+    stats.total = stats.total + 1
+    if rule.check then
+      stats.checked = stats.checked + 1
+    else
+      stats.manual = stats.manual + 1
+    end
+    stats.severity[rule.severity] = stats.severity[rule.severity] + 1
+  end
+
+  return { total = #rules, families = families }
 end
 
 return M

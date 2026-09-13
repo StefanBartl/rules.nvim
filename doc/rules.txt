@@ -55,6 +55,21 @@ COMMANDS                                                        *rules-commands*
     --diff={REF}          optional, e.g. --diff=main
     --format={FORMAT}     optional, only "json" is recognized
 
+                                                                   *:Rules_show*
+:Rules show {id}
+    Jumps straight to one rule's source location by its exact id (e.g.
+    `:Rules show DEP-06`), without running a family check. Errors, rather
+    than silently doing nothing, if no loaded rule has that id.
+
+                                                                  *:Rules_stats*
+:Rules stats
+    A structural overview of every loaded rule: total count, and per-family
+    totals split into automated (has a `check`) vs. manual, plus a severity
+    breakdown. No check runs — this is catalog metadata, not a pass/fail
+    report; opens in a readable buffer, or prints JSON with --format=json.
+
+    --format={FORMAT}     optional, only "json" is recognized
+
 ==============================================================================
 GATES                                                              *rules-gates*
 
@@ -69,7 +84,9 @@ are bundled; define them in `setup()`: >lua
     })
 <
 See docs/BINDINGS.md in the plugin's repository for the `--diff` scoping
-semantics in detail.
+semantics in detail. A configured family that matches zero loaded rules
+(a typo, or a family not yet migrated to fenced `rule` blocks) warns rather
+than silently running a smaller gate than configured.
 
 ==============================================================================
 WAIVERS                                                          *rules-waivers*
@@ -82,6 +99,11 @@ A waived rule that would otherwise fail or error reports as "waived"
 instead of "fail" — visible in the buffer report with its reason, excluded
 from the quickfix worklist, and never counted by `check_family_json`'s exit
 code. See docs/BINDINGS.md in the plugin's repository for detail.
+
+`:checkhealth rules` cross-checks the current working directory's waivers
+against every loaded rule and warns about an orphaned entry — a waiver
+whose rule id was retired or mistyped, which would otherwise sit silently
+protecting nothing.
 
 ==============================================================================
 RULESET FORMAT                                            *rules-ruleset-format*

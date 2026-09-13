@@ -5,10 +5,13 @@
 | Command | Args | Flags | Does |
 | --- | --- | --- | --- |
 | `:Rules check` | `[path]` (defaults to cwd) | `--family=<PREFIX>` (required), `--format=json` (optional) | Runs every rule in the family against `path`. Default: reports into the quickfix list and a readable buffer. `--format=json` prints the results as JSON instead (`:messages`/stdout) and does not touch quickfix/buffer or quit Neovim — see below for headless/CI use |
-| `:Rules gate` | `<name>` (required), `[path]` (defaults to cwd) | `--diff=<git-ref>` (optional), `--format=json` (optional) | Runs every family configured for gate `name` (`setup({ gates = {...} })`) as one combined report. `--diff=<git-ref>` narrows findings to files changed since that ref (`git diff --name-only` + untracked files) — a rule with no findings inside the diff reports as `pass` even if the repo has standing issues elsewhere. `--format=json` behaves like `:Rules check`'s |
+| `:Rules gate` | `<name>` (required), `[path]` (defaults to cwd) | `--diff=<git-ref>` (optional), `--format=json` (optional) | Runs every family configured for gate `name` (`setup({ gates = {...} })`) as one combined report. `--diff=<git-ref>` narrows findings to files changed since that ref (`git diff --name-only` + untracked files) — a rule with no findings inside the diff reports as `pass` even if the repo has standing issues elsewhere. `--format=json` behaves like `:Rules check`'s. A configured family matching zero loaded rules (typo, or not migrated yet) warns instead of silently shrinking the gate |
+| `:Rules show` | `<id>` (required) | — | Jumps to one rule's source location by its exact id, without running a family check. Errors if no loaded rule has that id |
+| `:Rules stats` | — | `--format=json` (optional) | Structural overview of every loaded rule: per-family totals, automated-vs-manual split, severity breakdown. No check runs — pure catalog metadata |
 
-No default keymaps are bound — `:Rules check`/`:Rules gate` is the whole
-surface for now.
+No default keymaps are bound. `--family=`, a gate's `<name>`, and `:Rules
+show`'s `<id>` all tab-complete against whatever is actually loaded/
+configured right now.
 
 ## Headless/CI use
 
@@ -88,3 +91,8 @@ or a value that isn't a string — is a load error, notified the same way a
 bad ruleset file is, not a silent zero-waivers file. Same reasoning as
 `docs/RULESET-FORMAT.md`'s check primitives: a malformed input fails loudly
 instead of quietly doing nothing.
+
+`:checkhealth rules` cross-checks the current working directory's waivers
+against every loaded rule id and warns about any entry that matches
+nothing — a rule that was renamed/retired, or a plain typo, left silently
+protecting nothing.
