@@ -39,6 +39,19 @@ describe("rules.engine.fswalk.files", function()
     assert.is_true(contains_suffix(files, "/sub/b.lua"))
   end)
 
+  it("returns '/'-separated paths even when root itself uses backslashes", function()
+    local dir = tmp_dir()
+    write_file(dir, "bad.lua", { "x" })
+
+    local backslash_root = dir:gsub("/", "\\")
+    local files = fswalk.files(backslash_root)
+
+    assert.is_true(contains_suffix(files, "/bad.lua"))
+    for _, item in ipairs(files) do
+      assert.is_nil(item:find("\\", 1, true))
+    end
+  end)
+
   it("skips .git and .deps directories", function()
     local dir = tmp_dir()
     vim.fn.mkdir(dir .. "/.git", "p")

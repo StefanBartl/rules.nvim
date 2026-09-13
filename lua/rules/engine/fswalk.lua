@@ -21,10 +21,19 @@ local M = {}
 local SKIP_DIRS = { ".git", ".deps" }
 
 --- Every file under `root`, skipping VCS/dependency directories.
+---
+--- `collect_recursive` only ever appends "/"-joined suffixes onto whatever
+--- `root` it was given verbatim (its own contract promises "absolute
+--- paths", not a particular separator) -- on Windows a backslash-form
+--- `root` (e.g. from `vim.fn.tempname()`/`vim.fn.getcwd()`) would otherwise
+--- come back mixed-separator, breaking this module's own "/"-separated
+--- promise below. Normalizing `root` here, once, before the walk keeps
+--- that promise regardless of what separator style the caller's `root` used.
 ---@param root string
 ---@return string[] files  absolute paths, "/"-separated
 function M.files(root)
-  return collect_recursive.files(root, {
+  local normalized_root = root:gsub("\\", "/")
+  return collect_recursive.files(normalized_root, {
     ignore = function(abs_path, is_dir)
       if not is_dir then
         return false
