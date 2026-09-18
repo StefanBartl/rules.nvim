@@ -1,0 +1,74 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  stylua:
+    name: stylua (format check)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - uses: JohnnyMorganz/stylua-action@v4
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
+          # Pinned, not "latest", the same way every other repo in the fleet
+          # pins it: a stylua release has changed formatting behaviour out
+          # from under a repo before, turning the gate red with no local diff
+          # to blame. Bump deliberately, with `stylua --write .` run and the
+          # diff reviewed.
+          version: v2.5.2
+          args: --check .
+
+  luacheck:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      # PUC Lua, not "luajit-2.1": that value 404s on this action (LuaJIT
+      # stopped publishing the tarball it downloads). Which interpreter runs
+      # luacheck is independent of what it checks against -- `std = "luajit"`
+      # in .luacheckrc is what pins that.
+      - uses: leafo/gh-actions-lua@v10
+        with:
+          luaVersion: "5.4"
+      - uses: leafo/gh-actions-luarocks@v4
+      - run: luarocks install luacheck 1.2.0
+      - run: luacheck lua TESTS
+
+  tests:
+    name: plenary specs (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      # One platform failing must not cancel the others: which of the three
+      # broke is the whole information content of this job.
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest, macos-latest]
+    defaults:
+      run:
+        # Windows runners default to PowerShell; one shell on all three keeps
+        # the run step itself from being what differs between platforms.
+        # scripts/test.sh is a bash script besides.
+        shell: bash
+    steps:
+      - uses: actions/checkout@v5
+      # Both are resolved by scripts/minimal_init.lua from `.deps/<name>` --
+      # see the three lookup paths it documents. lib.nvim is a hard runtime
+      # dependency (the `:Rules` usercmd goes through usercmd.composer), and
+      # plenary is the busted-compatible harness TESTS/ is written against.
+      - uses: actions/checkout@v5
+        with:
+          repository: StefanBartl/lib.nvim
+          path: .deps/lib.nvim
+          ref: ci-verified
+      - uses: actions/checkout@v5
+        with:
+          repository: nvim-lua/plenary.nvim
+          path: .deps/plenary.nvim
+      - uses: rhysd/action-setup-vim@v1
+        with:
+          neovim: true
+          version: stable
+      - run: bash scripts/test.sh
