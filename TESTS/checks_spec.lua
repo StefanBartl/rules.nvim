@@ -52,6 +52,10 @@ describe("rules.engine.checks (dispatch)", function()
     assert.are.equal("error", status)
     assert.are.equal(1, #findings)
     assert.matches("grep check crashed", findings[1].text)
+    -- `status.message` is a multi-line `debug.traceback()` string; a raw
+    -- embed would crash `report/buffer.lua`'s `nvim_buf_set_lines` call on
+    -- render (`'replacement string' item contains newlines`).
+    assert.is_nil(findings[1].text:find("\n", 1, true))
   end)
 end)
 
@@ -151,6 +155,9 @@ describe("rules.engine.checks.grep", function()
     assert.are.equal("fail", status)
     assert.are.equal(1, #findings)
     assert.matches("could not read file", findings[1].text)
+    -- Same crash class as checks/init.lua's ERR-01 test above: the caught
+    -- error's `.message` is a multi-line traceback.
+    assert.is_nil(findings[1].text:find("\n", 1, true))
   end)
 
   it("reuses a shared ctx's file listing across two calls instead of re-walking", function()
@@ -373,6 +380,9 @@ describe("rules.engine.checks.json_key", function()
     assert.is_true(ok)
     assert.are.equal("error", status)
     assert.matches("could not read file", findings[1].text)
+    -- Same crash class as checks/init.lua's ERR-01 test above: the caught
+    -- error's `.message` is a multi-line traceback.
+    assert.is_nil(findings[1].text:find("\n", 1, true))
   end)
 end)
 
@@ -401,7 +411,7 @@ describe("rules.engine.checks.lua_predicate", function()
   end)
 
   it("reports an error, not a crash, when fn throws", function()
-    local status = lua_predicate.run({
+    local status, findings = lua_predicate.run({
       type = "lua_predicate",
       fn = function()
         error("boom")
@@ -409,6 +419,10 @@ describe("rules.engine.checks.lua_predicate", function()
     }, "/tmp")
 
     assert.are.equal("error", status)
+    assert.matches("boom", findings[1].text)
+    -- Same crash class as checks/init.lua's ERR-01 test above: the caught
+    -- error's `.message` is a multi-line traceback.
+    assert.is_nil(findings[1].text:find("\n", 1, true))
   end)
 
   it("ERR-02: reports an error, not a malformed finding, when fn's findings lack a `line`", function()

@@ -8,6 +8,7 @@
 -- failure instead of a bare error string, valuable here since `spec.fn` is
 -- arbitrary user code that can fail arbitrarily deep).
 local safe_error = require("lib.lua.error")
+local errline = require("rules.engine.checks.errline")
 
 local M = {}
 
@@ -43,7 +44,10 @@ function M.run(spec, root)
 
   local ok, passed, findings_or_msg = safe_error.safe_call(spec.fn, root)
   if not ok then
-    return "error", { { file = root, line = 1, text = "lua_predicate error: " .. passed.message } }
+    -- `passed.message` is a full multi-line `debug.traceback()` string --
+    -- embedding it as-is would crash `report/buffer.lua`'s render instead
+    -- of showing this friendly error (see errline.lua).
+    return "error", { { file = root, line = 1, text = "lua_predicate error: " .. errline.first_line(passed.message) } }
   end
   if passed then
     return "pass", {}
