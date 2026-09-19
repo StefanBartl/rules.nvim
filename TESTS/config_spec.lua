@@ -42,4 +42,35 @@ describe("rules.config.setup", function()
     assert.are.same({ "/a" }, config.get().rulesets)
     assert.are.same({}, config.get().gates)
   end)
+
+  it("ERR-50: warns with a did-you-mean hint on a typo'd top-level key, instead of silently dropping it", function()
+    ---@diagnostic disable-next-line: duplicate-set-field
+    local original_notify = vim.notify
+    local messages = {}
+    vim.notify = function(msg, _)
+      messages[#messages + 1] = msg
+    end
+
+    config.setup({ ruleset = { "/a" } }) -- typo: "ruleset", not "rulesets"
+    vim.notify = original_notify
+
+    assert.are.same({}, config.get().rulesets) -- the typo'd value never lands
+    assert.is_true(#messages > 0)
+    assert.matches("ruleset", messages[#messages])
+    assert.matches("did you mean rulesets", messages[#messages])
+  end)
+
+  it("ERR-50: does not warn for the two known top-level keys", function()
+    ---@diagnostic disable-next-line: duplicate-set-field
+    local original_notify = vim.notify
+    local messages = {}
+    vim.notify = function(msg, _)
+      messages[#messages + 1] = msg
+    end
+
+    config.setup({ rulesets = { "/a" }, gates = { release = { "REL" } } })
+    vim.notify = original_notify
+
+    assert.are.equal(0, #messages)
+  end)
 end)
