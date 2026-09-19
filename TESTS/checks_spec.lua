@@ -3,6 +3,7 @@
 -- ecosystem's own rule catalog for the reasoning; confirmed firing via a live
 -- lua_ls gegenprobe (2026-09-13), unlike a guessed-at suppression.
 ---@diagnostic disable: duplicate-set-field
+local checks = require("rules.engine.checks")
 local grep = require("rules.engine.checks.grep")
 local file_exists = require("rules.engine.checks.file_exists")
 local json_key = require("rules.engine.checks.json_key")
@@ -37,6 +38,22 @@ end
 local function walked_path(dir, name)
   return vim.fs.normalize(dir) .. "/" .. name
 end
+
+describe("rules.engine.checks (dispatch)", function()
+  it("ERR-01: a check impl that throws reports an error, not a crash, and names the check type", function()
+    -- A malformed Lua pattern is the realistic real-world trigger (an
+    -- unescaped `(`/`[`/trailing `%` in a ruleset-authored `grep` rule) --
+    -- `string.find` throws on it rather than returning an error value.
+    local dir = tmp_dir()
+    write_file(dir, "a.lua", { "local x = 1" })
+
+    local status, findings = checks.run({ type = "grep", pattern = "(" }, dir)
+
+    assert.are.equal("error", status)
+    assert.are.equal(1, #findings)
+    assert.matches("grep check crashed", findings[1].text)
+  end)
+end)
 
 describe("rules.engine.checks.grep", function()
   it("passes when the pattern occurs nowhere", function()
