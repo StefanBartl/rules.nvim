@@ -117,7 +117,10 @@ end
 ---@param opts Rules.Opts|nil
 ---@return nil
 function M.setup(opts)
-  state = vim.tbl_deep_extend("force", vim.deepcopy(DEFAULTS), validate(opts or {}))
+  if opts == nil then
+    opts = {}
+  end
+  state = vim.tbl_deep_extend("force", vim.deepcopy(DEFAULTS), validate(opts))
 end
 
 --- ERR-54: a live reference to the internal state, not a copy -- every
