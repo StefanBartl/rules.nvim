@@ -261,6 +261,25 @@ describe("rules.engine.checks.file_exists", function()
     assert.are.equal("fail", status)
     assert.are.equal(1, #findings)
   end)
+
+  it("errors loudly, not a silent pass, when neither `path` nor `paths` is set", function()
+    -- Regression: a typo'd field name (`Path` instead of `path`) used to
+    -- crash (root .. "/" .. nil), loud and visible. The `paths` refactor
+    -- made `candidates` default to `{}` for the same typo, which turned
+    -- file_absent's "nothing found" branch into a silent, wrong "pass" --
+    -- indistinguishable from a rule that genuinely found the forbidden file
+    -- absent. Worst on exactly the rule shape ("this file must never
+    -- exist") where a silently vacuous check does the most damage.
+    local dir = tmp_dir()
+
+    local status, findings = file_exists.run({ type = "file_absent", Path = ".env" }, dir)
+    assert.are.equal("error", status)
+    assert.are.equal(1, #findings)
+
+    local status2, findings2 = file_exists.run({ type = "file_exists" }, dir)
+    assert.are.equal("error", status2)
+    assert.are.equal(1, #findings2)
+  end)
 end)
 
 describe("rules.engine.checks.json_key", function()
