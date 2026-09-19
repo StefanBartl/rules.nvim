@@ -370,4 +370,16 @@ describe("rules.engine.checks.lua_predicate", function()
 
     assert.are.equal("error", status)
   end)
+
+  it("ERR-02: reports an error, not a malformed finding, when fn's findings lack a `line`", function()
+    local status, findings = lua_predicate.run({
+      type = "lua_predicate",
+      fn = function()
+        return false, { { file = "x", text = "nope" } }
+      end,
+    }, "/tmp")
+
+    assert.are.equal("error", status)
+    assert.matches("malformed finding", findings[1].text)
+  end)
 end)
