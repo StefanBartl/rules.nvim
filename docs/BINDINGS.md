@@ -103,7 +103,9 @@ A `.rules-waivers.json` that isn't a `{"RULE-ID": "reason"}` object — a list,
 or a value that isn't a string — is a load error, notified the same way a
 bad ruleset file is, not a silent zero-waivers file. Same reasoning as
 `docs/RULESET-FORMAT.md`'s check primitives: a malformed input fails loudly
-instead of quietly doing nothing.
+instead of quietly doing nothing. A reason is also re-validated on every
+load: no newline (it is rendered as one report line), at most 500
+characters, and at most 500 entries in the file — each is a load error too.
 
 `:checkhealth rules` cross-checks the current working directory's waivers
 against every loaded rule id and warns about any entry that matches
