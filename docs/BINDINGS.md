@@ -58,6 +58,13 @@ require("rules").setup({
 })
 ```
 
+A `rulesets` entry is expanded (`~`, `$VAR`/`${VAR}`, `%VAR%`) before it is
+checked, so the `~/...` form above works as written. A path that still
+resolves to neither a directory nor a readable `.md` file (a typo, an
+unset env var, a ruleset that hasn't been cloned yet) is a load error,
+notified the same way a malformed rule block is — never a silent zero
+rules loaded.
+
 ```vim
 :Rules gate release
 :Rules gate review --diff=main

@@ -61,11 +61,24 @@ describe("rules.engine.loader", function()
     assert.are.equal(0, #errors)
   end)
 
-  it("returns nothing for an empty or missing path, without erroring", function()
-    local rules, errors = loader.load({ "/definitely/does/not/exist" })
+  it("returns nothing without erroring for a directory that genuinely has zero .md files", function()
+    local dir = tmp_dir()
+
+    local rules, errors = loader.load({ dir })
 
     assert.are.equal(0, #rules)
     assert.are.equal(0, #errors)
+  end)
+
+  it("ERR-11: records an error for a path that resolves to neither a directory nor a readable .md file", function()
+    -- "empty, nothing to report" and "empty, because the path never
+    -- resolved at all" used to look identical -- a typo'd or `~`-prefixed
+    -- path silently loaded zero rules with no signal anywhere.
+    local rules, errors = loader.load({ "/definitely/does/not/exist" })
+
+    assert.are.equal(0, #rules)
+    assert.are.equal(1, #errors)
+    assert.matches("does/not/exist", errors[1])
   end)
 
   it("finds .md files under a directory whose name contains glob-special characters", function()
@@ -80,6 +93,23 @@ describe("rules.engine.loader", function()
     write_file(dir, "a.md", { "```rule", 'id = "DEP-01",', 'severity = "recommended",', "```" })
 
     local rules, errors = loader.load({ dir })
+
+    assert.are.equal(0, #errors)
+    assert.are.equal(1, #rules)
+  end)
+
+  it("ERR-11: expands a $VAR-style ruleset path instead of treating it as literal and unresolvable", function()
+    -- README.md/docs/BINDINGS.md's own quickstart example is a `~`-prefixed
+    -- path; `vim.fn.isdirectory("~/x")` does NOT expand `~` on its own, so
+    -- that documented example silently loaded zero rules before this.
+    -- `$VAR` is used here instead of `~` to stay hermetic (no dependency on
+    -- the test machine's actual home directory).
+    local dir = tmp_dir()
+    write_file(dir, "a.md", { "```rule", 'id = "DEP-01",', 'severity = "recommended",', "```" })
+    vim.env.RULES_NVIM_TEST_RULESET_DIR = dir
+
+    local rules, errors = loader.load({ "$RULES_NVIM_TEST_RULESET_DIR" })
+    vim.env.RULES_NVIM_TEST_RULESET_DIR = nil
 
     assert.are.equal(0, #errors)
     assert.are.equal(1, #rules)
