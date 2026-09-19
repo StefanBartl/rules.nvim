@@ -52,18 +52,24 @@ describe("rules.engine.fswalk.files", function()
     end
   end)
 
-  it("skips .git and .deps directories", function()
+  it("skips .git, .deps and .claude directories", function()
     local dir = tmp_dir()
     vim.fn.mkdir(dir .. "/.git", "p")
     write_file(dir .. "/.git", "config", { "x" })
     vim.fn.mkdir(dir .. "/.deps", "p")
     write_file(dir .. "/.deps", "vendored.lua", { "x" })
+    -- .claude/worktrees/<name> is a second full checkout of this same repo
+    -- (a running Claude Code session's own worktree) -- without skipping it,
+    -- every finding in that checkout was counted a second time.
+    vim.fn.mkdir(dir .. "/.claude/worktrees/some-session/lua", "p")
+    write_file(dir .. "/.claude/worktrees/some-session/lua", "duplicate.lua", { "x" })
     write_file(dir, "real.lua", { "x" })
 
     local files = fswalk.files(dir)
 
     assert.is_false(contains_suffix(files, "/.git/config"))
     assert.is_false(contains_suffix(files, "/.deps/vendored.lua"))
+    assert.is_false(contains_suffix(files, "/duplicate.lua"))
     assert.is_true(contains_suffix(files, "/real.lua"))
   end)
 

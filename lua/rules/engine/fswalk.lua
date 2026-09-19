@@ -18,7 +18,15 @@ local collect_recursive = require("lib.nvim.fs.collect_recursive")
 local M = {}
 
 ---@type string[]
-local SKIP_DIRS = { ".git", ".deps" }
+--- `.claude` is a git worktree's own workdir for a running Claude Code
+--- session (`.claude/worktrees/<name>`) -- a second, full checkout of this
+--- same repo. Without it here, a `grep` check walked every open worktree in
+--- addition to the real tree, multiplying every finding once per session:
+--- measured 2026-09-18, 81 of 134 grep-rule hits across the fleet were this
+--- duplication, one repo alone reporting 68 SEC-01 findings where 17 were
+--- real. A `:cnext` into one of the duplicates also lands in another
+--- session's working tree, not this one's.
+local SKIP_DIRS = { ".git", ".deps", ".claude" }
 
 --- Every file under `root`, skipping VCS/dependency directories.
 ---
