@@ -26,7 +26,11 @@ SETUP                                                              *rules-setup*
     })
 <
 `rulesets` is a list of files or directories; every `.md` file reachable from
-each entry is scanned for fenced ```rule blocks.
+each entry is scanned for fenced ```rule blocks. Each entry is expanded
+(`~`, `$VAR`/`${VAR}`, `%VAR%`) before it is checked, so the `~/...` form
+above works as written; a path that still resolves to neither a directory
+nor a readable `.md` file is a load error, notified rather than silently
+loading zero rules.
 
 ==============================================================================
 COMMANDS                                                        *rules-commands*

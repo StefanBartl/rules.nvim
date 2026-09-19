@@ -7,14 +7,24 @@
 
 local parser = require("rules.engine.parser")
 local fswalk = require("rules.engine.fswalk")
+-- SEC-34: `vim.fn.expand()` would also apply shell/`<cfile>`-style specials
+-- this is a static config string, not buffer/user text, but the ruleset
+-- path is the plugin's own documented `~/path/to/your/checklists` example
+-- (README.md, docs/BINDINGS.md), so it has to actually expand `~`/env vars.
+local expand_path = require("lib.nvim.cross.fs.expand_path")
 
 local M = {}
 
 --- Every `.md` file reachable from `path` — itself if it already is one.
 ---@param path string
 ---@return string[] md_files
+---@return string|nil error  set when `path` resolves to neither a directory
+---   nor a readable `.md` file -- distinct from a directory that genuinely
+---   has zero `.md` files in it, which is not an error (ERR-11)
 local function md_files_under(path)
-  if vim.fn.isdirectory(path) == 1 then
+  local expanded = expand_path(path)
+
+  if vim.fn.isdirectory(expanded) == 1 then
     -- `fswalk.files` (a literal `uv.fs_scandir` walk), not `vim.fn.globpath`:
     -- glob-family functions interpret `~`/`[`/`?`/`*`/`{}` in their PATH
     -- argument too, not just the pattern -- a ruleset path containing any of
@@ -23,16 +33,20 @@ local function md_files_under(path)
     -- despite `isdirectory` above confirming the directory genuinely exists.
     -- `fswalk` never interprets `path`, only lists what is actually there.
     local files = {}
-    for _, file in ipairs(fswalk.files(path)) do
+    for _, file in ipairs(fswalk.files(expanded)) do
       if file:match("%.md$") then
         files[#files + 1] = file
       end
     end
-    return files
-  elseif path:match("%.md$") and vim.fn.filereadable(path) == 1 then
-    return { path }
+    return files, nil
+  elseif expanded:match("%.md$") then
+    if vim.fn.filereadable(expanded) == 1 then
+      return { expanded }, nil
+    end
+    return {}, ("ruleset path %q: not a readable file"):format(path)
   end
-  return {}
+
+  return {}, ("ruleset path %q: not a directory or a readable .md file"):format(path)
 end
 
 --- Load and merge every ruleset path into one flat rule list.
@@ -49,7 +63,11 @@ function M.load(ruleset_paths)
   local seen_files = {}
 
   for _, path in ipairs(ruleset_paths or {}) do
-    for _, file in ipairs(md_files_under(path)) do
+    local files, path_err = md_files_under(path)
+    if path_err then
+      errors[#errors + 1] = path_err
+    end
+    for _, file in ipairs(files) do
       -- `:p` makes it absolute; `vim.fs.normalize` forces "/"-separators --
       -- needed on Windows, where `globpath` and a hand-built path can name
       -- the same file with different slash directions and compare unequal.
