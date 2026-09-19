@@ -8,6 +8,18 @@ describe("rules.config.setup", function()
     assert.are.same({ release = { "REL" } }, config.get().gates)
   end)
 
+  it("ERR-22: a non-table setup() argument degrades to defaults instead of crashing on pairs()", function()
+    config.setup({ rulesets = { "/a" } }) -- establish a known non-default state first
+
+    for _, bad in ipairs({ "not-a-table", 5, true }) do
+      local ok = pcall(config.setup, bad)
+      assert.is_true(ok, ("setup(%s) must not raise"):format(tostring(bad)))
+      assert.are.same({}, config.get().rulesets) -- DEFAULTS.rulesets
+      assert.are.same({}, config.get().gates) -- DEFAULTS.gates
+      config.setup({ rulesets = { "/a" } }) -- reset for the next iteration
+    end
+  end)
+
   it("ERR-22: an invalid rulesets value degrades to the default instead of propagating", function()
     config.setup({ rulesets = { "/a" } }) -- establish a known non-default state first
     config.setup({ rulesets = "not-a-list" })
