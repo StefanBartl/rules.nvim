@@ -124,8 +124,24 @@ function M.setup()
             vim.notify(("[rules.nvim] no loaded rule with id %q"):format(ctx.args.id), vim.log.levels.ERROR)
             return
           end
-          vim.cmd.edit(vim.fn.fnameescape(rule.source_file))
-          vim.api.nvim_win_set_cursor(0, { rule.source_line, 0 })
+
+          -- ERR-01: `:edit` is a filesystem boundary that genuinely fails
+          -- (the source file moved/deleted since the ruleset was loaded, a
+          -- swapfile, an autocmd vetoing the edit) -- a raw Vim error (E37)
+          -- must not surface in place of this plugin's own notify style.
+          local edit_ok, edit_err = pcall(vim.cmd.edit, vim.fn.fnameescape(rule.source_file))
+          if not edit_ok then
+            vim.notify(("[rules.nvim] could not open %s: %s"):format(rule.source_file, edit_err), vim.log.levels.ERROR)
+            return
+          end
+
+          local cursor_ok, cursor_err = pcall(vim.api.nvim_win_set_cursor, 0, { rule.source_line, 0 })
+          if not cursor_ok then
+            vim.notify(
+              ("[rules.nvim] opened %s but could not jump to line %d: %s"):format(rule.source_file, rule.source_line, cursor_err),
+              vim.log.levels.WARN
+            )
+          end
         end,
       },
       {
