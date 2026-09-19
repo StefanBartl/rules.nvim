@@ -4,6 +4,9 @@
 --- (`NEW-36`: the key *replaces* LuaLS's library injection rather than
 --- adding to it, so its mere presence is the violation, not its value).
 
+-- ERR-05/06: `lib.lua.error.safe_call` instead of a hand-rolled `pcall`.
+local safe_error = require("lib.lua.error")
+
 local M = {}
 
 ---@class Rules.Check.JsonKeyAbsent
@@ -29,7 +32,15 @@ function M.run(spec, root)
     return "pass", {}
   end
 
-  local raw = table.concat(vim.fn.readfile(full), "\n")
+  -- ERR-01: `filereadable` above only checks openability at that instant --
+  -- a TOCTOU window (removed/renamed/locked before this read) means
+  -- `readfile` can still throw rather than return an error value.
+  local read_ok, lines = safe_error.safe_call(vim.fn.readfile, full)
+  if not read_ok then
+    return "error", { { file = full, line = 1, text = "could not read file: " .. lines.message } }
+  end
+
+  local raw = table.concat(lines, "\n")
   local ok, decoded = pcall(vim.json.decode, raw)
   if not ok or type(decoded) ~= "table" then
     return "fail", { { file = full, line = 1, text = "could not parse as JSON: " .. tostring(decoded) } }

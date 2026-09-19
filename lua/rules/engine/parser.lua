@@ -44,7 +44,14 @@ function M.extract_rules(file_path)
     return rules, errors
   end
 
-  local lines = vim.fn.readfile(file_path)
+  -- ERR-01: `filereadable` above only checks openability at that instant --
+  -- a TOCTOU window (the file removed/renamed/locked before this read) means
+  -- `readfile` can still throw (`E484`) rather than return an error value.
+  local read_ok, lines = safe_error.safe_call(vim.fn.readfile, file_path)
+  if not read_ok then
+    errors[#errors + 1] = ("%s: could not read (%s)"):format(file_path, lines.message)
+    return rules, errors
+  end
   local in_block = false
   local block_start = nil
   local block_lines = {}

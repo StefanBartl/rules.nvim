@@ -90,6 +90,28 @@ describe("rules.engine.waivers.load", function()
     assert.matches("exceeds", err)
   end)
 
+  it("ERR-01: reports an error, not a crash, when readfile throws after filereadable passed", function()
+    -- The TOCTOU window between `filereadable` and `readfile` -- removed,
+    -- renamed, or exclusively locked in between -- `vim.fn.readfile` raises
+    -- rather than returning an error value.
+    local dir = tmp_dir()
+    vim.fn.writefile({ '{"DEP-01": "tracked"}' }, dir .. "/.rules-waivers.json")
+
+    local original_readfile = vim.fn.readfile
+    ---@diagnostic disable-next-line: duplicate-set-field
+    vim.fn.readfile = function()
+      error("E484: Can't open file")
+    end
+
+    local ok, w, err = pcall(waivers.load, dir)
+    vim.fn.readfile = original_readfile
+
+    assert.is_true(ok)
+    assert.are.same({}, w)
+    assert.is_not_nil(err)
+    assert.matches("could not read", err)
+  end)
+
   it("SEC-33: rejects a waivers file exceeding the entry-count cap", function()
     local entries = {}
     for i = 1, 501 do
