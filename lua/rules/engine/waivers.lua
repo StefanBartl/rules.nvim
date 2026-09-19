@@ -36,7 +36,15 @@ function M.load(root)
     return {}, nil
   end
 
-  local raw = table.concat(vim.fn.readfile(path), "\n")
+  -- ERR-01: `filereadable` above only checks openability at that instant --
+  -- a TOCTOU window (removed/renamed/locked before this read) means
+  -- `readfile` can still throw rather than return an error value.
+  local read_ok, lines = safe_error.safe_call(vim.fn.readfile, path)
+  if not read_ok then
+    return {}, ("%s: could not read (%s)"):format(path, lines.message)
+  end
+
+  local raw = table.concat(lines, "\n")
   local ok, decoded = safe_error.safe_call(vim.json.decode, raw)
   if not ok or type(decoded) ~= "table" then
     return {}, path .. ": could not parse as JSON"

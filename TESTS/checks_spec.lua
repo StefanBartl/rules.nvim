@@ -355,6 +355,25 @@ describe("rules.engine.checks.json_key", function()
     assert.are.equal("error", status2)
     assert.are.equal(1, #findings2)
   end)
+
+  it("ERR-01: reports an error, not a crash, when readfile throws after filereadable passed", function()
+    local dir = tmp_dir()
+    write_file(dir, ".luarc.json", { "{}" })
+
+    local original_readfile = vim.fn.readfile
+    ---@diagnostic disable-next-line: duplicate-set-field
+    vim.fn.readfile = function()
+      error("E484: Can't open file")
+    end
+
+    local ok, status, findings =
+      pcall(json_key.run, { type = "json_key_absent", path = ".luarc.json", key = "workspace.library" }, dir)
+    vim.fn.readfile = original_readfile
+
+    assert.is_true(ok)
+    assert.are.equal("error", status)
+    assert.matches("could not read file", findings[1].text)
+  end)
 end)
 
 describe("rules.engine.checks.lua_predicate", function()

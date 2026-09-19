@@ -134,4 +134,25 @@ describe("rules.engine.parser", function()
     assert.are.equal(0, #rules)
     assert.are.equal(1, #errors)
   end)
+
+  it("ERR-01: reports an error, not a crash, when readfile throws after filereadable passed", function()
+    -- The TOCTOU window between `filereadable` and `readfile` (removed,
+    -- renamed, or exclusively locked in between) -- `vim.fn.readfile` raises
+    -- rather than returning an error value.
+    local path = write_tmp({ "```rule", 'id = "DEP-01",', 'severity = "recommended",', "```" })
+
+    local original_readfile = vim.fn.readfile
+    ---@diagnostic disable-next-line: duplicate-set-field
+    vim.fn.readfile = function()
+      error("E484: Can't open file")
+    end
+
+    local ok, rules, errors = pcall(parser.extract_rules, path)
+    vim.fn.readfile = original_readfile
+
+    assert.is_true(ok)
+    assert.are.equal(0, #rules)
+    assert.are.equal(1, #errors)
+    assert.matches("could not read", errors[1])
+  end)
 end)
