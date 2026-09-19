@@ -23,6 +23,21 @@ local function write_file(dir, name, lines)
   vim.fn.writefile(lines, dir .. "/" .. name)
 end
 
+--- The spelling a path under `dir` has once it has been through `fswalk` --
+--- absolute and "/"-separated, which is `fswalk.files`' documented contract
+--- and therefore the spelling of every `ctx` cache key and every finding's
+--- `file`. `tmp_dir()` hands back whatever `vim.fn.tempname()` produces,
+--- which on Windows is backslash-separated, so `dir .. "/" .. name` is a
+--- *mixed*-separator third spelling that the engine never produces. Both
+--- sides of a path comparison have to be resolved the same way -- exactly
+--- what gate_spec.lua already does for `diff_files`' keys.
+---@param dir string
+---@param name string
+---@return string
+local function walked_path(dir, name)
+  return vim.fs.normalize(dir) .. "/" .. name
+end
+
 describe("rules.engine.checks.grep", function()
   it("passes when the pattern occurs nowhere", function()
     local dir = tmp_dir()
@@ -136,7 +151,7 @@ describe("rules.engine.checks.grep", function()
     -- (`tostring(lines)`, a `"table: 0x..."` string) -- truthy garbage,
     -- not absent and not nil.
     local dir = tmp_dir()
-    local file = dir .. "/a.lua"
+    local file = walked_path(dir, "a.lua")
     write_file(dir, "a.lua", { "x" })
 
     local ctx = {}
