@@ -6,6 +6,7 @@
 -- `check` is a ruleset author's own data (an arbitrary Lua pattern, an
 -- arbitrary `spec` shape) driving plugin code for the first time.
 local safe_error = require("lib.lua.error")
+local errline = require("rules.engine.checks.errline")
 
 local M = {}
 
@@ -47,7 +48,11 @@ function M.run(check, root, ctx)
   -- this one rule, not abort the whole family run before any report opens.
   local ok, status, findings = safe_error.safe_call(impl.run, check, root, ctx)
   if not ok then
-    return "error", { { file = root, line = 1, text = ("%s check crashed: %s"):format(check.type, status.message) } }
+    -- `status.message` is a full multi-line `debug.traceback()` string --
+    -- embedding it as-is would crash `report/buffer.lua`'s render instead
+    -- of showing this friendly error (see errline.lua).
+    local text = ("%s check crashed: %s"):format(check.type, errline.first_line(status.message))
+    return "error", { { file = root, line = 1, text = text } }
   end
   return status, findings
 end

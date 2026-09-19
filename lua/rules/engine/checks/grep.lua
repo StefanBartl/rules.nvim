@@ -21,6 +21,7 @@
 
 local fswalk = require("rules.engine.fswalk")
 local safe_error = require("lib.lua.error")
+local errline = require("rules.engine.checks.errline")
 
 local M = {}
 
@@ -89,7 +90,11 @@ local function cached_readfile(file, ctx)
   if ok then
     result, err = lines, nil
   else
-    result, err = false, lines.message
+    -- `lines.message` is a full multi-line `debug.traceback()` string --
+    -- embedding it as-is in a Finding.text below would crash
+    -- `report/buffer.lua`'s render instead of a friendly "fail" (see
+    -- errline.lua).
+    result, err = false, errline.first_line(lines.message)
   end
 
   if ctx then

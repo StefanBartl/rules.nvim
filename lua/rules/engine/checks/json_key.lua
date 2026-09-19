@@ -6,6 +6,7 @@
 
 -- ERR-05/06: `lib.lua.error.safe_call` instead of a hand-rolled `pcall`.
 local safe_error = require("lib.lua.error")
+local errline = require("rules.engine.checks.errline")
 
 local M = {}
 
@@ -37,7 +38,10 @@ function M.run(spec, root)
   -- `readfile` can still throw rather than return an error value.
   local read_ok, lines = safe_error.safe_call(vim.fn.readfile, full)
   if not read_ok then
-    return "error", { { file = full, line = 1, text = "could not read file: " .. lines.message } }
+    -- `lines.message` is a full multi-line `debug.traceback()` string --
+    -- embedding it as-is would crash `report/buffer.lua`'s render instead
+    -- of showing this friendly error (see errline.lua).
+    return "error", { { file = full, line = 1, text = "could not read file: " .. errline.first_line(lines.message) } }
   end
 
   local raw = table.concat(lines, "\n")
