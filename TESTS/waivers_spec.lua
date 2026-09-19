@@ -64,6 +64,46 @@ describe("rules.engine.waivers.load", function()
     assert.are.same({}, w)
     assert.is_not_nil(err)
   end)
+
+  it("SEC-33: rejects a multi-line reason instead of crashing report rendering later", function()
+    -- nvim_buf_set_lines rejects any line containing "\n" -- a multi-line
+    -- reason (legal JSON) would otherwise reach that call and throw at
+    -- render time, naming report/window.lua instead of the waivers file.
+    local dir = tmp_dir()
+    vim.fn.writefile({ '{"DEP-01": "line one\\nline two"}' }, dir .. "/.rules-waivers.json")
+
+    local w, err = waivers.load(dir)
+
+    assert.are.same({}, w)
+    assert.is_not_nil(err)
+    assert.matches("newline", err)
+  end)
+
+  it("SEC-33: rejects a reason exceeding the length cap", function()
+    local dir = tmp_dir()
+    vim.fn.writefile({ '{"DEP-01": "' .. string.rep("x", 501) .. '"}' }, dir .. "/.rules-waivers.json")
+
+    local w, err = waivers.load(dir)
+
+    assert.are.same({}, w)
+    assert.is_not_nil(err)
+    assert.matches("exceeds", err)
+  end)
+
+  it("SEC-33: rejects a waivers file exceeding the entry-count cap", function()
+    local entries = {}
+    for i = 1, 501 do
+      entries[#entries + 1] = ('"DEP-%d": "waived"'):format(i)
+    end
+    local dir = tmp_dir()
+    vim.fn.writefile({ "{" .. table.concat(entries, ",") .. "}" }, dir .. "/.rules-waivers.json")
+
+    local w, err = waivers.load(dir)
+
+    assert.are.same({}, w)
+    assert.is_not_nil(err)
+    assert.matches("more than", err)
+  end)
 end)
 
 describe("rules.engine.waivers.orphaned", function()

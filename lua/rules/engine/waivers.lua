@@ -16,6 +16,15 @@ local M = {}
 
 ---@alias Rules.Waivers table<string, string>
 
+-- SEC-33: re-validate every field of a persisted snapshot on load -- type,
+-- length AND count cap. `report/buffer.lua` renders a reason via
+-- `nvim_buf_set_lines`, which rejects a string containing a newline, so a
+-- multi-line reason (legal JSON, a natural shape for "ticket + explanation")
+-- would otherwise crash every `:Rules check`/`gate` run in the repo at
+-- render time instead of at load time.
+local MAX_REASON_LEN = 500
+local MAX_WAIVERS = 500
+
 --- Load `<root>/.rules-waivers.json`. A missing file means no waivers and
 --- is not an error; an unparseable one is.
 ---@param root string
@@ -40,9 +49,20 @@ function M.load(root)
     return {}, path .. ': must be a JSON object of {"RULE-ID": "reason"}, not a list'
   end
 
+  local count = 0
   for id, reason in pairs(decoded) do
     if type(id) ~= "string" or type(reason) ~= "string" then
       return {}, path .. ": every entry must be a string rule id mapped to a string reason"
+    end
+    if reason:find("\n", 1, true) then
+      return {}, ("%s: reason for %s must not contain a newline (it is rendered as one report line)"):format(path, id)
+    end
+    if #reason > MAX_REASON_LEN then
+      return {}, ("%s: reason for %s exceeds %d characters"):format(path, id, MAX_REASON_LEN)
+    end
+    count = count + 1
+    if count > MAX_WAIVERS then
+      return {}, ("%s: more than %d waiver entries"):format(path, MAX_WAIVERS)
     end
   end
 
