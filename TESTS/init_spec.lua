@@ -38,6 +38,31 @@ describe("rules.find_rule", function()
   end)
 end)
 
+describe("rules.check_family_json", function()
+  it("ERR-11: warns when --family matches zero loaded rules, distinct from a clean empty run", function()
+    -- Regression: a typo'd/transposed `--family=` used to produce an empty
+    -- result list with no signal anywhere, visually identical to a family
+    -- that genuinely has no findings.
+    local dir = tmp_dir()
+    write_file(dir, "a.md", { "```rule", 'id = "DEP-01",', 'severity = "recommended",', "```" })
+    config.setup({ rulesets = { dir } })
+
+    ---@diagnostic disable-next-line: duplicate-set-field
+    local original_notify = vim.notify
+    local messages = {}
+    vim.notify = function(msg, _)
+      messages[#messages + 1] = msg
+    end
+
+    local _, _, results = rules.check_family_json("SCE", dir)
+    vim.notify = original_notify
+
+    assert.are.equal(0, #results)
+    assert.is_true(#messages > 0)
+    assert.matches("SCE", messages[#messages])
+  end)
+end)
+
 describe("rules.stats", function()
   it("counts total rules, per-family checked/manual and severity", function()
     local dir = tmp_dir()

@@ -43,13 +43,24 @@ end
 
 --- Shared by `check_family`/`check_family_json`: load rules and this root's
 --- waivers (`.rules-waivers.json`, see `docs/BINDINGS.md`), then run one
---- family.
+--- family. Warns when `family_prefix` matches zero loaded rules -- a family
+--- prefix is derived from loaded rule ids, so that is always a mistake
+--- (typo, or a ruleset not loaded/migrated yet), never a legitimate empty
+--- result; mirrors the warning `run_gate_results` already gives via
+--- `gate.unknown_families`.
 ---@param family_prefix string
 ---@param path string|nil
 ---@return Rules.Result[]
 local function run_family(family_prefix, path)
   local root = path or vim.fn.getcwd()
-  return runner.check_family(M.load_rules(), family_prefix, root, load_waivers(root))
+  local rules = M.load_rules()
+  if #gate.unknown_families(rules, { family_prefix }) > 0 then
+    vim.notify(
+      ("[rules.nvim] --family=%q matches no loaded rule -- typo in the prefix, or not loaded/migrated yet"):format(family_prefix),
+      vim.log.levels.WARN
+    )
+  end
+  return runner.check_family(rules, family_prefix, root, load_waivers(root))
 end
 
 --- Shared by `run_gate`/`run_gate_json`.
