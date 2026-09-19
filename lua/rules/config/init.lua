@@ -69,6 +69,14 @@ end
 ---@param opts table
 ---@return table validated  only the keys that passed validation
 local function validate(opts)
+  if type(opts) ~= "table" then
+    vim.notify(
+      ("[rules.nvim] setup() expects a table, got %s -- ignoring, falling back to defaults"):format(type(opts)),
+      vim.log.levels.WARN
+    )
+    return {}
+  end
+
   warn_unknown_keys(opts)
   local out = {}
 
