@@ -22,6 +22,46 @@ local function is_string_list(list)
   return true
 end
 
+---@type table<string, true>
+local KNOWN_KEYS = { rulesets = true, gates = true }
+
+--- An unknown top-level key, with the nearest known one as a hint when
+--- there is a plausible one -- same shape as lib.config's own
+--- `describe_unknown`.
+---@param key any
+---@return string
+local function describe_unknown(key)
+  local levenshtein = require("lib.lua.strings.distance").levenshtein
+  local name = tostring(key)
+  local best, best_distance = nil, nil
+  for known in pairs(KNOWN_KEYS) do
+    local d = levenshtein(name, known)
+    if d <= 3 and (best_distance == nil or d < best_distance) then
+      best, best_distance = known, d
+    end
+  end
+  return best and ("%s (did you mean %s?)"):format(name, best) or name
+end
+
+--- ERR-50: unknown-key detection runs before the merge -- a typo'd top-
+--- level option (`ruleset` for `rulesets`) must not vanish silently into
+--- the default; the same mechanism that discards a bad *value* (ERR-22)
+--- discarded a bad *key* with no notification at all.
+---@param opts table
+---@return nil
+local function warn_unknown_keys(opts)
+  local unknown = {}
+  for key in pairs(opts) do
+    if not KNOWN_KEYS[key] then
+      unknown[#unknown + 1] = describe_unknown(key)
+    end
+  end
+  if #unknown > 0 then
+    table.sort(unknown)
+    vim.notify(("[rules.nvim] setup(): unknown option(s) ignored: %s"):format(table.concat(unknown, ", ")), vim.log.levels.WARN)
+  end
+end
+
 --- ERR-22: an invalid config value degrades to its default instead of
 --- propagating to crash something downstream later (a `loader.load` or
 --- `gate.run` call site), where the real cause -- a typo in `setup({...})`
@@ -29,6 +69,7 @@ end
 ---@param opts table
 ---@return table validated  only the keys that passed validation
 local function validate(opts)
+  warn_unknown_keys(opts)
   local out = {}
 
   if opts.rulesets ~= nil then
