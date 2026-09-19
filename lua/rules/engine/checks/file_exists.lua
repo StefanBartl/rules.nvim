@@ -36,6 +36,15 @@ function M.run(spec, root)
   if #candidates == 0 then
     return "error", { { file = root, line = 1, text = "file_exists/file_absent check has no `path` or `paths`" } }
   end
+  -- PRIN-25: `spec` is a raw table from a user-authored Markdown file --
+  -- validate each candidate is actually a string before it drives the
+  -- `root .. "/" .. p` concatenation below (a wrong-typed value, e.g. a
+  -- table or boolean, would otherwise throw uncaught).
+  for _, p in ipairs(candidates) do
+    if type(p) ~= "string" then
+      return "error", { { file = root, line = 1, text = "file_exists/file_absent check's `path`/`paths` must be string(s)" } }
+    end
+  end
   local label = spec.path or table.concat(candidates, " or ")
 
   local found_full = nil

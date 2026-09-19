@@ -13,9 +13,16 @@ local M = {}
 
 ---@param spec Rules.Check.JsonKeyAbsent
 ---@param root string
----@return "pass"|"fail" status
+---@return "pass"|"fail"|"error" status
 ---@return Rules.Finding[] findings
 function M.run(spec, root)
+  -- PRIN-25: `spec` is a raw table from a user-authored Markdown file --
+  -- validate before `root .. "/" .. spec.path` and `spec.key:gmatch(...)`
+  -- below, matching lua_predicate.lua's own guarded pattern.
+  if type(spec.path) ~= "string" or type(spec.key) ~= "string" then
+    return "error", { { file = root, line = 1, text = "json_key_absent check needs a string `path` and `key`" } }
+  end
+
   local full = root .. "/" .. spec.path
   if vim.fn.filereadable(full) == 0 then
     -- No file, nothing to violate.

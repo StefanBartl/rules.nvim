@@ -297,6 +297,15 @@ describe("rules.engine.checks.file_exists", function()
     assert.are.equal("error", status2)
     assert.are.equal(1, #findings2)
   end)
+
+  it("PRIN-25: errors loudly on a wrong-typed `path` instead of throwing", function()
+    local dir = tmp_dir()
+
+    local status, findings = file_exists.run({ type = "file_exists", path = true }, dir)
+
+    assert.are.equal("error", status)
+    assert.are.equal(1, #findings)
+  end)
 end)
 
 describe("rules.engine.checks.json_key", function()
@@ -333,6 +342,18 @@ describe("rules.engine.checks.json_key", function()
     local status = json_key.run({ type = "json_key_absent", path = ".luarc.json", key = "workspace.library" }, dir)
 
     assert.are.equal("fail", status)
+  end)
+
+  it("PRIN-25: errors loudly when `path` or `key` is missing/wrong-typed instead of throwing", function()
+    local dir = tmp_dir()
+
+    local status, findings = json_key.run({ type = "json_key_absent", key = "workspace.library" }, dir)
+    assert.are.equal("error", status)
+    assert.are.equal(1, #findings)
+
+    local status2, findings2 = json_key.run({ type = "json_key_absent", path = ".luarc.json" }, dir)
+    assert.are.equal("error", status2)
+    assert.are.equal(1, #findings2)
   end)
 end)
 

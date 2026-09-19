@@ -54,6 +54,12 @@ character there, and that pattern would silently match almost nothing. Use
 that mistake is documented in this project's own history and is exactly what
 `patterns` exists to make unnecessary.
 
+**A malformed check spec reports `error`, not a crash.** A missing or
+wrong-typed required field (`file_exists`/`file_absent` with no `path`/
+`paths`, `json_key_absent` with no `path` or `key`) fails only the one rule
+with an `error` status naming the check type — it never aborts the rest of
+the family run.
+
 **`grep` findings are candidates, not verdicts.** A `grep` check finding a
 hit means "this line matches the pattern", not "this line is definitely
 wrong" — a rule author decides, per rule, whether that gap matters enough to
