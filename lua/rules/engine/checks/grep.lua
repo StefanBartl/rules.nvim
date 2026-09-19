@@ -30,6 +30,12 @@ local M = {}
 ---@field patterns string[]|nil  any-of a list of Lua patterns; use instead of `pattern` for more than one call site
 ---@field unless string|nil  Lua pattern; a hit on the same line is suppressed
 ---@field include string|nil  Lua pattern matched against the file path; default "%.lua$"
+---@field excludes string[]|nil  any-of a list of Lua patterns matched against
+---  the file path; a file matching any of these is skipped entirely (not
+---  just this one hit) -- for a whole class of call site that is never the
+---  hazard the rule means (TESTS/ fixtures exercising the very pattern being
+---  checked for, a Neovim-free scripts/ that has no `vim.system` to reach
+---  for). Same `pattern`/`patterns` singular-or-list convention as above.
 
 ---@class Rules.Finding
 ---@field file string
@@ -118,8 +124,20 @@ function M.run(spec, root, ctx)
     files = fswalk.files(root)
   end
 
+  local function excluded(file)
+    if not spec.excludes then
+      return false
+    end
+    for _, p in ipairs(spec.excludes) do
+      if file:find(p) then
+        return true
+      end
+    end
+    return false
+  end
+
   for _, file in ipairs(files) do
-    if file:match(include) then
+    if file:match(include) and not excluded(file) then
       local lines, read_err = cached_readfile(file, ctx)
       if lines == false then
         -- A matching file that can't be read (permissions, deleted between the

@@ -82,6 +82,39 @@ describe("rules.engine.checks.grep", function()
     assert.are.equal("pass", status) -- default include is "%.lua$", so a.txt is skipped
   end)
 
+  it("`excludes` skips a whole file even though it matches `include`", function()
+    local dir = tmp_dir()
+    vim.fn.mkdir(dir .. "/TESTS", "p")
+    write_file(dir .. "/TESTS", "checks_spec.lua", { "os.execute('rm -rf tmp')" })
+    write_file(dir, "real.lua", { "local x = 1" })
+
+    local status, findings = grep.run({
+      type = "grep",
+      pattern = "os%.execute%(",
+      excludes = { "/TESTS/" },
+    }, dir)
+
+    assert.are.equal("pass", status)
+    assert.are.equal(0, #findings)
+  end)
+
+  it("`excludes` does not touch a file that does not match any of them", function()
+    local dir = tmp_dir()
+    vim.fn.mkdir(dir .. "/TESTS", "p")
+    write_file(dir .. "/TESTS", "fixture.lua", { "os.execute('rm -rf tmp')" })
+    write_file(dir, "real.lua", { "os.execute('rm -rf tmp')" })
+
+    local status, findings = grep.run({
+      type = "grep",
+      pattern = "os%.execute%(",
+      excludes = { "/TESTS/" },
+    }, dir)
+
+    assert.are.equal("fail", status)
+    assert.are.equal(1, #findings)
+    assert.is_true(findings[1].file:find("real%.lua$") ~= nil)
+  end)
+
   it("fails (not a silent skip) when a matching file cannot be read", function()
     local dir = tmp_dir()
     write_file(dir, "a.lua", { "irrelevant content" })
@@ -209,6 +242,24 @@ describe("rules.engine.checks.file_exists", function()
     local status = file_exists.run({ type = "file_absent", path = "nope" }, dir)
 
     assert.are.equal("pass", status)
+  end)
+
+  it("file_exists with `paths` passes when any one candidate is present", function()
+    local dir = tmp_dir()
+    write_file(dir, ".stylua.toml", { "" })
+
+    local status = file_exists.run({ type = "file_exists", paths = { "stylua.toml", ".stylua.toml" } }, dir)
+
+    assert.are.equal("pass", status)
+  end)
+
+  it("file_exists with `paths` fails only when NONE of the candidates are present", function()
+    local dir = tmp_dir()
+
+    local status, findings = file_exists.run({ type = "file_exists", paths = { "stylua.toml", ".stylua.toml" } }, dir)
+
+    assert.are.equal("fail", status)
+    assert.are.equal(1, #findings)
   end)
 end)
 
