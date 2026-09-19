@@ -11,7 +11,7 @@ describe("rules.config.setup", function()
   it("ERR-22: a non-table setup() argument degrades to defaults instead of crashing on pairs()", function()
     config.setup({ rulesets = { "/a" } }) -- establish a known non-default state first
 
-    for _, bad in ipairs({ "not-a-table", 5, true }) do
+    for _, bad in ipairs({ "not-a-table", 5, true, false }) do
       local ok = pcall(config.setup, bad)
       assert.is_true(ok, ("setup(%s) must not raise"):format(tostring(bad)))
       assert.are.same({}, config.get().rulesets) -- DEFAULTS.rulesets
