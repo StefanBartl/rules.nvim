@@ -48,6 +48,7 @@ provide — the same way you'd point ESLint at your own `.eslintrc`.
 
 - [Ruleset format](docs/RULESET-FORMAT.md) — how a rule and its `check` are written.
 - [Bindings](docs/BINDINGS.md) — the `:Rules` command and its subcommands.
+- [Agent-run manual rules](docs/AGENT.md) — planned, not built: how the rules with no `check` could be worked by an agent, as proposals a person reviews.
 
 `:help rules` is the same command reference inside the editor.
 
