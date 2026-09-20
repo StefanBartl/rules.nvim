@@ -22,7 +22,8 @@ An agent's answer is a proposal, never a verdict:
 ## What would change in this plugin
 
 1. Parser (`engine/parser.lua`). Keep the rule's own text — the prose under the
-   block, up to the next heading or rule block — which today is dropped, and
+   block, up to the next heading or rule block — which today is dropped, plus
+   the nearest heading above it (`section`, what a rules list groups by), and
    recognise an optional `agent = { question, include, max_files }` field. A
    block without it behaves exactly as now.
 2. Block evaluation. `load("return {" .. body .. "}")` runs with the full
@@ -30,8 +31,11 @@ An agent's answer is a proposal, never a verdict:
    from a folder you did not write cannot run arbitrary code just by being
    loaded. `lua_predicate` stays available where the host trusts the ruleset.
 3. `engine/agent/plan.lua` and `engine/agent/validate.lua`, pure functions with
-   no `vim.api` and no network. `plan(rule, root)` builds the request;
-   `validate(rule, text, root)` parses the answer and checks every quoted line
+   no `vim.api` and no network. `plan(rules, root)` returns requests batched
+   per scope: several rules that look at the same files share one request, the
+   scope is set per family in `.rules.json` or `setup()` and can be overridden
+   per rule. `validate(rule, text, root)` parses the answer and checks every
+   quoted line
    against the tree as it is now, dropping what does not occur there. Sending
    the request is the host's job.
 4. A verdict store next to `.rules-waivers.json`, written only by an accept.
