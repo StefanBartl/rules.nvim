@@ -171,7 +171,7 @@ Your feedback is very welcome. Use the
 bugs, suggest features or ask usage questions; anything more open-ended fits
 a [discussion](https://github.com/StefanBartl/rules.nvim/discussions).
 
-If you find this plugin useful, a ⭐ on GitHub supports its development.
+If you find this plugin useful, a star on GitHub supports its development.
 
 ## License
 
