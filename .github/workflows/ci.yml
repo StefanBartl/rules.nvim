@@ -32,10 +32,10 @@ jobs:
       # stopped publishing the tarball it downloads). Which interpreter runs
       # luacheck is independent of what it checks against -- `std = "luajit"`
       # in .luacheckrc is what pins that.
-      - uses: leafo/gh-actions-lua@v10
+      - uses: leafo/gh-actions-lua@v13
         with:
           luaVersion: "5.4"
-      - uses: leafo/gh-actions-luarocks@v4
+      - uses: leafo/gh-actions-luarocks@v6
       - run: luarocks install luacheck 1.2.0
       - run: luacheck lua TESTS
 
