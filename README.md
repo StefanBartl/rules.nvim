@@ -17,6 +17,9 @@
 [![Neovim](https://img.shields.io/badge/Neovim-0.10%2B-57A143?logo=neovim&logoColor=white)](https://neovim.io)
 [![Lua](https://img.shields.io/badge/Lua-5.1%2FLuaJIT-2C2D72?logo=lua&logoColor=white)](https://www.lua.org)
 ![Status](https://img.shields.io/badge/status-alpha-red)
+[![wkd](https://img.shields.io/badge/wkd-family-c6ff3d)](https://stefanbartl.github.io/wkd/p/rules/)
+
+> Part of the [wkd](https://stefanbartl.github.io/wkd/) family — see this plugin's [page](https://stefanbartl.github.io/wkd/p/rules/) on the site.
 
 A rule/checklist engine for Neovim. `rules.nvim` reads a set of rules you
 point it at, runs whichever of them can be checked mechanically against a
