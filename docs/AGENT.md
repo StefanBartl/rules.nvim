@@ -6,8 +6,8 @@ it changes what `:Rules check` and `:Rules gate` do today.
 A rule with no `check` is a `manual` result: a worklist entry for "a human or
 an agent session". This page is what "an agent session" would concretely be,
 seen from this plugin. The whole design, spanning four repositories, is in
-[`RULES_AGENT_CONCEPT.md`](https://github.com/StefanBartl/docmap-desktop/blob/main/docs/RULES_AGENT_CONCEPT.md)
-in `docmap-desktop`; this page lists only what would change **here**.
+`RULES_AGENT_CONCEPT.md`, kept with the author's working notes outside the
+repositories; this page lists only what would change **here**.
 
 ## The line that does not move
 
