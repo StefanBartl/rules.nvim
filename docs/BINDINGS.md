@@ -8,6 +8,7 @@
 | `:Rules gate` | `<name>` (required), `[path]` (defaults to cwd) | `--diff=<git-ref>` (optional), `--format=json` (optional) | Runs every family configured for gate `name` (`setup({ gates = {...} })`) as one combined report. `--diff=<git-ref>` narrows findings to files changed since that ref (`git diff --name-only` + untracked files) — a rule with no findings inside the diff reports as `pass` even if the repo has standing issues elsewhere. `--format=json` behaves like `:Rules check`'s. A configured family matching zero loaded rules (typo, or not migrated yet) warns instead of silently shrinking the gate |
 | `:Rules show` | `<id>` (required) | — | Jumps to one rule's source location by its exact id, without running a family check. Errors if no loaded rule has that id |
 | `:Rules stats` | — | `--format=json` (optional) | Structural overview of every loaded rule: per-family totals, automated-vs-manual split, severity breakdown. No check runs — pure catalog metadata |
+| `:Rules messages` | — | — | Opens this plugin's notify history (toast + `:messages` log, via `lib.nvim.notify.popup`) |
 
 No default keymaps are bound. `--family=`, a gate's `<name>`, and `:Rules
 show`'s `<id>` all tab-complete against whatever is actually loaded/

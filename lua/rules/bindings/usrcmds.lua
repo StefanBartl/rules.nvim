@@ -1,6 +1,8 @@
 ---@module 'rules.bindings.usrcmds'
 ---@brief The `:Rules <subcommand>` verb, built via lib.nvim's composer.
 
+local notify = require("rules.util.notify")
+
 local M = {}
 
 --- Register two argtypes with the shared composer registry so `--family=`
@@ -75,7 +77,7 @@ function M.setup()
         desc = "Sweep one rule family (--family=PREFIX) across PATH (default: cwd), --format=json for machine-readable output",
         run = function(ctx)
           if not ctx.flags.family then
-            vim.notify("[rules.nvim] :Rules check needs --family=<PREFIX>, e.g. --family=DEP", vim.log.levels.ERROR)
+            notify.error(":Rules check needs --family=<PREFIX>, e.g. --family=DEP")
             return
           end
           if ctx.flags.format == "json" then
@@ -99,13 +101,13 @@ function M.setup()
         desc = "Run a configured gate (setup({ gates = {...} })), --diff=<git-ref> to scope to that diff",
         run = function(ctx)
           if not ctx.args.name then
-            vim.notify("[rules.nvim] :Rules gate needs a name, e.g. :Rules gate release", vim.log.levels.ERROR)
+            notify.error(":Rules gate needs a name, e.g. :Rules gate release")
             return
           end
           if ctx.flags.format == "json" then
             local json, _, _, err = require("rules").run_gate_json(ctx.args.name, ctx.args.path, ctx.flags.diff)
             if err then
-              vim.notify("[rules.nvim] " .. err, vim.log.levels.ERROR)
+              notify.error(err)
             else
               print(json)
             end
@@ -121,7 +123,7 @@ function M.setup()
         run = function(ctx)
           local rule = require("rules").find_rule(ctx.args.id)
           if not rule then
-            vim.notify(("[rules.nvim] no loaded rule with id %q"):format(ctx.args.id), vim.log.levels.ERROR)
+            notify.error(("no loaded rule with id %q"):format(ctx.args.id))
             return
           end
 
@@ -131,16 +133,13 @@ function M.setup()
           -- must not surface in place of this plugin's own notify style.
           local edit_ok, edit_err = pcall(vim.cmd.edit, vim.fn.fnameescape(rule.source_file))
           if not edit_ok then
-            vim.notify(("[rules.nvim] could not open %s: %s"):format(rule.source_file, edit_err), vim.log.levels.ERROR)
+            notify.error(("could not open %s: %s"):format(rule.source_file, edit_err))
             return
           end
 
           local cursor_ok, cursor_err = pcall(vim.api.nvim_win_set_cursor, 0, { rule.source_line, 0 })
           if not cursor_ok then
-            vim.notify(
-              ("[rules.nvim] opened %s but could not jump to line %d: %s"):format(rule.source_file, rule.source_line, cursor_err),
-              vim.log.levels.WARN
-            )
+            notify.warn(("opened %s but could not jump to line %d: %s"):format(rule.source_file, rule.source_line, cursor_err))
           end
         end,
       },
@@ -155,6 +154,13 @@ function M.setup()
           else
             require("rules.report.stats").open(stats)
           end
+        end,
+      },
+      {
+        path = { "messages" },
+        desc = "Open this plugin's notify history (toast + :messages log)",
+        run = function()
+          require("lib.nvim.notify.popup").show_history("rules")
         end,
       },
     },

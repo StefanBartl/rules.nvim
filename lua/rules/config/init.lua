@@ -2,6 +2,7 @@
 ---@brief Merge setup() options over DEFAULTS.
 
 local DEFAULTS = require("rules.config.DEFAULTS")
+local notify = require("rules.util.notify")
 
 local M = {}
 
@@ -58,7 +59,7 @@ local function warn_unknown_keys(opts)
   end
   if #unknown > 0 then
     table.sort(unknown)
-    vim.notify(("[rules.nvim] setup(): unknown option(s) ignored: %s"):format(table.concat(unknown, ", ")), vim.log.levels.WARN)
+    notify.warn(("setup(): unknown option(s) ignored: %s"):format(table.concat(unknown, ", ")))
   end
 end
 
@@ -70,10 +71,7 @@ end
 ---@return table validated  only the keys that passed validation
 local function validate(opts)
   if type(opts) ~= "table" then
-    vim.notify(
-      ("[rules.nvim] setup() expects a table, got %s -- ignoring, falling back to defaults"):format(type(opts)),
-      vim.log.levels.WARN
-    )
+    notify.warn(("setup() expects a table, got %s -- ignoring, falling back to defaults"):format(type(opts)))
     return {}
   end
 
@@ -84,10 +82,7 @@ local function validate(opts)
     if is_string_list(opts.rulesets) then
       out.rulesets = opts.rulesets
     else
-      vim.notify(
-        "[rules.nvim] setup({ rulesets = ... }) must be a list of strings -- ignoring, falling back to default",
-        vim.log.levels.WARN
-      )
+      notify.warn("setup({ rulesets = ... }) must be a list of strings -- ignoring, falling back to default")
     end
   end
 
@@ -104,10 +99,7 @@ local function validate(opts)
     if gates_ok then
       out.gates = opts.gates
     else
-      vim.notify(
-        '[rules.nvim] setup({ gates = ... }) must be { name = {"PREFIX", ...}, ... } -- ignoring, falling back to default',
-        vim.log.levels.WARN
-      )
+      notify.warn('setup({ gates = ... }) must be { name = {"PREFIX", ...}, ... } -- ignoring, falling back to default')
     end
   end
 

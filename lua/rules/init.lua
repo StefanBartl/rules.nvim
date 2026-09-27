@@ -7,6 +7,7 @@ local loader = require("rules.engine.loader")
 local runner = require("rules.engine.runner")
 local waivers = require("rules.engine.waivers")
 local gate = require("rules.engine.gate")
+local notify = require("rules.util.notify")
 
 ---@type table<"critical"|"recommended"|"nice-to-have", integer>
 local ZERO_SEVERITY = { critical = 0, recommended = 0, ["nice-to-have"] = 0 }
@@ -25,7 +26,7 @@ end
 function M.load_rules()
   local rules, errors = loader.load(config.get().rulesets)
   for _, err in ipairs(errors) do
-    vim.notify("[rules.nvim] " .. err, vim.log.levels.WARN)
+    notify.warn(err)
   end
   return rules
 end
@@ -36,7 +37,7 @@ end
 local function load_waivers(root)
   local repo_waivers, err = waivers.load(root)
   if err then
-    vim.notify("[rules.nvim] " .. err, vim.log.levels.WARN)
+    notify.warn(err)
   end
   return repo_waivers
 end
@@ -55,10 +56,7 @@ local function run_family(family_prefix, path)
   local root = path or vim.fn.getcwd()
   local rules = M.load_rules()
   if #gate.unknown_families(rules, { family_prefix }) > 0 then
-    vim.notify(
-      ("[rules.nvim] --family=%q matches no loaded rule -- typo in the prefix, or not loaded/migrated yet"):format(family_prefix),
-      vim.log.levels.WARN
-    )
+    notify.warn(("--family=%q matches no loaded rule -- typo in the prefix, or not loaded/migrated yet"):format(family_prefix))
   end
   return runner.check_family(rules, family_prefix, root, load_waivers(root))
 end
@@ -81,12 +79,8 @@ local function run_gate_results(gate_name, path, diff_ref)
   local root = path or vim.fn.getcwd()
   local rules = M.load_rules()
   for _, family in ipairs(gate.unknown_families(rules, families)) do
-    vim.notify(
-      ("[rules.nvim] gate %q: family %q matches no loaded rule -- typo in gates config, or not migrated yet"):format(
-        gate_name,
-        family
-      ),
-      vim.log.levels.WARN
+    notify.warn(
+      ("gate %q: family %q matches no loaded rule -- typo in gates config, or not migrated yet"):format(gate_name, family)
     )
   end
   local results = gate.run(rules, families, root, load_waivers(root))
@@ -140,7 +134,7 @@ end
 function M.run_gate(gate_name, path, diff_ref)
   local results, err = run_gate_results(gate_name, path, diff_ref)
   if not results then
-    vim.notify("[rules.nvim] " .. err, vim.log.levels.ERROR)
+    notify.error(err)
     return nil
   end
   require("rules.report.quickfix").set(results)
