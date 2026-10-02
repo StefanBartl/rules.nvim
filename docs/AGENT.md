@@ -1,7 +1,8 @@
 # Agent-run manual rules (planned)
 
-Status: a plan, not a feature. Nothing described here exists yet, and none of
-it changes what `:Rules check` and `:Rules gate` do today.
+Status: a plan, with its first step built. The parser and the sandboxed block
+evaluation (items 1 and 2 below) exist; the agent itself (items 3 to 5) does
+not. None of it changes what `:Rules check` and `:Rules gate` report.
 
 A rule with no `check` is a `manual` result: a worklist entry for "a human or
 an agent session". This page is what "an agent session" would concretely be,
@@ -21,15 +22,17 @@ An agent's answer is a proposal, never a verdict:
 
 ## What would change in this plugin
 
-1. Parser (`engine/parser.lua`). Keep the rule's own text — the prose under the
-   block, up to the next heading or rule block — which today is dropped, plus
-   the nearest heading above it (`section`, what a rules list groups by), and
-   recognise an optional `agent = { question, include, max_files }` field. A
-   block without it behaves exactly as now.
-2. Block evaluation. `load("return {" .. body .. "}")` runs with the full
-   environment today. Evaluate in an empty environment instead, so a ruleset
-   from a folder you did not write cannot run arbitrary code just by being
-   loaded. `lua_predicate` stays available where the host trusts the ruleset.
+1. ~~Parser (`engine/parser.lua`).~~ **Built (P0).** It keeps the rule's own
+   text (`text`), its heading (`title`) and the section above it (`section`),
+   and validates an optional `agent = { question, include, max_files }` field.
+   A block without it behaves exactly as before: measured against the real
+   corpus (430 rules, 69 files), the old and the new parser find the same
+   rules and every one of the 32 checked rules gets the same status. See
+   [RULESET-FORMAT.md](RULESET-FORMAT.md).
+2. ~~Block evaluation.~~ **Built (P0).** A block body is evaluated in an empty
+   environment, under an instruction budget. `lua_predicate` runs only where the
+   host trusts predicates (`setup({ lua_predicates = ... })`, or a per-rule
+   function for a host with its own trust list).
 3. `engine/agent/plan.lua` and `engine/agent/validate.lua`, pure functions with
    no `vim.api` and no network. `plan(rules, root)` returns requests batched
    per scope: several rules that look at the same files share one request, the

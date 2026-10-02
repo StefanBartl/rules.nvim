@@ -21,11 +21,12 @@ local M = {}
 ---@param families string[]
 ---@param root string
 ---@param waivers Rules.Waivers|nil
+---@param opts Rules.RunOpts|nil
 ---@return Rules.Result[]
-function M.run(rules, families, root, waivers)
+function M.run(rules, families, root, waivers, opts)
   local results = {}
   for _, family in ipairs(families) do
-    vim.list_extend(results, runner.check_family(rules, family, root, waivers))
+    vim.list_extend(results, runner.check_family(rules, family, root, waivers, opts))
   end
   return results
 end
