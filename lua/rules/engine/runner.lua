@@ -26,16 +26,26 @@ local M = {}
 ---   trusted -- inside one's own Neovim, pointed at one's own rulesets, that is the design
 
 --- Whether `rule`'s predicate may run under `opts`.
+---
+--- Only a `lua_predicate` rule asks: the policy can be a host callback that
+--- hashes files or reads a trust store, and consulting it for every `grep` and
+--- `file_exists` rule of a family would repeat that work for an answer nothing
+--- reads. A callback that throws means "not trusted" -- it must not abort the
+--- family run, which reports one broken rule as `error` and carries on.
 ---@param opts Rules.RunOpts|nil
 ---@param rule Rules.ParsedRule
 ---@return boolean
 local function predicates_allowed(opts, rule)
+  if not (rule.check and rule.check.type == "lua_predicate") then
+    return true
+  end
   local policy = opts and opts.lua_predicates
   if policy == nil then
     return true
   end
   if type(policy) == "function" then
-    return policy(rule) == true
+    local ok, allowed = pcall(policy, rule)
+    return ok and allowed == true
   end
   return policy == true
 end

@@ -73,6 +73,40 @@ describe("rules.engine.runner.check_family lua_predicates", function()
     assert.are.equal("pass", results[2].status)
   end)
 
+  it("does not consult the policy for a rule that has no predicate", function()
+    local asked = {}
+    local mixed = {
+      { id = "ASK-01", severity = "recommended", check = { type = "file_exists", path = "a.lua" } },
+      { id = "ASK-02", severity = "recommended" },
+      predicate_rule("ASK-03"),
+    }
+    local dir = tmp_dir()
+    vim.fn.writefile({ "x" }, dir .. "/a.lua")
+
+    runner.check_family(mixed, "ASK", dir, {}, {
+      lua_predicates = function(rule)
+        asked[#asked + 1] = rule.id
+        return true
+      end,
+    })
+
+    assert.are.same({ "ASK-03" }, asked)
+  end)
+
+  it("treats a policy that throws as untrusted instead of aborting the family", function()
+    local results = runner.check_family(predicates, "PRD", tmp_dir(), {}, {
+      lua_predicates = function()
+        error("trust store unreadable")
+      end,
+    })
+
+    assert.are.equal(2, #results)
+    for _, res in ipairs(results) do
+      assert.are.equal("error", res.status)
+      assert.matches("predicate not trusted", res.findings[1].text)
+    end
+  end)
+
   it("does not touch the other check types when predicates are off", function()
     local mixed = {
       { id = "MIX-01", severity = "recommended", check = { type = "file_exists", path = "a.lua" } },

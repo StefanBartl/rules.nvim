@@ -317,3 +317,69 @@ describe("rules.engine.parser sandbox", function()
     assert.are.equal("DEP-02", rules[1].id)
   end)
 end)
+
+describe("rules.engine.parser bounds on a block's own text", function()
+  --- A one-rule file whose block carries `extra` as additional fields.
+  ---@param extra string[]
+  ---@return string
+  local function file_with(extra)
+    local lines = { "```rule", 'id = "BND-01",', 'severity = "recommended",' }
+    vim.list_extend(lines, extra)
+    vim.list_extend(lines, { "```" })
+    return write_tmp(lines)
+  end
+
+  it("rejects an id with a control character, so a report line cannot be split", function()
+    -- the backslash-n lives inside the block's Lua string, so it is built here;
+    -- written as an escape it would become a real line break of the file
+    local backslash = string.char(92)
+    local path = write_tmp({ "```rule", 'id = "BND' .. backslash .. 'n01",', 'severity = "recommended",', "```" })
+
+    local rules, errors = parser.extract_rules(path)
+
+    assert.are.equal(0, #rules)
+    assert.matches("control characters", errors[1])
+  end)
+
+  it("rejects an id that is longer than a rule id has any reason to be", function()
+    local path = write_tmp({ "```rule", 'id = "' .. string.rep("A", 101) .. '",', 'severity = "recommended",', "```" })
+
+    local rules, errors = parser.extract_rules(path)
+
+    assert.are.equal(0, #rules)
+    assert.matches("at most 100 bytes", errors[1])
+  end)
+
+  it("drops an oversized agent question but keeps the rule", function()
+    local path = file_with({ 'agent = { question = "' .. string.rep("q", 4001) .. '" },' })
+
+    local rules, errors = parser.extract_rules(path)
+
+    assert.are.equal(1, #rules)
+    assert.is_nil(rules[1].agent)
+    assert.matches("longer than 4000 bytes", errors[1])
+  end)
+
+  it("drops an agent whose include list is unreasonably long", function()
+    local globs = {}
+    for i = 1, 51 do
+      globs[i] = '"lua/' .. i .. '/**/*.lua"'
+    end
+    local path = file_with({ "agent = { include = { " .. table.concat(globs, ", ") .. " } }," })
+
+    local rules, errors = parser.extract_rules(path)
+
+    assert.are.equal(1, #rules)
+    assert.is_nil(rules[1].agent)
+    assert.matches("more than 50 entries", errors[1])
+  end)
+
+  it("still accepts an ordinary agent block", function()
+    local path = file_with({ 'agent = { question = "Is it?", include = { "lua/**/*.lua" }, max_files = 3 },' })
+
+    local rules, errors = parser.extract_rules(path)
+
+    assert.are.equal(0, #errors)
+    assert.are.equal("Is it?", rules[1].agent.question)
+  end)
+end)
