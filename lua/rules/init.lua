@@ -42,6 +42,12 @@ local function load_waivers(root)
   return repo_waivers
 end
 
+--- Host policy for a run, from `setup()`.
+---@return Rules.RunOpts
+local function run_opts()
+  return { lua_predicates = config.get().lua_predicates }
+end
+
 --- Shared by `check_family`/`check_family_json`: load rules and this root's
 --- waivers (`.rules-waivers.json`, see `docs/BINDINGS.md`), then run one
 --- family. Warns when `family_prefix` matches zero loaded rules -- a family
@@ -58,7 +64,7 @@ local function run_family(family_prefix, path)
   if #gate.unknown_families(rules, { family_prefix }) > 0 then
     notify.warn(("--family=%q matches no loaded rule -- typo in the prefix, or not loaded/migrated yet"):format(family_prefix))
   end
-  return runner.check_family(rules, family_prefix, root, load_waivers(root))
+  return runner.check_family(rules, family_prefix, root, load_waivers(root), run_opts())
 end
 
 --- Shared by `run_gate`/`run_gate_json`.
@@ -83,7 +89,7 @@ local function run_gate_results(gate_name, path, diff_ref)
       ("gate %q: family %q matches no loaded rule -- typo in gates config, or not migrated yet"):format(gate_name, family)
     )
   end
-  local results = gate.run(rules, families, root, load_waivers(root))
+  local results = gate.run(rules, families, root, load_waivers(root), run_opts())
 
   if diff_ref then
     local changed, err = gate.diff_files(root, diff_ref)

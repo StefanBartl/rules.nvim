@@ -32,6 +32,12 @@ above works as written; a path that still resolves to neither a directory
 nor a readable `.md` file is a load error, notified rather than silently
 loading zero rules.
 
+`lua_predicates` (boolean, default `true`) decides whether `lua_predicate`
+checks may run. A rule block body is always evaluated in an empty environment,
+but a predicate is arbitrary Lua that runs later; set `lua_predicates = false`
+to run a ruleset you did not write, and each predicate then reports `error`
+("predicate not trusted") instead of running. See docs/RULESET-FORMAT.md.
+
 ==============================================================================
 COMMANDS                                                        *rules-commands*
 

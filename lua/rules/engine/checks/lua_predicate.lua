@@ -9,6 +9,7 @@
 -- arbitrary user code that can fail arbitrarily deep).
 local safe_error = require("lib.lua.error")
 local errline = require("rules.engine.checks.errline")
+local sandbox = require("rules.util.sandbox")
 
 local M = {}
 
@@ -33,14 +34,26 @@ local function validate_findings(findings)
   return true, nil
 end
 
+--- A predicate is arbitrary Lua, and a parsed one is created in an empty
+--- environment (see `rules.util.sandbox`): it only gets `vim`, `string`, `io`
+--- back when the host trusts predicates, and says so loudly when it does not --
+--- the rule reports `error`, it never silently drops out of the run.
 ---@param spec Rules.Check.LuaPredicate
 ---@param root string
+---@param _ctx table|nil  unused; the shared cache is `grep`'s
+---@param opts { lua_predicates?: boolean }|nil  `lua_predicates = false` refuses to run
+---   a predicate; absent means trusted, as before
 ---@return "pass"|"fail"|"error" status
 ---@return Rules.Finding[] findings
-function M.run(spec, root)
+function M.run(spec, root, _ctx, opts)
   if type(spec.fn) ~= "function" then
     return "error", { { file = root, line = 1, text = "lua_predicate check has no `fn`" } }
   end
+
+  if opts and opts.lua_predicates == false then
+    return "error", { { file = root, line = 1, text = "predicate not trusted (lua_predicates is off)" } }
+  end
+  sandbox.rebind(spec.fn)
 
   local ok, passed, findings_or_msg = safe_error.safe_call(spec.fn, root)
   if not ok then

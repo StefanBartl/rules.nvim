@@ -24,7 +24,7 @@ local function is_string_list(list)
 end
 
 ---@type table<string, true>
-local KNOWN_KEYS = { rulesets = true, gates = true }
+local KNOWN_KEYS = { rulesets = true, gates = true, lua_predicates = true }
 
 --- An unknown top-level key, with the nearest known one as a hint when
 --- there is a plausible one -- same shape as lib.config's own
@@ -100,6 +100,14 @@ local function validate(opts)
       out.gates = opts.gates
     else
       notify.warn('setup({ gates = ... }) must be { name = {"PREFIX", ...}, ... } -- ignoring, falling back to default')
+    end
+  end
+
+  if opts.lua_predicates ~= nil then
+    if type(opts.lua_predicates) == "boolean" then
+      out.lua_predicates = opts.lua_predicates
+    else
+      notify.warn("setup({ lua_predicates = ... }) must be a boolean -- ignoring, falling back to default")
     end
   end
 

@@ -33,10 +33,69 @@ same as any Lua table literal.
 | `id` | yes | a stable string, never reused once a rule is retired |
 | `severity` | yes | `"critical"` \| `"recommended"` \| `"nice-to-have"` |
 | `check` | no | see below — omit it entirely for a rule with no automated check |
+| `agent` | no | a hint for an agent working a rule that has no `check` — see below |
 
 A rule's **family** is its ID's leading letters (`"DEP"` for `"DEP-01"`) —
 there is no separate family field. `:Rules check --family=<PREFIX>` matches
 on this.
+
+## What the parser adds
+
+The block cannot say where it sits or what is written under it, so the parser
+reads that from the Markdown around it:
+
+| Field | Value |
+| --- | --- |
+| `text` | the prose under the block, up to the next heading or the next rule block, without the blank lines and `---` rules that only frame it. `""` when there is none |
+| `title` | the heading the rule sits under, when that heading names the rule (`` #### `DEP-06` — … ``). Otherwise `nil` |
+| `section` | the heading above the rule's own title; when the nearest heading does not name the rule, that heading itself. This is what a catalog groups by |
+| `source_file`, `source_line` | where the block starts |
+
+A `#` line inside another fenced block (a shell comment in an example) is not
+a heading. These fields belong to the parser: a block that sets one of them has
+it overwritten.
+
+## The `agent` field
+
+```lua
+agent = {
+  question  = "Does any exported function here take more than 5 positional parameters?",
+  include   = { "lua/**/*.lua" },
+  max_files = 20,
+},
+```
+
+Optional, and only a hint — it changes nothing about `:Rules check`. `question`
+replaces the generic "does the code comply with the rule text", `include` says
+where to look, `max_files` caps how many files one request carries. An invalid
+`agent` (an unknown key, an empty `question`, an `include` that is not a list of
+strings, a `max_files` that is not a positive integer) is **dropped and
+reported**, and the rule itself stays: losing a rule from a gate over a typo in
+an optional hint would be the worse failure.
+
+## A ruleset is code
+
+A ruleset is Lua, and a folder you did not write is a stranger's Lua. Two
+things follow, and they are different in kind:
+
+- **A block body is evaluated in an empty environment.** It cannot call
+  `os.execute`, `io.open`, `require` or anything on `vim`; a body that tries
+  fails as a malformed block, reported like any other, and the rest of the file
+  still loads. This is a boundary on *what* a ruleset can do, not on *how much*
+  it can use: string methods stay reachable through a literal, so a hostile
+  ruleset can still allocate memory. What it cannot do is touch the disk, a
+  process or the network — and a loop that never ends is stopped by an
+  instruction budget.
+- **A `lua_predicate` is arbitrary code that runs later, with the real
+  environment.** `setup({ lua_predicates = false })` refuses to run any: each
+  one reports `error` with `predicate not trusted`, visibly, rather than
+  dropping out of the run. The default is `true` — your own rulesets in your
+  own Neovim. Everything that is not a predicate (`grep`, `file_exists`,
+  `file_absent`, `json_key_absent`, rules with no check) runs either way.
+
+A host that keeps its own trust list can pass `lua_predicates` as a function
+`(rule) -> boolean` to `runner.check_family`/`gate.run` (the rule carries its
+`source_file`), so one trusted file does not trust every file.
 
 ## `check` types
 

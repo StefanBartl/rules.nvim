@@ -15,7 +15,7 @@ local M = {}
 --- field and starting an unnamed one, not as a second return value -- named
 --- here instead of inline, same reasoning as the rule's own example.
 ---@class Rules.CheckImpl
----@field run fun(spec: table, root: string, ctx: table|nil): ("pass"|"fail"|"error"), Rules.Finding[]
+---@field run fun(spec: table, root: string, ctx: table|nil, opts: Rules.RunOpts|nil): ("pass"|"fail"|"error"), Rules.Finding[]
 
 ---@type table<string, Rules.CheckImpl>
 local BY_TYPE = {
@@ -32,9 +32,11 @@ local BY_TYPE = {
 ---@param ctx table|nil  shared cache for one `check_family` run; only
 ---   `grep` uses it today (memoized file listing/contents), other check
 ---   types ignore the extra argument
+---@param opts Rules.RunOpts|nil  host policy for this run; only `lua_predicate`
+---   reads it today
 ---@return "pass"|"fail"|"error"|"manual" status
 ---@return Rules.Finding[] findings
-function M.run(check, root, ctx)
+function M.run(check, root, ctx, opts)
   if check == nil then
     return "manual", {}
   end
@@ -46,7 +48,7 @@ function M.run(check, root, ctx)
   -- ERR-01: this is a system boundary -- a malformed ruleset-authored spec
   -- (an unescaped Lua pattern, a wrong-shaped `spec` table) must fail just
   -- this one rule, not abort the whole family run before any report opens.
-  local ok, status, findings = safe_error.safe_call(impl.run, check, root, ctx)
+  local ok, status, findings = safe_error.safe_call(impl.run, check, root, ctx, opts)
   if not ok then
     -- `status.message` is a full multi-line `debug.traceback()` string --
     -- embedding it as-is would crash `report/buffer.lua`'s render instead

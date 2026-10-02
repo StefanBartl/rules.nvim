@@ -66,6 +66,11 @@ unset env var, a ruleset that hasn't been cloned yet) is a load error,
 notified the same way a malformed rule block is — never a silent zero
 rules loaded.
 
+`lua_predicates` (default `true`) controls whether `lua_predicate` checks may
+run. Set it to `false` for a ruleset you did not write: each predicate then
+reports `error` ("predicate not trusted") instead of running, and every other
+check type runs as usual. See [RULESET-FORMAT.md](RULESET-FORMAT.md).
+
 ```vim
 :Rules gate release
 :Rules gate review --diff=main
