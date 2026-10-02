@@ -30,7 +30,7 @@ same as any Lua table literal.
 
 | Field | Required | Meaning |
 | --- | --- | --- |
-| `id` | yes | a stable string, never reused once a rule is retired |
+| `id` | yes | a stable string, never reused once a rule is retired; at most 100 bytes, no control characters |
 | `severity` | yes | `"critical"` \| `"recommended"` \| `"nice-to-have"` |
 | `check` | no | see below — omit it entirely for a rule with no automated check |
 | `agent` | no | a hint for an agent working a rule that has no `check` — see below |
@@ -69,7 +69,8 @@ Optional, and only a hint — it changes nothing about `:Rules check`. `question
 replaces the generic "does the code comply with the rule text", `include` says
 where to look, `max_files` caps how many files one request carries. An invalid
 `agent` (an unknown key, an empty `question`, an `include` that is not a list of
-strings, a `max_files` that is not a positive integer) is **dropped and
+strings, a `max_files` that is not a positive integer, a `question` over 4000 bytes,
+an `include` with more than 50 entries or an entry over 200 bytes) is **dropped and
 reported**, and the rule itself stays: losing a rule from a gate over a typo in
 an optional hint would be the worse failure.
 

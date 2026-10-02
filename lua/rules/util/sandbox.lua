@@ -10,8 +10,11 @@
 --- one C call), so a hostile ruleset can still burn memory. What it cannot do
 --- is touch the disk, a process or the network, and -- because the evaluation
 --- runs under an instruction budget with the JIT off -- it cannot hang the host
---- in a loop (measured: `while true do end` aborts in ~2 ms, where a bare
---- count hook never fires inside a JIT-compiled loop).
+--- in a *Lua* loop (measured: `while true do end` aborts in ~2 ms, where a bare
+--- count hook never fires inside a JIT-compiled loop). The budget counts VM
+--- instructions, so it does not see time spent inside one C call: a pattern with
+--- nested quantifiers handed to `find` on a long literal can still run for a
+--- long while. That is the same resource boundary as the memory case above.
 ---
 --- A `check.fn` of a `lua_predicate` is a closure created in that empty
 --- environment, so as written it would see no `vim`, no `string`, no `ipairs`.

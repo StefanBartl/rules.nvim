@@ -52,6 +52,15 @@ local VALID_SEVERITIES = { critical = true, recommended = true, ["nice-to-have"]
 ---@type table<string, true>
 local AGENT_KEYS = { question = true, include = true, max_files = true }
 
+--- Bounds on what a block may say. A ruleset can come from a folder nobody
+--- wrote by hand, and these strings end up in reports, prompts and globs: a
+--- megabyte `question` or an id with a newline in it is not a rule, it is
+--- something that breaks the next consumer.
+local MAX_ID_BYTES = 100
+local MAX_QUESTION_BYTES = 4000
+local MAX_INCLUDE_ENTRIES = 50
+local MAX_GLOB_BYTES = 200
+
 --- A string with no content once whitespace is gone.
 ---@param s any
 ---@return boolean
@@ -79,19 +88,25 @@ local function validate_agent(agent)
   if agent.question ~= nil and is_blank(agent.question) then
     return nil, "`question` must be a non-empty string"
   end
+  if agent.question ~= nil and #agent.question > MAX_QUESTION_BYTES then
+    return nil, ("`question` is longer than %d bytes"):format(MAX_QUESTION_BYTES)
+  end
 
   if agent.include ~= nil then
     local ok = type(agent.include) == "table" and vim.islist(agent.include) and #agent.include > 0
     if ok then
       for _, glob in ipairs(agent.include) do
-        if is_blank(glob) then
+        if is_blank(glob) or #glob > MAX_GLOB_BYTES then
           ok = false
           break
         end
       end
     end
     if not ok then
-      return nil, "`include` must be a non-empty list of non-empty strings"
+      return nil, ("`include` must be a non-empty list of non-empty strings (each up to %d bytes)"):format(MAX_GLOB_BYTES)
+    end
+    if #agent.include > MAX_INCLUDE_ENTRIES then
+      return nil, ("`include` has more than %d entries"):format(MAX_INCLUDE_ENTRIES)
     end
   end
 
@@ -221,6 +236,12 @@ function M.extract_rules(file_path)
           errors[#errors + 1] = ("%s:%d: %s"):format(file_path, block_start, eval_err)
         elseif type(rule.id) ~= "string" or rule.id == "" then
           errors[#errors + 1] = ("%s:%d: rule block has no string `id`"):format(file_path, block_start)
+        elseif #rule.id > MAX_ID_BYTES or rule.id:find("%c") then
+          errors[#errors + 1] = ("%s:%d: rule `id` must be at most %d bytes with no control characters"):format(
+            file_path,
+            block_start,
+            MAX_ID_BYTES
+          )
         elseif type(rule.severity) ~= "string" then
           errors[#errors + 1] = ("%s:%d: rule %s has no string `severity`"):format(file_path, block_start, rule.id)
         elseif not VALID_SEVERITIES[rule.severity] then
