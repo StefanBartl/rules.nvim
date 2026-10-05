@@ -102,8 +102,8 @@ A host that keeps its own trust list can pass `lua_predicates` as a function
 
 | `type` | Fields | What it does |
 | --- | --- | --- |
-| `grep` | `pattern` (Lua pattern) or `patterns` (list, any-of), `unless` (optional), `include` (optional, default `"%.lua$"`) | flags every line under the checked path matching `pattern`/one of `patterns`, unless it also matches `unless` |
-| `file_exists` / `file_absent` | `path` (relative) | a required/forbidden file or directory |
+| `grep` | `pattern` (Lua pattern) or `patterns` (list, any-of), `unless` (optional), `include` or `includes` (optional, default `"%.lua$"`), `excludes` (optional) | flags every line under the checked path matching `pattern`/one of `patterns`, unless it also matches `unless` |
+| `file_exists` / `file_absent` | `path` (relative) or `paths` (list, any-of); a `*` makes it a glob | a required/forbidden file or directory |
 | `json_key_absent` | `path`, `key` (dotted, e.g. `"workspace.library"`) | fails if the key is set in the JSON file; passes if the file or the key is missing |
 | `lua_predicate` | `fn(root) -> ok, findings_or_message` | anything the above can't express |
 
@@ -113,6 +113,25 @@ character there, and that pattern would silently match almost nothing. Use
 `patterns` (a list) instead of trying to cram alternation into one pattern —
 that mistake is documented in this project's own history and is exactly what
 `patterns` exists to make unnecessary.
+
+**Which files a `grep` reads.** `include` is one Lua pattern matched against
+the file path; `includes` is a list of them, for a rule that spans file types
+(`includes = { "%.md$", "%.txt$", "%.lua$" }`) — the same reason `patterns`
+exists. Once either is given, the `"%.lua$"` default no longer applies.
+`excludes` is a list of path patterns whose files are skipped entirely, for a
+whole class of call site that is never the hazard the rule means
+(`excludes = { "/TESTS/" }`). `unless` works per line, `excludes` per file.
+
+**Globs in `file_exists` / `file_absent`.** A path containing `*` is matched
+against the files under the checked root: `*` stays inside one path segment,
+a `**` segment spans any number of directories, none included.
+`path = "lua/*/health.lua"` is how a catalog written for every repo names a
+file whose module directory differs per plugin; `paths` takes several
+candidates, globbed or not, and any one of them satisfies the check. Three
+things to know: a glob sees files, not directories; it does not look inside
+`.git`, `.deps` or `.claude`; and the root itself is never read as a pattern,
+which is what a `lua_predicate` calling `vim.fn.glob(root .. "/…")` gets wrong
+on a root containing `~` or `[`.
 
 **A malformed check spec reports `error`, not a crash.** A missing or
 wrong-typed required field (`file_exists`/`file_absent` with no `path`/

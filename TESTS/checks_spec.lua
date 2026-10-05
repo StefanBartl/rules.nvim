@@ -103,6 +103,32 @@ describe("rules.engine.checks.grep", function()
     assert.are.equal("pass", status) -- default include is "%.lua$", so a.txt is skipped
   end)
 
+  it("`includes` scans every file type in the list, and only those", function()
+    local dir = tmp_dir()
+    write_file(dir, "README.md", { "see the wkdbook" })
+    write_file(dir, "help.txt", { "see the wkdbook" })
+    write_file(dir, "a.lua", { "-- see the wkdbook" })
+
+    local status, findings = grep.run({
+      type = "grep",
+      pattern = "wkdbook",
+      includes = { "%.md$", "%.txt$" },
+    }, dir)
+
+    assert.are.equal("fail", status)
+    assert.are.equal(2, #findings) -- a.lua is not in the list: no implicit "%.lua$" once `includes` is given
+  end)
+
+  it("`include` and `includes` together scan a file matching either", function()
+    local dir = tmp_dir()
+    write_file(dir, "README.md", { "hit" })
+    write_file(dir, "a.lua", { "hit" })
+
+    local _, findings = grep.run({ type = "grep", pattern = "hit", include = "%.lua$", includes = { "%.md$" } }, dir)
+
+    assert.are.equal(2, #findings)
+  end)
+
   it("`excludes` skips a whole file even though it matches `include`", function()
     local dir = tmp_dir()
     vim.fn.mkdir(dir .. "/TESTS", "p")
@@ -312,6 +338,75 @@ describe("rules.engine.checks.file_exists", function()
 
     assert.are.equal("error", status)
     assert.are.equal(1, #findings)
+  end)
+
+  it("a `*` in `path` matches any one directory name", function()
+    local dir = tmp_dir()
+    vim.fn.mkdir(dir .. "/lua/myplugin", "p")
+    write_file(dir .. "/lua/myplugin", "health.lua", { "return {}" })
+
+    local status = file_exists.run({ type = "file_exists", path = "lua/*/health.lua" }, dir)
+
+    assert.are.equal("pass", status)
+  end)
+
+  it("a `*` does not cross a directory boundary", function()
+    local dir = tmp_dir()
+    vim.fn.mkdir(dir .. "/lua/myplugin/editor", "p")
+    write_file(dir .. "/lua/myplugin/editor", "health.lua", { "return {}" })
+
+    local status, findings = file_exists.run({ type = "file_exists", path = "lua/*/health.lua" }, dir)
+
+    assert.are.equal("fail", status)
+    assert.are.equal(1, #findings)
+  end)
+
+  it("a `**` segment spans any number of directories, none included", function()
+    local dir = tmp_dir()
+    vim.fn.mkdir(dir .. "/lua/a/b", "p")
+    write_file(dir .. "/lua", "top_spec.lua", { "" })
+
+    assert.are.equal("fail", (file_exists.run({ type = "file_absent", path = "lua/**/*_spec.lua" }, dir)))
+
+    vim.fn.delete(dir .. "/lua/top_spec.lua")
+    assert.are.equal("pass", (file_exists.run({ type = "file_absent", path = "lua/**/*_spec.lua" }, dir)))
+
+    write_file(dir .. "/lua/a/b", "deep_spec.lua", { "" })
+    local status, findings = file_exists.run({ type = "file_absent", path = "lua/**/*_spec.lua" }, dir)
+    assert.are.equal("fail", status)
+    assert.is_true(findings[1].file:find("deep_spec%.lua$") ~= nil)
+  end)
+
+  it("a glob treats every other character literally", function()
+    local dir = tmp_dir()
+    write_file(dir, "axtxt", { "" })
+
+    -- "." must not act as the Lua pattern wildcard it would be unescaped.
+    local status = file_exists.run({ type = "file_exists", path = "*.txt" }, dir)
+
+    assert.are.equal("fail", status)
+  end)
+
+  it("XP-01: a glob still matches under a root that is itself glob syntax", function()
+    -- `vim.fn.glob(root .. "/lua/*/x.lua")` reads `[`/`~` in the ROOT as
+    -- pattern syntax too and silently returns nothing; the literal walk does not.
+    local dir = tmp_dir() .. "/STEFAN~1/a[1]"
+    vim.fn.mkdir(dir .. "/lua/p", "p")
+    write_file(dir .. "/lua/p", "health.lua", { "" })
+
+    local status = file_exists.run({ type = "file_exists", path = "lua/*/health.lua" }, dir)
+
+    assert.are.equal("pass", status)
+  end)
+
+  it("a glob among `paths` is one more any-of candidate", function()
+    local dir = tmp_dir()
+    vim.fn.mkdir(dir .. "/doc", "p")
+    write_file(dir .. "/doc", "rules.txt", { "" })
+
+    local status = file_exists.run({ type = "file_exists", paths = { "README.txt", "doc/*.txt" } }, dir)
+
+    assert.are.equal("pass", status)
   end)
 end)
 

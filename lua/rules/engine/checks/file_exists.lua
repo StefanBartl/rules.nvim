@@ -2,22 +2,88 @@
 ---@brief Check types "file_exists" and "file_absent": a required path is (or
 --- is not) present relative to the checked root.
 
+---@description
+--- A path with a `*` in it is a glob, matched against the files under the
+--- root: `*` stays inside one path segment, a `**` segment spans any number of
+--- directories (none included). That is what a catalog written for every
+--- repo needs -- `lua/*/health.lua` when the module name differs per plugin.
+--- The match runs over the same literal directory walk `grep` uses, never
+--- over `vim.fn.glob`, which reads the *root* as a pattern too (`~`, `[`):
+--- a Windows 8.3 short name in the root would make it silently match nothing.
+--- A glob therefore sees files only, and nothing under the directories the
+--- walk skips (`.git`, `.deps`, `.claude`).
+
+local fswalk = require("rules.engine.fswalk")
+
 local M = {}
 
 ---@class Rules.Check.FileExists
 ---@field type "file_exists"|"file_absent"
----@field path string|nil  relative to the checked root
+---@field path string|nil  relative to the checked root; a glob when it contains `*`
 ---@field paths string[]|nil  any-of a list of relative paths -- for a file
 ---  with more than one accepted spelling (e.g. `stylua.toml` and the equally
 ---  valid `.stylua.toml`, both read by stylua itself). Same `pattern`/
 ---  `patterns` singular-or-list convention `grep` uses; `path` and `paths`
 ---  are mutually exclusive, `path` wins if both are somehow given.
 
+--- One glob segment as an anchored Lua pattern: `*` is any run of characters,
+--- everything else is literal.
+---@param segment string
+---@return string
+local function segment_pattern(segment)
+  return "^" .. vim.pesc(segment):gsub("%%%*", ".*") .. "$"
+end
+
+--- Whether path segments `parts[pi..]` match glob segments `glob[gi..]`.
+---@param glob string[]
+---@param gi integer
+---@param parts string[]
+---@param pi integer
+---@return boolean
+local function segments_match(glob, gi, parts, pi)
+  if gi > #glob then
+    return pi > #parts
+  end
+  if glob[gi] == "**" then
+    for skip = pi, #parts + 1 do
+      if segments_match(glob, gi + 1, parts, skip) then
+        return true
+      end
+    end
+    return false
+  end
+  if pi > #parts or not parts[pi]:find(segment_pattern(glob[gi])) then
+    return false
+  end
+  return segments_match(glob, gi + 1, parts, pi + 1)
+end
+
+--- The first file under `root` matching `glob`, or nil.
+---@param glob string  relative, "/"-separated
+---@param root string
+---@param ctx table|nil
+---@return string|nil full
+local function first_glob_match(glob, root, ctx)
+  local prefix = root:gsub("\\", "/"):gsub("/+$", "") .. "/"
+  local glob_segments = vim.split(glob, "/", { plain = true, trimempty = true })
+  for _, file in ipairs(fswalk.cached_files(root, ctx)) do
+    if file:sub(1, #prefix) == prefix then
+      local parts = vim.split(file:sub(#prefix + 1), "/", { plain = true })
+      if segments_match(glob_segments, 1, parts, 1) then
+        return file
+      end
+    end
+  end
+  return nil
+end
+
 ---@param spec Rules.Check.FileExists
 ---@param root string
+---@param ctx table|nil  shared cache for one `check_family` run; a glob
+---   reuses the file listing `grep` rules of the same run already took
 ---@return "pass"|"fail"|"error" status
 ---@return Rules.Finding[] findings
-function M.run(spec, root)
+function M.run(spec, root, ctx)
   ---@type string[]
   local candidates = spec.path and { spec.path } or (spec.paths or {})
 
@@ -49,9 +115,15 @@ function M.run(spec, root)
 
   local found_full = nil
   for _, p in ipairs(candidates) do
-    local full = root .. "/" .. p
-    if vim.fn.filereadable(full) == 1 or vim.fn.isdirectory(full) == 1 then
-      found_full = full
+    if p:find("*", 1, true) then
+      found_full = first_glob_match(p, root, ctx)
+    else
+      local full = root .. "/" .. p
+      if vim.fn.filereadable(full) == 1 or vim.fn.isdirectory(full) == 1 then
+        found_full = full
+      end
+    end
+    if found_full then
       break
     end
   end
