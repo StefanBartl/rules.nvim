@@ -399,6 +399,40 @@ describe("rules.engine.checks.file_exists", function()
     assert.are.equal("pass", status)
   end)
 
+  it("a root with a trailing separator globs like one without", function()
+    -- Tab completion of a directory and fnamemodify(dir, ":p") hand the root
+    -- over with a trailing separator; the walk then returns `root//lua/...`.
+    local dir = tmp_dir()
+    vim.fn.mkdir(dir .. "/lua/p", "p")
+    write_file(dir .. "/lua/p", "health.lua", { "" })
+
+    for _, root in ipairs({ dir .. "/", dir .. "//", dir .. "\\" }) do
+      assert.are.equal("pass", (file_exists.run({ type = "file_exists", path = "lua/*/health.lua" }, root)))
+      assert.are.equal("fail", (file_exists.run({ type = "file_absent", path = "lua/*/health.lua" }, root)))
+    end
+  end)
+
+  it("a glob accepts `./`, an empty segment and a backslash the way a literal path does", function()
+    local dir = tmp_dir()
+    vim.fn.mkdir(dir .. "/lua/p", "p")
+    write_file(dir .. "/lua/p", "health.lua", { "" })
+
+    for _, glob in ipairs({ "./lua/*/health.lua", "lua//*/health.lua", "lua\\*\\health.lua" }) do
+      assert.are.equal("pass", (file_exists.run({ type = "file_exists", path = glob }, dir)), glob)
+      assert.are.equal("fail", (file_exists.run({ type = "file_absent", path = glob }, dir)), glob)
+    end
+  end)
+
+  it("a glob segment is anchored on both sides", function()
+    local dir = tmp_dir()
+    vim.fn.mkdir(dir .. "/lua/p", "p")
+    write_file(dir .. "/lua/p", "health.lua.bak", { "" })
+    write_file(dir .. "/lua/p", "xhealth.lua", { "" })
+
+    assert.are.equal("fail", (file_exists.run({ type = "file_exists", path = "lua/*/health.lua" }, dir)))
+    assert.are.equal("fail", (file_exists.run({ type = "file_exists", path = "lua/*/health" }, dir)))
+  end)
+
   it("a glob among `paths` is one more any-of candidate", function()
     local dir = tmp_dir()
     vim.fn.mkdir(dir .. "/doc", "p")

@@ -1,5 +1,6 @@
 ---@module 'rules.engine.fswalk'
----@brief Recursive file listing used by the `grep` check.
+---@brief Recursive file listing used by the `grep` check and by a globbed
+--- `file_exists`/`file_absent`.
 ---@description
 --- Thin wrapper around `lib.nvim.fs.collect_recursive` (REL-31: reusable
 --- filesystem-walk logic belongs in `lib.nvim`, not reimplemented here) --

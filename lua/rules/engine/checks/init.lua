@@ -29,9 +29,9 @@ local BY_TYPE = {
 --- Run a rule's `check` against a root path.
 ---@param check table|nil
 ---@param root string
----@param ctx table|nil  shared cache for one `check_family` run; only
----   `grep` uses it today (memoized file listing/contents), other check
----   types ignore the extra argument
+---@param ctx table|nil  shared cache for one `check_family` run: `grep` and
+---   a globbed `file_exists`/`file_absent` share the memoized file listing,
+---   `grep` also the file contents; other check types ignore the argument
 ---@param opts Rules.RunOpts|nil  host policy for this run; only `lua_predicate`
 ---   reads it today
 ---@return "pass"|"fail"|"error"|"manual" status

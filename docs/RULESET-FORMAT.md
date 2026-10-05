@@ -117,7 +117,8 @@ that mistake is documented in this project's own history and is exactly what
 **Which files a `grep` reads.** `include` is one Lua pattern matched against
 the file path; `includes` is a list of them, for a rule that spans file types
 (`includes = { "%.md$", "%.txt$", "%.lua$" }`) — the same reason `patterns`
-exists. Once either is given, the `"%.lua$"` default no longer applies.
+exists. Once either is given, the `"%.lua$"` default no longer applies; an
+empty `includes = {}` counts as not given, so the default applies again.
 `excludes` is a list of path patterns whose files are skipped entirely, for a
 whole class of call site that is never the hazard the rule means
 (`excludes = { "/TESTS/" }`). `unless` works per line, `excludes` per file.
@@ -127,11 +128,16 @@ against the files under the checked root: `*` stays inside one path segment,
 a `**` segment spans any number of directories, none included.
 `path = "lua/*/health.lua"` is how a catalog written for every repo names a
 file whose module directory differs per plugin; `paths` takes several
-candidates, globbed or not, and any one of them satisfies the check. Three
-things to know: a glob sees files, not directories; it does not look inside
-`.git`, `.deps` or `.claude`; and the root itself is never read as a pattern,
-which is what a `lua_predicate` calling `vim.fn.glob(root .. "/…")` gets wrong
-on a root containing `~` or `[`.
+candidates, globbed or not, and any one of them satisfies the check. Things
+to know: a glob sees files, not directories, and does not go into symlinked
+directories (a junction or symlink that stands in for a module directory is
+not found by a glob, though a literal path through it is); it does not look
+inside `.git`, `.deps` or `.claude`; it is case-sensitive on every platform,
+unlike a literal path on a case-insensitive filesystem; `\` counts as a
+separator and `.` or an empty segment is ignored, as in a literal path, but
+`..` is not resolved. The root itself is never read as a pattern, which is what
+a `lua_predicate` calling `vim.fn.glob(root .. "/…")` gets wrong on a root
+containing `[`.
 
 **A malformed check spec reports `error`, not a crash.** A missing or
 wrong-typed required field (`file_exists`/`file_absent` with no `path`/
