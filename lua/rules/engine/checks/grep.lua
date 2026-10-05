@@ -31,6 +31,11 @@ local M = {}
 ---@field patterns string[]|nil  any-of a list of Lua patterns; use instead of `pattern` for more than one call site
 ---@field unless string|nil  Lua pattern; a hit on the same line is suppressed
 ---@field include string|nil  Lua pattern matched against the file path; default "%.lua$"
+---@field includes string[]|nil  any-of a list of Lua patterns matched against
+---  the file path -- for a rule that spans file types (Markdown, vimdoc and
+---  Lua at once), which one pattern cannot say without alternation. Same
+---  singular-or-list convention as `pattern`/`patterns`; given both, a file
+---  matching either is scanned.
 ---@field excludes string[]|nil  any-of a list of Lua patterns matched against
 ---  the file path; a file matching any of these is skipped entirely (not
 ---  just this one hit) -- for a whole class of call site that is never the
@@ -114,19 +119,26 @@ end
 ---@return "pass"|"fail" status
 ---@return Rules.Finding[] findings
 function M.run(spec, root, ctx)
-  local include = spec.include or "%.lua$"
   local findings = {}
+  local files = fswalk.cached_files(root, ctx)
 
-  local files
-  if ctx then
-    ctx.file_list = ctx.file_list or {}
-    files = ctx.file_list[root]
-    if not files then
-      files = fswalk.files(root)
-      ctx.file_list[root] = files
+  ---@type string[]
+  local includes = {}
+  if spec.include then
+    includes[#includes + 1] = spec.include
+  end
+  vim.list_extend(includes, spec.includes or {})
+  if #includes == 0 then
+    includes[1] = "%.lua$"
+  end
+
+  local function included(file)
+    for _, p in ipairs(includes) do
+      if file:find(p) then
+        return true
+      end
     end
-  else
-    files = fswalk.files(root)
+    return false
   end
 
   local function excluded(file)
@@ -142,7 +154,7 @@ function M.run(spec, root, ctx)
   end
 
   for _, file in ipairs(files) do
-    if file:match(include) and not excluded(file) then
+    if included(file) and not excluded(file) then
       local lines, read_err = cached_readfile(file, ctx)
       if lines == false then
         -- A matching file that can't be read (permissions, deleted between the

@@ -52,4 +52,23 @@ function M.files(root)
   })
 end
 
+--- `M.files(root)`, memoized in `ctx` for the lifetime of one `check_family`
+--- run -- every `grep` rule and every globbed `file_exists` rule of a family
+--- walks the same tree, so the listing is taken once.
+---@param root string
+---@param ctx table|nil  shared cache for the current run; nil walks every time
+---@return string[] files  absolute paths, "/"-separated
+function M.cached_files(root, ctx)
+  if not ctx then
+    return M.files(root)
+  end
+  ctx.file_list = ctx.file_list or {}
+  local files = ctx.file_list[root]
+  if not files then
+    files = M.files(root)
+    ctx.file_list[root] = files
+  end
+  return files
+end
+
 return M
