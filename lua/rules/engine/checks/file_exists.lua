@@ -65,10 +65,21 @@ end
 ---@return string|nil full
 local function first_glob_match(glob, root, ctx)
   local prefix = root:gsub("\\", "/"):gsub("/+$", "") .. "/"
-  local glob_segments = vim.split(glob, "/", { plain = true, trimempty = true })
+  -- Segments, not a string match: `\` is a separator here as it is for a
+  -- literal path, and `.` or an empty segment (`./lua/*/x.lua`, `lua//*/x`)
+  -- means nothing, exactly as the filesystem treats it for a literal path.
+  local glob_segments = {}
+  for _, segment in ipairs(vim.split((glob:gsub("\\", "/")), "/", { plain = true })) do
+    if segment ~= "" and segment ~= "." then
+      glob_segments[#glob_segments + 1] = segment
+    end
+  end
   for _, file in ipairs(fswalk.cached_files(root, ctx)) do
     if file:sub(1, #prefix) == prefix then
-      local parts = vim.split(file:sub(#prefix + 1), "/", { plain = true })
+      -- `trimempty`: a root given with a trailing separator (tab completion
+      -- of a directory, `fnamemodify(dir, ":p")`) comes back from the walk as
+      -- `root//lua/...`, whose first segment would otherwise be empty.
+      local parts = vim.split(file:sub(#prefix + 1), "/", { plain = true, trimempty = true })
       if segments_match(glob_segments, 1, parts, 1) then
         return file
       end
