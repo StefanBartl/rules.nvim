@@ -11,4 +11,22 @@ return {
   -- between spec files.
   isolated = "file",
   host = "c",
+  -- Guards (docs/GUARDS.md of testing.nvim). The suite is clean for these, so they raise errors.
+  guards = {
+    fs = "error",
+    scheduled_error = "error",
+    prompt = "error",
+    deprecation = "error",
+    -- Warn only: TESTS/window_spec.lua closes the tabs that report.window.open creates, but not
+    -- the report buffers behind them, so the state guard names 14 leaked buffers. A spec that
+    -- leaks (not the plugin); the specs stay unchanged for now.
+    state = "warn",
+    -- Spawn net on: every process a spec starts must be listed in guard_allow.spawn below.
+    process_net = "error",
+  },
+  guard_allow = {
+    -- gate_spec.lua builds throwaway git repositories (git init/add/commit/diff) in a temp
+    -- directory to test the diff-scoped gate; git is the real tool the plugin integrates.
+    spawn = { "git" },
+  },
 }
