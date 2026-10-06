@@ -40,7 +40,7 @@ jobs:
       - run: luacheck lua TESTS
 
   tests:
-    name: plenary specs (${{ matrix.os }})
+    name: testing.nvim specs (${{ matrix.os }})
     runs-on: ${{ matrix.os }}
     timeout-minutes: 15
     strategy:
@@ -57,28 +57,36 @@ jobs:
         shell: bash
     steps:
       - uses: actions/checkout@v5
-      # Both are resolved by scripts/minimal_init.lua from `.deps/<name>` --
-      # see the three lookup paths it documents. lib.nvim is a hard runtime
-      # dependency (the `:Rules` usercmd goes through usercmd.composer), and
-      # plenary is the busted-compatible harness TESTS/ is written against.
+      # Both are resolved by scripts/test.sh and TESTS/minimal_init.lua from
+      # `.deps/<name>` -- see the four lookup places they document. lib.nvim is
+      # a hard runtime dependency (the `:Rules` usercmd goes through
+      # usercmd.composer); testing.nvim is the runner for the specs in TESTS/.
       - uses: actions/checkout@v5
         with:
           repository: StefanBartl/lib.nvim
           path: .deps/lib.nvim
           ref: ci-verified
-      - uses: actions/checkout@v5
-        with:
-          repository: nvim-lua/plenary.nvim
-          path: .deps/plenary.nvim
-          # Pinned to the 2026-09-20 HEAD; bump deliberately, not by drifting.
-          ref: 74b06c6c75e4eeb3108ec01852001636d85a932b
       - uses: rhysd/action-setup-vim@v1
         with:
           neovim: true
           version: stable
+      # Checked out from the branch that only moves once the dependency's own CI is green.
+      - uses: actions/checkout@v5
+        with:
+          repository: "StefanBartl/testing.nvim"
+          path: .deps/testing.nvim
+          ref: ci-verified
       - run: |
           exec > >(tee -a "$RUNNER_TEMP/test-output.log") 2>&1
-          bash scripts/test.sh
+          bash scripts/test.sh --json "$RUNNER_TEMP/testing-ir.json"
+      # The IR is what a reporter or a person reads to find out WHICH case failed on WHICH platform.
+      - uses: actions/upload-artifact@v7
+        if: failure()
+        with:
+          name: testing-ir-${{ matrix.os }}
+          path: ${{ runner.temp }}/testing-ir.json
+          if-no-files-found: ignore
+          retention-days: 14
       - uses: actions/upload-artifact@v7
         if: failure()
         with:

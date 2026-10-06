@@ -162,9 +162,10 @@ the four `check` types, and why they're Lua patterns rather than regex:
 ## Contributing
 
 Clone the repository and either symlink it or add it to your runtime path.
-Run the test suite with `scripts/test.sh` (needs a `lib.nvim` and a
-`plenary.nvim` checkout — see that script's own header for how it finds
-them).
+Run the test suite with `scripts/test.sh` (needs a
+[testing.nvim](https://github.com/StefanBartl/testing.nvim) and a `lib.nvim`
+checkout — see that script's own header for how it finds them). Pass
+`--file <text>` to run only the spec files whose name contains `<text>`.
 
 Pull requests very welcome.
 
