@@ -71,8 +71,13 @@ function M.setup()
         path = { "check" },
         args = { { name = "path", type = "DIR", optional = true } },
         flags = {
-          { name = "family", type = "RULES_FAMILY" },
-          { name = "format", type = "STRING", values = { "json" } },
+          { name = "family", type = "RULES_FAMILY", desc = "Rule family to sweep, e.g. DEP for DEP-01 (required)" },
+          {
+            name = "format",
+            type = "STRING",
+            values = { "json" },
+            desc = "Print results as JSON (no quickfix, no report buffer)",
+          },
         },
         desc = "Sweep one rule family (--family=PREFIX) across PATH (default: cwd), --format=json for machine-readable output",
         run = function(ctx)
@@ -95,8 +100,13 @@ function M.setup()
           { name = "path", type = "DIR", optional = true },
         },
         flags = {
-          { name = "diff", type = "STRING" },
-          { name = "format", type = "STRING", values = { "json" } },
+          { name = "diff", type = "STRING", desc = "Only findings in files changed since this git ref (plus untracked)" },
+          {
+            name = "format",
+            type = "STRING",
+            values = { "json" },
+            desc = "Print results as JSON (no quickfix, no report buffer)",
+          },
         },
         desc = "Run a configured gate (setup({ gates = {...} })), --diff=<git-ref> to scope to that diff",
         run = function(ctx)
@@ -145,7 +155,14 @@ function M.setup()
       },
       {
         path = { "stats" },
-        flags = { { name = "format", type = "STRING", values = { "json" } } },
+        flags = {
+          {
+            name = "format",
+            type = "STRING",
+            values = { "json" },
+            desc = "Print the stats as JSON instead of opening the overview",
+          },
+        },
         desc = "Structural overview of every loaded rule: per-family totals, automated-vs-manual, severity -- no check run",
         run = function(ctx)
           local stats = require("rules").stats()
