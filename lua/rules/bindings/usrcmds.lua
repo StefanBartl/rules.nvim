@@ -33,6 +33,7 @@ local function register_argtypes()
   })
 
   argtypes.register("RULES_GATE", {
+    desc = "Gate from setup({ gates }): a named group of rule families",
     validate = function(raw)
       return true, raw, nil
     end,
@@ -44,6 +45,7 @@ local function register_argtypes()
   })
 
   argtypes.register("RULES_ID", {
+    desc = "Exact id of a loaded rule, e.g. DEP-06",
     validate = function(raw)
       return true, raw, nil
     end,
