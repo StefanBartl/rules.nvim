@@ -96,13 +96,18 @@ COMMANDS                                                        *rules-commands*
 
                                                                     *:Rules_new*
 :Rules new [{family} [{title}...]] [severity={level}] [text={text}]
-                                  [ruleset={name}] [{place}] [--dry]
+                                  [ruleset={name}] [{place}] [--yes] [--dry]
     Makes a rule in a ruleset of the one-file-per-rule form, at the next
     free id of {family}. With the family, a title and severity= the rule
     is made, placed and opened. With less, a Markdown form opens, filled in
     with what was given (|rules-form|). The command checks nothing of a rule
     itself: it hands one operation of `rules-ops/1` to the engine and tells
     the answer. --dry checks everything and writes nothing.
+
+    {family} is 1 to 12 uppercase letters A-Z (DEP): `Fix` or `dep` is
+    refused, so a mistyped title does not make a family. A family that no
+    rule has yet is asked about before the first rule is made (--yes skips
+    the question).
 
     A `key=` word may stand before the family (it takes one word); the
     family is the first word that is no known `key=`. A value is taken

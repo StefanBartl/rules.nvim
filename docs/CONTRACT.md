@@ -102,7 +102,7 @@ is true only if all entries are. `dry_run` checks everything and writes nothing.
 
 | Operation | Fields | What it does |
 | --- | --- | --- |
-| `new` | `family`, `title`, `severity`, `text`?, `check`?, `agent`?, a place?, `ruleset`? | Creates `<ruleset>/_rules/<FAMILY>/<ID>.md` with the next free id (loaded and retired ids count) under the ruleset's lock. With a place the rule also goes into a layout. `inverse`: `retire`. |
+| `new` | `family` (1 to 12 uppercase letters `A-Z`; anything else is `invalid_argument: family must be 1 to 12 uppercase letters A-Z (e.g. DEP)`), `title`, `severity`, `text`?, `check`?, `agent`?, a place?, `ruleset`? | Creates `<ruleset>/_rules/<FAMILY>/<ID>.md` with the next free id (loaded and retired ids count) under the ruleset's lock. With a place the rule also goes into a layout. `inverse`: `retire`. |
 | `set` | `id`, `patch` { `severity`?, `title`?, `text`?, `check`?, `agent`? }, `if_match`? | Changes parts of the rule's file by editing lines: everything else (other prose, line endings, the final newline) stays byte for byte. `null` for `check` or `agent` removes it. `inverse`: `set` with the values before. |
 | `retire` | `id`, `replaced_by`?, `reason`?, `if_match`? | Moves the file to `_retired/` (the id stays taken) and takes the rule out of every layout that holds it. `inverse`: `reinstate` with `places`, one entry for each layout the rule stood in. |
 | `reinstate` | `id`, a place? or `places`? | Brings a retired rule back to the file it came from. `places` (`{ "regeln/DEP.md": { "after": "DEP-01" } }`, keyed by the `output` of the layout, goes alone) puts it back into each of those layouts. `inverse`: `retire`. |

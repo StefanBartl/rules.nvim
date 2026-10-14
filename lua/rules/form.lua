@@ -177,9 +177,9 @@ function M.validate(parsed)
 
   local family = vim.trim(parsed.family)
   if family == "" then
-    errors[#errors + 1] = "Family is required (letters, e.g. DEP)"
-  elseif not family:match("^%a+$") or #family > ops.FAMILY_MAX then
-    errors[#errors + 1] = ("Family must be letters only, at most %d (e.g. DEP)"):format(ops.FAMILY_MAX)
+    errors[#errors + 1] = "Family is required (uppercase letters, e.g. DEP)"
+  elseif ops.family_error(family) then
+    errors[#errors + 1] = "Family " .. ops.family_error(family)
   end
 
   local title = vim.trim(parsed.title)
