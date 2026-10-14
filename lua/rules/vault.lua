@@ -5,8 +5,8 @@
 --- order, from `vault` of the call, `setup({ vault = ... })`, `$RULES_VAULT`, then the `vault` of the project's
 --- `.rules.json`. A path is never guessed: no vault is a normal state and answers with a message, not an error.
 ---
---- This module is the small public face of that (`rules.settings` does the work and ranks the places): the later
---- `:RulesVault` command takes its `roots` from here.
+--- This module is the small public face of that (`rules.settings` does the work and ranks the places): the
+--- `:RulesVault` command (`rules.ui.vault_cmd`) takes its `roots` from here.
 ---
 ---```lua
 --- local vault = require("rules.vault")
@@ -25,6 +25,17 @@
 local settings = require("rules.settings")
 
 local M = {}
+
+---The start of the message `root` gives when nothing names a vault (a normal state, unlike a vault that is named but
+---unusable): a front end that tells the two apart tests for it with `is_none`.
+M.NONE = "no vault is configured"
+
+---Whether a message of `root` says that no vault is configured at all.
+---@param message string|nil
+---@return boolean
+function M.is_none(message)
+  return type(message) == "string" and message:sub(1, #M.NONE) == M.NONE
+end
 
 ---@class Rules.Vault.Opts
 ---@field project? string  the root being checked (default: the working directory)
@@ -51,7 +62,7 @@ function M.root(opts)
   if problem then
     return nil, problem
   end
-  return nil, "no vault is configured: " .. settings.NO_VAULT_HINT
+  return nil, M.NONE .. ": " .. settings.NO_VAULT_HINT
 end
 
 ---Where the vault was named: `"call"`, `"setup"`, `"env"` ($RULES_VAULT) or `"project"`; `nil` without a vault.

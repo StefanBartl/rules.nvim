@@ -13,11 +13,13 @@ describe(":Rules option float", function()
 
   before_each(function()
     pcall(vim.api.nvim_del_user_command, "Rules")
+    pcall(vim.api.nvim_del_user_command, "RulesVault")
     require("rules.bindings.usrcmds").setup()
   end)
 
   after_each(function()
     pcall(vim.api.nvim_del_user_command, "Rules")
+    pcall(vim.api.nvim_del_user_command, "RulesVault")
   end)
 
   it("leaves no flag without a description", function()
