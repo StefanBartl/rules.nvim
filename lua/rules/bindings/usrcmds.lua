@@ -1,5 +1,5 @@
 ---@module 'rules.bindings.usrcmds'
----@brief The `:Rules <subcommand>` verb, built via lib.nvim's composer.
+---@brief The `:Rules <subcommand>` and `:RulesVault <verb>` user commands, built via lib.nvim's composer.
 
 local notify = require("rules.util.notify")
 
@@ -72,10 +72,12 @@ local function register_argtypes()
   })
 end
 
---- Create the `:Rules` verb.
+--- Create the `:Rules` and `:RulesVault` verbs.
 ---@return nil
 function M.setup()
   register_argtypes()
+  -- after RULES_ID and RULES_FAMILY: its <Tab> offers those, and the rulesets of the vault
+  require("rules.ui.vault_routes").register_types()
   local composer = require("lib.nvim.bindings.usercmd.composer")
 
   local routes = {
@@ -241,6 +243,15 @@ function M.setup()
   composer.verb("Rules", {
     desc = "rules.nvim: check rules against a repo, make, change, retire and move them",
     routes = routes,
+  })
+
+  -- open, clipboard, link, find, grep, tree, cdx, create: finding the rules in the vault (`rules.ui.vault_routes`)
+  composer.verb("RulesVault", {
+    desc = "The rules vault: open, copy, link, search and show its rulesets, rules and families; create a vault",
+    routes = require("rules.ui.vault_routes").routes(),
+    default = function(ctx)
+      require("rules.ui.vault_cmd").status(ctx)
+    end,
   })
 end
 

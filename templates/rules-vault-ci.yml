@@ -1,0 +1,63 @@
+# CI of a rules-vault, made by `:RulesVault create` (template: templates/rules-vault-ci.yml of rules.nvim).
+#
+# Read only: nothing here changes a file or talks to anything but GitHub. Three checks, each of which turns the run red:
+#   1. the reading documents of every ruleset are up to date with the layouts and rule files (`catalog --check`)
+#   2. every ruleset loads without errors (a duplicate id, an invalid severity, a gap in the numbering)
+#   3. writing keeps every rule file byte for byte (`roundtrip.lua`)
+#
+# rules.nvim and lib.nvim are checked out below `.deps/`. If rules.nvim is not readable with the token of this
+# repository (a private fork), give `actions/checkout` a `token:` of your own for that step.
+
+name: rules-vault
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  rules:
+    name: catalogs, load, round trip
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    env:
+      LIB_NVIM_DIR: ${{ github.workspace }}/.deps/lib.nvim
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/checkout@v5
+        with:
+          repository: StefanBartl/lib.nvim
+          path: .deps/lib.nvim
+          ref: ci-verified
+      - uses: actions/checkout@v5
+        with:
+          repository: StefanBartl/rules.nvim
+          path: .deps/rules.nvim
+      - uses: rhysd/action-setup-vim@v1
+        with:
+          neovim: true
+          version: stable
+
+      - name: The reading documents are up to date (catalog --check, every ruleset)
+        shell: bash
+        run: |
+          set -euo pipefail
+          for ruleset in rulesets/*/; do
+            echo "== $ruleset"
+            nvim --headless -u NONE -i NONE -n -l .deps/rules.nvim/scripts/ruleset.lua catalog --check "$ruleset"
+          done
+
+      - name: Every ruleset loads without errors
+        shell: bash
+        run: |
+          set -euo pipefail
+          nvim --headless -u NONE -i NONE -n -l .deps/rules.nvim/scripts/rules.lua call snapshot --vault=. > snapshot.json
+          jq -r '.load_errors[]' snapshot.json
+          jq -e '(.load_errors | length) == 0' snapshot.json > /dev/null
+          jq -r '"\(.counts.rules) rules in \(.counts.files) files"' snapshot.json
+
+      - name: Writing keeps the rule files byte for byte (round trip)
+        shell: bash
+        run: |
+          set -euo pipefail
+          nvim --headless -u NONE -i NONE -n -l .deps/rules.nvim/scripts/roundtrip.lua rulesets/*/
