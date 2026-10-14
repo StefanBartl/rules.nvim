@@ -899,7 +899,7 @@ describe("rules.engine.catalog.build", function()
       local root = ruleset()
       vim.fn.mkdir(root .. "/real", "p")
       if not link_dir(root .. "/real", root .. "/alias") then
-        return
+        pending("no right to make a link here")
       end
       write(root .. "/_layouts/ALIAS.md", layout_text("alias/x.md", { "{{rule DEP-01}}" }))
 

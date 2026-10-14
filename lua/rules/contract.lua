@@ -79,17 +79,24 @@ M.doc = d
 ---@field rulesets? string[]            files or directories; default `setup({ rulesets })`
 ---@field gates? table<string, string[]>  default `setup({ gates })`
 
+---Paths that differ only in case are one folder on Windows and (by default) on macOS.
+local CASE_INSENSITIVE = vim.fn.has("win32") == 1 or vim.fn.has("mac") == 1
+
 ---@param opts Rules.Contract.Opts|nil
----@return string[] paths  expanded, `/`-separated, absolute
+---@return string[] paths  expanded, `/`-separated, absolute; a ruleset listed twice (or spelled another way) once
 local function ruleset_paths(opts)
   local given = opts and opts.rulesets
   if given == nil then
     given = require("rules.config").get().rulesets
   end
-  local out = {}
+  local out, seen = {}, {}
   for _, path in ipairs(given or {}) do
-    local expanded = vim.fs.normalize(vim.fn.fnamemodify(expand_path(path), ":p"))
-    out[#out + 1] = (expanded:gsub("/+$", ""))
+    local expanded = (vim.fs.normalize(vim.fn.fnamemodify(expand_path(path), ":p")):gsub("/+$", ""))
+    local key = CASE_INSENSITIVE and vim.fn.tolower(expanded) or expanded
+    if not seen[key] then
+      seen[key] = true
+      out[#out + 1] = expanded
+    end
   end
   return out
 end
@@ -114,7 +121,9 @@ end
 ---The name each ruleset goes by in a document: the last part of its path. Only where two rulesets would get the
 ---same name (both are called `Checklists`) the folder above is added (`wkdbook-Lua/Checklists`): a name that is
 ---always taken from higher up would put a folder of this machine (a user name) into every document.
----@param paths string[]
+---Two rulesets that still share a name after that (two checkouts of one project, same folder names) are told apart
+---by a number: the first in the order of the configuration keeps the name, the next ones are `<name>#2`, `<name>#3`.
+---@param paths string[]  without duplicates (`ruleset_paths`)
 ---@return table<string, string> names  root -> name
 local function root_names(paths)
   local taken = {}
@@ -122,14 +131,20 @@ local function root_names(paths)
     local key = vim.fs.basename(root):lower()
     taken[key] = (taken[key] or 0) + 1
   end
-  local names = {}
+  local names, used = {}, {}
   for _, root in ipairs(paths) do
     local name = vim.fs.basename(root)
     local parent = vim.fs.basename(vim.fs.dirname(root))
     if taken[name:lower()] > 1 and parent ~= "" and parent ~= "." then
       name = parent .. "/" .. name
     end
-    names[root] = name
+    local unique, n = name, 1
+    while used[unique:lower()] do
+      n = n + 1
+      unique = name .. "#" .. n
+    end
+    used[unique:lower()] = true
+    names[root] = unique
   end
   return names
 end
@@ -573,18 +588,27 @@ function M.rule(id, opts)
   return d.seal(doc, view.rev), nil
 end
 
+---The largest whole number a JSON number carries exactly (2^53 - 1).
+local MAX_SAFE = 9007199254740991
+
 ---How far every family is numbered: the highest number taken (a loaded rule or a retired one), the width of the
----number and how many ids that are.
+---number and how many ids that are. The digits are compared as text (`top`, no leading zeros), so an id of any
+---length counts; `highest` is that number, held at 2^53 - 1 where it would be larger (a JSON number is exact up to
+---there) -- `next` is built from `top` and stays exact.
 ---@param view Rules.Contract.View
----@return table<string, { highest: integer, width: integer, count: integer }>
+---@return table<string, { highest: integer, top: string, width: integer, count: integer }>
 local function numbering(view)
   local seen = {}
   for _, list in ipairs({ view.rules, view.retired }) do
     for _, rule in ipairs(list) do
       local fam, num = rule.id:match("^(%a+)%-(%d+)$")
       if fam then
-        local s = seen[fam] or { highest = 0, width = 2, count = 0 }
-        s.highest = math.max(s.highest, tonumber(num) or 0)
+        local s = seen[fam] or { highest = 0, top = "", width = 2, count = 0 }
+        local digits = num:gsub("^0+", "")
+        if #digits > #s.top or (#digits == #s.top and digits > s.top) then
+          s.top = digits
+          s.highest = #digits > 15 and math.min(tonumber(digits) or MAX_SAFE, MAX_SAFE) or tonumber(digits) or 0
+        end
         s.width = math.max(s.width, #num)
         s.count = s.count + 1
         seen[fam] = s
@@ -594,14 +618,32 @@ local function numbering(view)
   return seen
 end
 
+---The id one past the highest number of a family, in the width the family uses (at least two digits).
+---@param family string
+---@param s { top: string, width: integer }|nil  nil: nothing is numbered in this family yet
+---@return string
+local function successor(family, s)
+  local top, width = s and s.top or "", s and s.width or 2
+  local out, carry = {}, 1
+  for i = #top, 1, -1 do
+    local v = top:byte(i) - 48 + carry
+    carry = v >= 10 and 1 or 0
+    out[#out + 1] = string.char(48 + v % 10)
+  end
+  if carry == 1 then
+    out[#out + 1] = "1"
+  end
+  local digits = table.concat(out):reverse()
+  return family .. "-" .. ("0"):rep(width - #digits) .. digits
+end
+
 ---The next free id of a family in a scan: one past the highest id taken, loaded or retired, with the width the
 ---family uses (at least two digits). An id is never given twice.
 ---@param view Rules.Contract.View
 ---@param family string
 ---@return string id
 function M.next_free(view, family)
-  local s = numbering(view)[family] or { highest = 0, width = 2 }
-  return ("%s-%0" .. s.width .. "d"):format(family, s.highest + 1)
+  return successor(family, numbering(view)[family])
 end
 
 ---`rules.next_id`: the next free id of a family (or of every family).
@@ -620,13 +662,8 @@ function M.next_id(params, opts)
   end
   local seen = numbering(view)
   local function entry(fam)
-    local s = seen[fam] or { highest = 0, width = 2, count = 0 }
-    return {
-      family = fam,
-      highest = s.highest,
-      count = s.count,
-      next = ("%s-%0" .. s.width .. "d"):format(fam, s.highest + 1),
-    }
+    local s = seen[fam] or { highest = 0, count = 0 }
+    return { family = fam, highest = s.highest, count = s.count, next = successor(fam, seen[fam]) }
   end
   local out = {}
   if params.family then

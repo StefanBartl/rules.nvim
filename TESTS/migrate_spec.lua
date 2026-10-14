@@ -802,7 +802,7 @@ describe("rules.engine.migrate.run", function()
       local root = ruleset()
       local outside = tmp_dir()
       if not link_dir(outside, root .. "/_layouts") then
-        return
+        pending("no right to make a link here")
       end
       local report = migrate.run(root, { write = true })
       assert.matches("leaves the ruleset", table.concat(report.problems, "\n"))
@@ -816,7 +816,7 @@ describe("rules.engine.migrate.run", function()
       local outside = tmp_dir()
       vim.fn.mkdir(root .. "/_rules", "p")
       if not link_dir(outside, root .. "/_rules/A") then
-        return
+        pending("no right to make a link here")
       end
       local report = migrate.run(root, { write = true })
       assert.matches("leaves the ruleset", table.concat(report.problems, "\n"))

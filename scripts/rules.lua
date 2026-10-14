@@ -126,7 +126,11 @@ else
   local params = { family = flags.family, severity = flags.severity }
   for _, key in ipairs({ "limit", "offset" }) do
     if flags[key] ~= nil then
-      params[key] = tonumber(flags[key]) or usage()
+      local number = tonumber(flags[key]) or usage()
+      -- `inf` and `nan` read as numbers but no JSON carries them: the text goes to the contract, which refuses it
+      -- as a document (a whole number is the only thing it takes)
+      local whole = number == number and number > -math.huge and number < math.huge and number % 1 == 0
+      params[key] = whole and number or flags[key]
     end
   end
   request = vim.json.encode({ params = params })
