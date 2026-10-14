@@ -184,6 +184,82 @@ describe("rules.engine.rule_edit", function()
     assert.are.equal(BASE, without)
   end)
 
+  describe("a block is edited field by field", function()
+    local CHECK = { "check = {", '  type = "grep",', '  pattern = "foo",', "}," }
+    local QUESTION = { question = "Is it so?" }
+
+    ---@param block string[]
+    ---@return string
+    local function file_of(block)
+      return rule_file("DEP-01", "recommended", "f", { "T." }, block)
+    end
+
+    it("leaves a check it was not asked to change as it is, in its order and its layout", function()
+      local block = vim.list_extend({ 'severity = "recommended",' }, CHECK)
+      local base = file_of(block)
+      local new = assert(rule_edit.apply(PATH, base, { agent = QUESTION }))
+      assert.is_truthy(new:find(table.concat(CHECK, "\n"), 1, true))
+      assert.are.same(QUESTION, parser.parse_rule_text(PATH, new).agent)
+      assert.are.same({ type = "grep", pattern = "foo" }, parser.parse_rule_text(PATH, new).check)
+      -- the one new line is the only difference
+      assert.are.equal(base, (new:gsub('agent = { question = "Is it so%?" },\n', "")))
+      -- and the block is as it was when the agent is taken out again
+      assert.are.equal(base, assert(rule_edit.apply(PATH, new, { agent = vim.NIL })))
+    end)
+
+    it("leaves an agent it was not asked to change as it is when the check changes", function()
+      local agent = { "agent = {", '  question = "Is it so?",', "}," }
+      local base = file_of(vim.list_extend(vim.list_extend({}, CHECK), agent))
+      local new = assert(rule_edit.apply(PATH, base, { check = { type = "grep", pattern = "bar" } }))
+      assert.is_truthy(new:find(table.concat(agent, "\n"), 1, true))
+      assert.are.equal("bar", parser.parse_rule_text(PATH, new).check.pattern)
+      local gone = assert(rule_edit.apply(PATH, base, { check = vim.NIL }))
+      assert.are.equal(table.concat(agent, "\n") .. "\n", gone:match("```rule\n(.-)```"))
+    end)
+
+    it("keeps the other fields of the block and the severity it repeats, and changes that one with the patch", function()
+      local block = { 'severity = "recommended",', 'note = "kept",' }
+      vim.list_extend(block, CHECK)
+      local base = file_of(block)
+      local new = assert(rule_edit.apply(PATH, base, { agent = QUESTION, severity = "critical" }))
+      assert.is_truthy(new:find('severity = "critical",\nnote = "kept",\n' .. table.concat(CHECK, "\n"), 1, true))
+      assert.are.equal("critical", parser.parse_rule_text(PATH, new).severity)
+      assert.is_truthy(new:find("severity: critical", 1, true))
+    end)
+
+    it("puts a new field after the ones that belong before it, and the first one at the top", function()
+      local base = file_of({ 'severity = "recommended",', 'note = "kept",' })
+      local new = assert(rule_edit.apply(PATH, base, { agent = QUESTION, check = { type = "grep", pattern = "x" } }))
+      local check_at = assert(new:find("check = ", 1, true))
+      local agent_at = assert(new:find("agent = ", 1, true))
+      assert.is_true(new:find("severity = ", 1, true) < check_at)
+      assert.is_true(check_at < agent_at)
+      assert.is_true(agent_at < new:find("note = ", 1, true))
+      local only_note = assert(rule_edit.apply(PATH, file_of({ 'note = "kept",' }), { agent = QUESTION }))
+      assert.is_true(only_note:find("agent = ", 1, true) < only_note:find("note = ", 1, true))
+    end)
+
+    it("adds the comma a last field without one needs", function()
+      local base = file_of({ 'severity = "recommended"' })
+      local new = assert(rule_edit.apply(PATH, base, { check = { type = "grep", pattern = "x" } }))
+      assert.is_truthy(new:find('severity = "recommended",\ncheck = ', 1, true))
+    end)
+
+    it("writes a block again, from its table, when two fields share a line", function()
+      local base = file_of({ 'check = { type = "grep", pattern = "foo" }, note = "kept",' })
+      local new = assert(rule_edit.apply(PATH, base, { agent = QUESTION }))
+      local rule = parser.parse_rule_text(PATH, new)
+      assert.are.same({ type = "grep", pattern = "foo" }, rule.check)
+      assert.are.same(QUESTION, rule.agent)
+    end)
+
+    it("takes the block out when the last field goes", function()
+      local base = file_of(CHECK)
+      local plain = assert(rule_edit.apply(PATH, base, { check = vim.NIL }))
+      assert.is_nil(plain:find("```rule", 1, true))
+    end)
+  end)
+
   it("refuses a check on a block with a function or a comment", function()
     local fn = rule_file(
       "DEP-01",

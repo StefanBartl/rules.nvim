@@ -11,7 +11,7 @@
 | `:Rules catalog` | `[path]` (default: every folder in `rulesets`) | `--check` (optional) | For a ruleset in the one-file-per-rule form: builds the reading documents from their layouts ([RULESET-FORMAT.md](RULESET-FORMAT.md#layouts-and-catalogs)). A document is written only when its content changed. `--check` writes nothing and warns about every document that is out of date — for CI use `scripts/ruleset.lua catalog --check <folder>` (exit code 1 when one is). Names the rules that are in no layout |
 | `:Rules messages` | — | — | Opens this plugin's notify history (toast + `:messages` log, via `lib.nvim.notify.popup`) |
 | `:Rules new` | `[<FAMILY> [title...]]` | `severity=`, `text=`, `ruleset=`, `--to=`, `--after=`, `--before=`, `--first`, `--yes`, `--dry` | Makes a rule at the next free id of the family (1 to 12 uppercase letters `A-Z`). With the family, a title and `severity=` the rule is made and opened (a family no rule has yet is asked about first, `--yes` skips the question); with less, the [form](#the-form) opens, filled in with what was given. See [Making, changing, retiring and moving rules](#making-changing-retiring-and-moving-rules) |
-| `:Rules set` | `<id>` | `severity=`, `title=`, `text=`, `check=`, `agent=`, `--dry` | Changes parts of a rule's file; everything else in the file stays byte for byte |
+| `:Rules set` | `<id>` | `severity=`, `title=`, `text=`, `check=`, `agent=`, `--dry` | Changes parts of a rule's file; every line it was not asked to change stays byte for byte (see [what `set` leaves alone](#making-changing-retiring-and-moving-rules)) |
 | `:Rules retire` | `<id>` | `--by=<id>`, `reason=`, `--yes`, `--dry` | Moves a rule's file to `_retired/` and out of every layout; the id stays taken. Asks first |
 | `:Rules move` | `<id>` | `--to=<file>#<section>`, `--after=<id>`, `--before=<id>`, `--first`, `--dry` | Moves the rule's `{{rule ID}}` line within its layout or into another; the rule's own file is not touched |
 | `:Rules list` | — | `--family=<PREFIX>`, `--severity=<level>`, `--format=json` | Puts the rules in the quickfix list, each at its source line; `--format=json` prints the `rules.list` document of the [machine contract](CONTRACT.md) |
@@ -88,6 +88,13 @@ writes a ruleset in the one-file-per-rule form ([RULESET-FORMAT.md](RULESET-FORM
   rule). A blank in a section is written with a backslash before it
   (`#Core\ Rules`); `<Tab>` writes it so. A word that is left over is refused
   with that hint, never taken for something else.
+- **What `set` leaves alone.** Only the parts named are changed, line by line: a
+  `check=` or `agent=` writes that field again on one line and leaves every other
+  line of the file, the other field of the block with its key order and layout
+  included, as it was. The exceptions are said, never silent: a block with a
+  comment or a Lua function is refused for `check=`/`agent=` (edit it by hand),
+  and a block whose fields share a line (`check = { ... }, agent = { ... },`) is
+  written again from its table, the keys in order of their names.
 - **`--dry`** is the door's `dry_run`: everything is checked and told, nothing is
   written, no buffer is touched. `set --dry` shows the change as a diff.
 - **`retire` asks first** (`No` is the button the dialog starts on; `--yes`

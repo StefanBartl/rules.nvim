@@ -125,8 +125,9 @@ COMMANDS                                                        *rules-commands*
 
                                                                     *:Rules_set*
 :Rules set {id} {key}={value}... [--dry]
-    Changes parts of a rule's file; everything else in the file stays byte
-    for byte. Keys: severity, title, text, check, agent. A value may hold
+    Changes parts of a rule's file; every line it was not asked to change
+    stays byte for byte (a check= leaves the agent of the block as it is, and
+    the other way round). Keys: severity, title, text, check, agent. A value may hold
     spaces (a word that is no known `key=` goes on with the value before
     it). check= and agent= take a JSON object, or nothing to remove the key.
     An open buffer of the file is reloaded; one with unsaved changes is

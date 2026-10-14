@@ -143,6 +143,39 @@ local function holds_function(value)
   return false
 end
 
+---The index after the long bracket that opens at `at`, nil when none opens there.
+---@param source string
+---@param at integer
+---@return integer|nil
+local function long_end(source, at)
+  local eq = source:match("^%[(=*)%[", at)
+  if not eq then
+    return nil
+  end
+  local _, close = source:find("]" .. eq .. "]", at + #eq + 2, true)
+  return (close or #source) + 1
+end
+
+---The index of the closing quote of the short string that opens at `at` (an unfinished one ends at its line).
+---@param source string
+---@param at integer
+---@return integer
+local function string_end(source, at)
+  local quote_char = source:sub(at, at)
+  local j = at + 1
+  while j <= #source do
+    local d = source:sub(j, j)
+    if d == BACKSLASH then
+      j = j + 2
+    elseif d == quote_char or d == "\n" then
+      break
+    else
+      j = j + 1
+    end
+  end
+  return j
+end
+
 ---Walks the source of a block the way Lua reads it, so a string or a long bracket is never taken for a comment. Tells
 ---whether the source holds a comment, and where the string literals of its top-level `severity = "..."` stand (the
 ---line of the source, the first and the last column of the literal, quotes included).
@@ -153,42 +186,15 @@ local function scan(source)
   local comment, found = false, {}
   local depth, i, n = 0, 1, #source
 
-  ---the index after the long bracket that opens at `at`, nil when none opens there
-  local function skip_long(at)
-    local eq = source:match("^%[(=*)%[", at)
-    if not eq then
-      return nil
-    end
-    local _, close = source:find("]" .. eq .. "]", at + #eq + 2, true)
-    return (close or n) + 1
-  end
-
-  ---the index of the closing quote of the short string that opens at `at` (an unfinished one ends at its line)
-  local function skip_string(at)
-    local quote_char = source:sub(at, at)
-    local j = at + 1
-    while j <= n do
-      local d = source:sub(j, j)
-      if d == BACKSLASH then
-        j = j + 2
-      elseif d == quote_char or d == "\n" then
-        break
-      else
-        j = j + 1
-      end
-    end
-    return j
-  end
-
   while i <= n do
     local c = source:sub(i, i)
     if c == "-" and source:sub(i + 1, i + 1) == "-" then
       comment = true
-      i = skip_long(i + 2) or ((source:find("\n", i, true) or n) + 1)
+      i = long_end(source, i + 2) or ((source:find("\n", i, true) or n) + 1)
     elseif c == '"' or c == "'" then
-      i = skip_string(i) + 1
-    elseif c == "[" and skip_long(i) then
-      i = skip_long(i)
+      i = string_end(source, i) + 1
+    elseif c == "[" and long_end(source, i) then
+      i = long_end(source, i) --[[@as integer]]
     elseif c == "{" then
       depth, i = depth + 1, i + 1
     elseif c == "}" then
@@ -200,7 +206,7 @@ local function scan(source)
       if name == "severity" and depth == 0 and source:sub(after - #name - 1, after - #name - 1) ~= "." then
         local from = source:match([=[^%s*=%s*()["']]=], after)
         if from then
-          local stop = skip_string(from)
+          local stop = string_end(source, from)
           local before = source:sub(1, from - 1)
           local _, breaks = before:gsub("\n", "")
           local line_start = before:match(".*\n()") or 1
@@ -215,6 +221,78 @@ local function scan(source)
     end
   end
   return comment, found
+end
+
+---@class Rules.BlockField
+---@field key string   the name of the field
+---@field l1 integer   the first line of the source it stands on
+---@field l2 integer   the last line
+
+---The fields of a block's table constructor (`id = ...,`, `check = { ... },`), each with the lines it takes. `nil` when
+---a field cannot be told by its name (a positional entry) or when two fields share a line: a block like that is not
+---edited line by line.
+---@param source string  the lines of the block between the fences
+---@return Rules.BlockField[]|nil
+local function top_fields(source)
+  local fields = {}
+  local depth, i, n, line = 0, 1, #source, 1
+  local start, first_line, last_line = nil, 1, 1
+
+  ---@return boolean ok
+  local function finish()
+    if not start then
+      return true
+    end
+    local text = source:sub(start, i - 1)
+    local key = text:match("^([%a_][%w_]*)%s*=[^=]") or text:match([=[^%[%s*["']([^"']*)["']%s*%]%s*=[^=]]=])
+    start = nil
+    if not key then
+      return false
+    end
+    local previous = fields[#fields]
+    if previous and first_line <= previous.l2 then
+      return false
+    end
+    fields[#fields + 1] = { key = key, l1 = first_line, l2 = last_line }
+    return true
+  end
+
+  while i <= n do
+    local c = source:sub(i, i)
+    local stop = i
+    if c == "\n" then
+      line = line + 1
+    elseif not c:match("%s") then
+      if not start and not (c == "," or c == ";") then
+        start, first_line = i, line
+      end
+      if (c == "," or c == ";") and depth == 0 then
+        if not finish() then
+          return nil
+        end
+      elseif c == '"' or c == "'" then
+        stop = string_end(source, i)
+      elseif c == "[" and long_end(source, i) then
+        stop = long_end(source, i) - 1
+      elseif c == "{" or c == "(" or c == "[" then
+        depth = depth + 1
+      elseif c == "}" or c == ")" or c == "]" then
+        depth = depth - 1
+      end
+      last_line = line
+      if stop > i then
+        local _, breaks = source:sub(i, stop):gsub("\n", "")
+        line = line + breaks
+        last_line = line
+      end
+    end
+    i = stop + 1
+  end
+  i = n + 1
+  if not finish() then
+    return nil
+  end
+  return fields
 end
 
 ---The lines of a block (without the fences) for a table: `id`, `severity`, `check`, `agent`, then the rest in byte
@@ -310,6 +388,97 @@ end
 
 -- ── the edit ────────────────────────────────────────────────────────────────────
 
+---Where a field stands among the others when a new one is written: the order `block_lines` writes them in.
+local RANK = { id = 1, severity = 2, check = 3, agent = 4 }
+
+---Change the string literals of the block's own `severity` (a block repeats it) to `severity`, line by line.
+---@param lines string[]
+---@param s integer  the line of the opening fence
+---@param e integer  the line of the closing fence
+---@param severity string
+---@return boolean found  false: the block has no such literal (nothing was changed)
+local function set_block_severity(lines, s, e, severity)
+  local _, found = scan(table.concat(lines, "\n", s + 1, e - 1))
+  for k = #found, 1, -1 do
+    local at, row = found[k], lines[s + found[k].line]
+    local quote_char = row:sub(at.from, at.from)
+    lines[s + at.line] = row:sub(1, at.from - 1) .. quote_char .. severity .. quote_char .. row:sub(at.to + 1)
+  end
+  return #found > 0
+end
+
+---Change the `check` and `agent` fields of a block line by line: a field the patch does not name stays as it is, byte
+---for byte (the order of its keys, the way it is laid out), and so does the `severity` the block repeats. A field the
+---patch names is written again on one line, in the place of the old one; a new one goes after the fields that
+---belong before it. Not possible (`false`) for a block whose fields cannot be told apart by lines (two on one line, a
+---positional entry): the caller writes the whole block again.
+---@param lines string[]
+---@param s integer  the line of the opening fence
+---@param e integer  the line of the closing fence
+---@param patch Rules.RulePatch
+---@param repeats_severity boolean  the block has a `severity` of its own
+---@return boolean done
+local function edit_fields(lines, s, e, patch, repeats_severity)
+  local fields = top_fields(table.concat(lines, "\n", s + 1, e - 1))
+  if not fields or #fields == 0 then
+    return false
+  end
+  local edits = {}
+  local indent = lines[s + fields[1].l1]:match("^%s*")
+  for _, key in ipairs({ "check", "agent" }) do
+    local value = patch[key]
+    if value ~= nil then
+      local new = {}
+      if value ~= vim.NIL then
+        local text = M.lua_value(value)
+        if not text then
+          return false
+        end
+        new[1] = ("%s%s = %s,"):format(indent, key, text)
+      end
+      local field
+      for _, f in ipairs(fields) do
+        if f.key == key then
+          field = f
+        end
+      end
+      if field then
+        edits[#edits + 1] = { l1 = s + field.l1, l2 = s + field.l2, new = new }
+      elseif #new > 0 then
+        -- after the last field that belongs before it, at the top when none does
+        local anchor
+        for _, f in ipairs(fields) do
+          if (RANK[f.key] or 5) < RANK[key] then
+            anchor = f
+          end
+        end
+        local at = anchor and s + anchor.l2 + 1 or s + fields[1].l1
+        if anchor and not lines[s + anchor.l2]:match("[,;]%s*$") then
+          lines[s + anchor.l2] = lines[s + anchor.l2]:gsub("%s*$", "") .. ","
+        end
+        edits[#edits + 1] = { l1 = at, l2 = at - 1, new = new }
+      end
+    end
+  end
+  if patch.severity ~= nil and repeats_severity and not set_block_severity(lines, s, e, patch.severity) then
+    return false
+  end
+  -- bottom to top, and of two edits of one place the later one first, so the fields come out in the order they were made
+  for index, edit in ipairs(edits) do
+    edit.index = index
+  end
+  table.sort(edits, function(a, b)
+    if a.l1 ~= b.l1 then
+      return a.l1 > b.l1
+    end
+    return a.index > b.index
+  end)
+  for _, edit in ipairs(edits) do
+    replace(lines, edit.l1, edit.l2, edit.new)
+  end
+  return true
+end
+
 ---@class Rules.RulePatch
 ---@field severity? string
 ---@field title? string
@@ -371,13 +540,7 @@ function M.apply(path, text, patch)
     if block.fence > 0 then
       return nil, "the rule block sits inside a longer fence; edit it by hand"
     end
-    local s, e = off + block.s, off + block.e
-    local _, found = scan(table.concat(lines, "\n", s + 1, e - 1))
-    for k = #found, 1, -1 do
-      local at, row = found[k], lines[s + found[k].line]
-      local quote_char = row:sub(at.from, at.from)
-      lines[s + at.line] = row:sub(1, at.from - 1) .. quote_char .. patch.severity .. quote_char .. row:sub(at.to + 1)
-    end
+    set_block_severity(lines, off + block.s, off + block.e, patch.severity)
   elseif edit_block then
     local block = rule_file.block
     local tbl = {}
@@ -400,6 +563,7 @@ function M.apply(path, text, patch)
         return nil, "the rule block holds a Lua function; edit it by hand"
       end
     end
+    local repeats_severity = tbl.severity ~= nil
     if patch.severity ~= nil and tbl.severity ~= nil then
       tbl.severity = patch.severity
     end
@@ -418,7 +582,8 @@ function M.apply(path, text, patch)
         end
         replace(lines, s, to, {})
       end
-    else
+    elseif not (block and edit_fields(lines, s, e, patch, repeats_severity)) then
+      -- a new block, or one whose fields cannot be told apart by lines: written again from its table
       local rendered, why = block_lines(tbl)
       if not rendered then
         return nil, why
