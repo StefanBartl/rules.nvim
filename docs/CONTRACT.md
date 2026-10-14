@@ -64,8 +64,14 @@ number follows the family (at least two digits).
 
 A duplicate id across rulesets, an unparseable block: the rule is not in the
 document and the message is here, with the ruleset's name instead of its path.
-Two rulesets that share an id (the `REL` family of `wkdbook-Lua` and
-`wkdbook-native`) load one of them; load such rulesets one per engine.
+Two rulesets that share an id load only one of them and report the other as a
+duplicate; an id is unique across every ruleset that is loaded together (the
+native apps' release family is `NREL` for that reason, `REL` is the Lua one).
+
+A ruleset goes by the last part of its path (`Checklists`); only when two
+rulesets would get the same name, the folder above is added
+(`wkdbook-Lua/Checklists`). A name is never taken from higher up than that, so
+a document does not carry a folder of the machine (a user name).
 
 ## Entry points
 
@@ -89,6 +95,10 @@ stdin and stdout (`ready\t1`, then `<id>\t<method>\t<params>` lines; see
 `lib.nvim/lua/lib/nvim/contract/host/README.md`). The rulesets and gates come
 from `$RULES_RULESETS` (paths separated by `;`) and `$RULES_GATES`
 (`name=FAM,FAM;name=FAM`). The process ends when its stdin ends.
+
+The engine keeps its scan of the rulesets while no `.md` file of them changes
+(size and modification time; a file changed within the last two seconds is
+never trusted), so a question costs milliseconds, not a parse of the ruleset.
 
 ### Lua
 

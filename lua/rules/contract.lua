@@ -111,36 +111,85 @@ function M.root_of(opts)
   return ruleset_paths(opts)[1]
 end
 
----The name a ruleset goes by in a document: its folder and the folder above (`wkdbook-Lua/Checklists`), so two
----rulesets that are both called `Checklists` stay apart.
----@param root string
----@return string
-local function root_name(root)
-  local parent = vim.fs.basename(vim.fs.dirname(root))
-  local name = vim.fs.basename(root)
-  if parent == "" or parent == "." then
-    return name
+---The name each ruleset goes by in a document: the last part of its path. Only where two rulesets would get the
+---same name (both are called `Checklists`) the folder above is added (`wkdbook-Lua/Checklists`): a name that is
+---always taken from higher up would put a folder of this machine (a user name) into every document.
+---@param paths string[]
+---@return table<string, string> names  root -> name
+local function root_names(paths)
+  local taken = {}
+  for _, root in ipairs(paths) do
+    local key = vim.fs.basename(root):lower()
+    taken[key] = (taken[key] or 0) + 1
   end
-  return parent .. "/" .. name
+  local names = {}
+  for _, root in ipairs(paths) do
+    local name = vim.fs.basename(root)
+    local parent = vim.fs.basename(vim.fs.dirname(root))
+    if taken[name:lower()] > 1 and parent ~= "" and parent ~= "." then
+      name = parent .. "/" .. name
+    end
+    names[root] = name
+  end
+  return names
 end
 
 ---The source-relative name of a file: `<ruleset name>/<path inside it>`; for a ruleset that is a file, its name.
 ---@param paths string[]
+---@param names table<string, string>
 ---@param file string
 ---@return string
-local function display_path(paths, file)
+local function display_path(paths, names, file)
   local normal = vim.fs.normalize(vim.fn.fnamemodify(file, ":p"))
   local best, best_len = nil, -1
   for _, root in ipairs(paths) do
     local rel = d.relative(root, normal)
     if rel and #root > best_len then
-      best, best_len = (root_name(root) .. "/" .. rel), #root
+      best, best_len = (names[root] .. "/" .. rel), #root
     elseif normal:lower() == root:lower() and #root > best_len then
-      best, best_len = root_name(root), #root
+      best, best_len = names[root], #root
     end
   end
   return best or ("<external>/" .. vim.fs.basename(normal))
 end
+
+---What the scan of these rulesets would read, as one text: every `.md` file with its size and modification time.
+---`nil` when a file changed so recently that a second change in the same clock tick could go unseen (a stale
+---answer must never be kept: the one place that writes the files, `rules-ops/1`, drops the cache itself).
+---@param paths string[]
+---@return string|nil
+local function signature(paths)
+  local fswalk = require("rules.engine.fswalk")
+  local uv = vim.uv or vim.loop
+  local parts = {}
+  local now = os.time()
+  for _, root in ipairs(paths) do
+    local files = { root }
+    if vim.fn.isdirectory(root) == 1 then
+      files = {}
+      for _, file in ipairs(fswalk.files(root)) do
+        if file:match("%.md$") then
+          files[#files + 1] = file
+        end
+      end
+    end
+    for _, file in ipairs(files) do
+      local stat = uv.fs_stat(file)
+      if not stat then
+        return nil
+      end
+      if stat.mtime.sec >= now - 2 then
+        return nil
+      end
+      parts[#parts + 1] = ("%s\t%d\t%d.%d"):format(file, stat.size, stat.mtime.sec, stat.mtime.nsec)
+    end
+  end
+  table.sort(parts)
+  return table.concat(paths, "\n") .. "\0" .. table.concat(parts, "\n")
+end
+
+---@type { key: string, view: Rules.Contract.View }|nil
+local cache
 
 ---@param file string
 ---@return string|nil bytes
@@ -196,16 +245,10 @@ end
 ---@field load_errors string[]
 ---@field rev string
 
----Scan the configured rulesets once into the shapes the documents use.
----@param opts Rules.Contract.Opts|nil
----@return Rules.Contract.View|nil view
----@return Lib.Contract.Error|nil err
-function M.view(opts)
-  local paths = ruleset_paths(opts)
-  if #paths == 0 then
-    return nil, errors.fail("not_found", "no ruleset is configured (rulesets is empty)")
-  end
-
+---@param paths string[]
+---@return Rules.Contract.View
+local function build_view(paths)
+  local names = root_names(paths)
   local parsed, load_errors = loader.load(paths)
 
   ---@type table<string, { etag: string, count: integer }>
@@ -232,7 +275,7 @@ function M.view(opts)
       severity = rule.severity,
       title = rule.title or "",
       section = rule.section or "",
-      source = display_path(paths, rule.source_file),
+      source = display_path(paths, names, rule.source_file),
       line = rule.source_line,
       has_check = rule.check ~= nil,
       check_type = type(rule.check) == "table" and type(rule.check.type) == "string" and rule.check.type or nil,
@@ -256,7 +299,7 @@ function M.view(opts)
 
   local files, lines = {}, {}
   for file, info in pairs(by_file) do
-    files[#files + 1] = { path = display_path(paths, file), rules = info.count, etag = info.etag }
+    files[#files + 1] = { path = display_path(paths, names, file), rules = info.count, etag = info.etag }
   end
   table.sort(files, function(a, b)
     return json.bytes_less(a.path, b.path)
@@ -274,7 +317,7 @@ function M.view(opts)
   for _, message in ipairs(load_errors) do
     local text = (message:gsub("\\", "/"))
     for _, root in ipairs(by_length) do
-      text = text:gsub(vim.pesc(root), (root_name(root):gsub("%%", "%%%%")))
+      text = text:gsub(vim.pesc(root), (names[root]:gsub("%%", "%%%%")))
     end
     for _, root in ipairs(by_length) do
       text = d.redact(root, text)
@@ -290,8 +333,32 @@ function M.view(opts)
     files = files,
     load_errors = scrubbed,
     rev = d.rev_of(lines),
-  },
-    nil
+  }
+end
+
+---Scan the configured rulesets into the shapes the documents use. The answer is kept while no `.md` file of the
+---rulesets changed (size and modification time), so a persistent host does not parse the ruleset for every
+---question; the table is shared, a caller must not change it.
+---@param opts Rules.Contract.Opts|nil
+---@return Rules.Contract.View|nil view
+---@return Lib.Contract.Error|nil err
+function M.view(opts)
+  local paths = ruleset_paths(opts)
+  if #paths == 0 then
+    return nil, errors.fail("not_found", "no ruleset is configured (rulesets is empty)")
+  end
+  local key = signature(paths)
+  if key and cache and cache.key == key then
+    return cache.view, nil
+  end
+  local view = build_view(paths)
+  cache = key and { key = key, view = view } or nil
+  return view, nil
+end
+
+---Forget the kept scan (the writer of the rule files calls this after a write).
+function M.clear_cache()
+  cache = nil
 end
 
 ---@param view Rules.Contract.View
