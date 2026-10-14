@@ -732,6 +732,18 @@ describe(":Rules new, set, retire, move, list", function()
       assert.is_nil(contract.view(nil).full["DEP-02"].check)
     end)
 
+    it("leaves the check line byte for byte where only the agent is set, as the command says it does", function()
+      local line = 'check = { type = "grep", pattern = "foo" },'
+      assert.is_truthy(read_raw(rule_path("DEP-02")):find(line, 1, true))
+      run('Rules set DEP-02 agent={"question":"Is it so?"}')
+      local text = read_raw(rule_path("DEP-02"))
+      assert.is_truthy(text:find(line, 1, true))
+      assert.is_truthy(text:find("agent = ", 1, true))
+      run("Rules set DEP-02 agent=")
+      assert.is_truthy(read_raw(rule_path("DEP-02")):find(line, 1, true))
+      assert.is_nil(read_raw(rule_path("DEP-02")):find("agent = ", 1, true))
+    end)
+
     it("tells what is wrong with the line, and what the engine refuses, word for word", function()
       run("Rules set DEP-01")
       assert.is_true(told("nothing to set"))

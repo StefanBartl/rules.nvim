@@ -106,8 +106,9 @@ function M.routes()
         { key = "agent", type = "STRING", desc = "The agent question as a JSON object, or nothing to remove it" },
       },
       flags = M.FLAGS.set,
-      desc = "Change parts of a rule's file (key=value, a value may hold spaces): everything else in the file stays "
-        .. "byte for byte; an open buffer of the file is reloaded, one with unsaved changes is reported",
+      desc = "Change parts of a rule's file (key=value, a value may hold spaces): every line it was not asked "
+        .. "to change stays byte for byte; an open buffer of the file is reloaded, one with unsaved changes is "
+        .. "reported",
       run = handler("set"),
     },
     {
