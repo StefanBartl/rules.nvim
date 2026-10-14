@@ -895,7 +895,18 @@ local function do_reinstate(op, ctx)
       return refuse("invalid_argument", "the retired file would not read as a rule: " .. tostring((rerrs or {})[1] or "unknown"))
     end
     if ctx.dry then
+      -- the target and the placement are checked too: a dry run that says "yes" must not fail on them
+      if vim.uv.fs_stat(target) then
+        return fail(ctx, errors.fail("conflict", "a file is where the rule would go back to"))
+      end
       entry.outcome = "would_reinstate"
+      if where then
+        local out, pwhy = place_in_layout(ctx, new_tx(), root, op.id, where)
+        if not out then
+          return refuse("invalid_argument", tostring(pwhy))
+        end
+        entry.placed = json.object({ layout = out })
+      end
       return entry
     end
     local tx = new_tx()
@@ -907,7 +918,11 @@ local function do_reinstate(op, ctx)
     if where then
       local out, pwhy = place_in_layout(ctx, tx, root, op.id, where)
       if not out then
-        return stopped(ctx, tx, tostring(pwhy))
+        local stop = stopped(ctx, tx, tostring(pwhy))
+        if stop.error.code == "io" then
+          stop.error.code = "invalid_argument"
+        end
+        return stop
       end
       entry.placed = json.object({ layout = out })
     end
@@ -1006,7 +1021,7 @@ local function do_move(op, ctx)
     if not placed_text then
       return refuse("invalid_argument", tostring(why))
     end
-    if base == (home and home.text or nil) then
+    if home and target.path == home.path and placed_text == home.text then
       entry.outcome = "unchanged"
       return entry
     end
