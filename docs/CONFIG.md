@@ -180,9 +180,29 @@ runs the template's own steps; it arranges the copies as a vault (`rulesets/lua`
 then repeats the run with one id made a second time and expects red:
 
 ```bash
-RULES_REAL_LUA=~/WKDBooks/Development/wkdbook-Lua/Checklists RULES_REAL_NATIVE=~/WKDBooks/Development/wkdbook-native/Checklists \
+RULES_REAL_LUA=<folder of the first ruleset> RULES_REAL_NATIVE=<folder of the second ruleset> \
   scripts/test.sh --file vault_ci
 ```
+
+### Pull before you make a rule
+
+Ids are given under a lock **per machine**. Two machines that each make a rule in one family without a pull in between
+make **the same id**. The rule for working with a vault on more than one machine: **pull before you create** (`git pull`
+in the vault folder). Three things back it up, none of them replaces it:
+
+- **A warning before the clash.** `:Rules new` and the `new` operation of `rules-ops/1` look, read only and without the
+  network, whether the vault is a git repository that lies behind its upstream (`git rev-list --count HEAD..@{u}`, a
+  3 second limit; silent when there is no git, no upstream or no vault, and for a ruleset that is not in the vault). If it
+  does, the entry of the result carries `warnings` (see [CONTRACT.md](CONTRACT.md#rules-ops1-write)), `:Rules new` shows
+  them as a warning after the line that says what was made, and the question of the form shows them before you confirm.
+  It is a **warning, not a refusal**: the rule is made. It knows what your last `git fetch` brought home, nothing more;
+  the engine never fetches.
+- **The engine never pulls, commits or pushes.** That stays with you (or the session), as with `tasks-vault`.
+- **A duplicate id fails the check.** It is a load error (`duplicate rule id DEP-07: ...`, both files named), so the CI of
+  the vault (above) and `scripts/ruleset.lua check` exit 1 on it, and the editor shows it as a warning when it loads.
+  When both machines made the id in the same ruleset, git itself stops the merge with an add/add conflict on the file
+  `DEP-07.md`; the check is what catches the cases git lets through (the same id in two rulesets, or under two file names).
+  Renumber or retire one of the two, then merge.
 
 ### `:checkhealth rules`
 

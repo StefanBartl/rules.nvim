@@ -138,6 +138,10 @@ function M.messages(result, op_list)
   for i, entry in ipairs(result.entries) do
     local level, text = describe(entry, op_list[i] or {})
     out[#out + 1] = { level = level, text = text }
+    -- told after the line that says what was made, at a level a person notices: the rule IS made
+    for _, warning in ipairs(entry.warnings or {}) do
+      out[#out + 1] = { level = "warn", text = warning }
+    end
     local catalog = entry.catalog
     if catalog and (catalog.errors or 0) > 0 then
       out[#out + 1] = {

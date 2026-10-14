@@ -20,7 +20,8 @@
 --- paths (`rules-export/1`).
 ---
 --- Reads only: `git_state` runs `git rev-parse` and `git status --porcelain` (no network, no lock, a timeout), and
---- says nothing when git is not installed.
+--- says nothing when git is not installed. `behind` runs `git rev-list --count HEAD..@{u}` the same way: how far the
+--- vault lies behind its upstream, the question `rules.ops` asks before a rule is made.
 
 local settings = require("rules.settings")
 
@@ -140,6 +141,32 @@ function M.git_state(root)
   end
   state.changes, state.clean = count, count == 0
   return state
+end
+
+---How long `behind` waits for git: it reads the local refs only, so this is a generous bound, not a typical time.
+M.BEHIND_TIMEOUT_MS = 3000
+
+---How many commits the upstream of the repository `root` lies in has that `HEAD` has not (`git rev-list --count
+---HEAD..@{u}`): what a `git pull` would bring. It knows only what the last `git fetch` brought home: no network, no
+---fetch, never a pull, no lock (`--no-optional-locks`), `BEHIND_TIMEOUT_MS` at most. Not `git_state`: that one runs
+---`git status`, which the creation of a rule does not need to wait for.
+---
+---`nil` is "nothing to say" and covers git not installed, not a repository, no commit yet, no upstream, a timeout
+---and anything git answers that is not a number: a warning that cannot be given is silence, never an error.
+---@param root string
+---@return integer|nil behind  commits to pull (0: up to date)
+function M.behind(root)
+  if vim.fn.executable("git") ~= 1 then
+    return nil
+  end
+  local done = require("lib.nvim.git").run(
+    { "rev-list", "--count", "HEAD..@{u}" },
+    { dir = root, timeout_ms = M.BEHIND_TIMEOUT_MS, read_only = true, no_lazy_fetch = true }
+  )
+  if done.timed_out or done.code ~= 0 then
+    return nil
+  end
+  return tonumber(vim.trim(done.stdout or ""))
 end
 
 return M

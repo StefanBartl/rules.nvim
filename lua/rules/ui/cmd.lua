@@ -162,6 +162,10 @@ function M.preview_text(op, entry)
   if entry.placed and entry.placed.layout then
     row("place", entry.placed.layout)
   end
+  for _, warning in ipairs(entry.warnings or {}) do
+    lines[#lines + 1] = ""
+    lines[#lines + 1] = "Warning: " .. warning
+  end
   lines[#lines + 1] = ""
   lines[#lines + 1] = "Back returns to the form: nothing is created."
   return table.concat(lines, "\n")
