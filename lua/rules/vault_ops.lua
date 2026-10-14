@@ -730,7 +730,13 @@ end
 ---@return string
 function M.display_path(path, rel, bufnr)
   if rel then
-    return require("lib.nvim.fs.relpath")(path, M.base_dir(bufnr))
+    -- both sides by real path: a buffer name and a vault path may spell one folder two ways (macOS /var and
+    -- /private/var, Windows 8.3 short names), and a relative path between the two spellings is a long run of `..`
+    local function canon(p)
+      local real = vim.uv.fs_realpath(p)
+      return real and norm(real) or p
+    end
+    return require("lib.nvim.fs.relpath")(canon(path), canon(M.base_dir(bufnr)))
   end
   return norm(path)
 end
