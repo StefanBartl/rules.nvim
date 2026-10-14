@@ -532,6 +532,84 @@ describe("rules-ops/1 retire, reinstate, move", function()
     assert.is_true(one(opts, { op = "move", id = "DEP-01", section = "Extra", layout = "regeln/DEP.md" }).ok)
     assert.are.equal(before, read_raw(root .. "/_rules/DEP/DEP-01.md"))
   end)
+
+  it("reports unchanged when a move puts the rule where it already is, on a real run and a dry run", function()
+    local root, opts = fixture()
+    local layout = root .. "/_layouts/regeln/DEP.md"
+    local doc_before = read_raw(root .. "/regeln/DEP.md")
+    for _, place in ipairs({ { after = "DEP-01" }, { section = "Core", layout = "regeln/DEP.md" } }) do
+      local op = vim.tbl_extend("force", { op = "move", id = place.after and "DEP-02" or "DEP-01" }, place)
+      op.first = place.section and true or nil
+      for _, extra in ipairs({ {}, { dry_run = true } }) do
+        local entry = one(opts, op, extra)
+        assert.is_true(entry.ok, vim.inspect(entry))
+        assert.are.equal("unchanged", entry.outcome, vim.inspect(op))
+        assert.are.same({}, entry.changed_ids)
+        assert.is_nil(entry.inverse)
+        assert.is_nil(entry.catalog)
+        assert.are.equal(LAYOUT_DEP, read_raw(layout))
+        assert.are.equal(doc_before, read_raw(root .. "/regeln/DEP.md"))
+      end
+    end
+    -- a real change still moves, and a dry run of it says so without writing
+    local dry = one(opts, { op = "move", id = "DEP-01", after = "DEP-02" }, { dry_run = true })
+    assert.are.equal("would_move", dry.outcome)
+    assert.are.equal(LAYOUT_DEP, read_raw(layout))
+  end)
+
+  it("reinstates a retired rule into a place, and a dry run says what the real run does", function()
+    local root, opts = fixture()
+    local original = read_raw(root .. "/_rules/DEP/DEP-02.md")
+    assert.is_true(one(opts, { op = "retire", id = "DEP-02" }).ok)
+    local retired_file = root .. "/_retired/DEP/DEP-02.md"
+    local retired = read_raw(retired_file)
+    local layout_after_retire = read_raw(root .. "/_layouts/regeln/DEP.md")
+
+    local op = { op = "reinstate", id = "DEP-02", after = "DEP-03" }
+    local dry = one(opts, op, { dry_run = true })
+    assert.is_true(dry.ok, vim.inspect(dry))
+    assert.are.equal("would_reinstate", dry.outcome)
+    assert.are.equal("regeln/DEP.md", dry.placed.layout)
+    assert.are.equal(retired, read_raw(retired_file))
+    assert.is_nil(read_raw(root .. "/_rules/DEP/DEP-02.md"))
+    assert.are.equal(layout_after_retire, read_raw(root .. "/_layouts/regeln/DEP.md"))
+
+    local real = one(opts, op)
+    assert.is_true(real.ok, vim.inspect(real))
+    assert.are.equal("reinstated", real.outcome)
+    assert.are.same(dry.placed, real.placed)
+    assert.are.same({ "DEP-02" }, real.changed_ids)
+    assert.are.equal(original, read_raw(root .. "/_rules/DEP/DEP-02.md"))
+    assert.is_nil(read_raw(retired_file))
+    assert.is_true(vim.tbl_contains(ids_of(opts), "DEP-02"))
+    local layout = read_raw(root .. "/_layouts/regeln/DEP.md")
+    assert.is_true(layout:find("DEP-03", 1, true) < layout:find("DEP-02", 1, true))
+    -- the inverse retires it again
+    assert.is_true(one(opts, real.inverse).ok)
+    assert.is_false(vim.tbl_contains(ids_of(opts), "DEP-02"))
+  end)
+
+  it("refuses a reinstate whose place does not exist the same way on a dry run and a real run, and writes nothing", function()
+    local root, opts = fixture()
+    assert.is_true(one(opts, { op = "retire", id = "DEP-02" }).ok)
+    local retired_file = root .. "/_retired/DEP/DEP-02.md"
+    local retired = read_raw(retired_file)
+    local layout = read_raw(root .. "/_layouts/regeln/DEP.md")
+    for _, op in ipairs({
+      { op = "reinstate", id = "DEP-02", after = "GHOST-01" },
+      { op = "reinstate", id = "DEP-02", section = "Core", layout = "regeln/NOPE.md" },
+    }) do
+      local dry = one(opts, op, { dry_run = true })
+      local real = one(opts, op)
+      assert.is_false(dry.ok, vim.inspect(op))
+      assert.is_false(real.ok, vim.inspect(op))
+      assert.are.equal("invalid_argument", dry.error.code, vim.inspect(dry))
+      assert.are.equal(dry.error.code, real.error.code, vim.inspect(real))
+      assert.are.equal(retired, read_raw(retired_file))
+      assert.is_nil(read_raw(root .. "/_rules/DEP/DEP-02.md"))
+      assert.are.equal(layout, read_raw(root .. "/_layouts/regeln/DEP.md"))
+    end
+  end)
 end)
 
 describe("rules-ops/1 the whole request", function()
