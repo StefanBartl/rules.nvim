@@ -10,10 +10,106 @@
 | `:Rules stats` | — | `--format=json` (optional) | Structural overview of every loaded rule: per-family totals, automated-vs-manual split, severity breakdown. No check runs — pure catalog metadata |
 | `:Rules catalog` | `[path]` (default: every folder in `rulesets`) | `--check` (optional) | For a ruleset in the one-file-per-rule form: builds the reading documents from their layouts ([RULESET-FORMAT.md](RULESET-FORMAT.md#layouts-and-catalogs)). A document is written only when its content changed. `--check` writes nothing and warns about every document that is out of date — for CI use `scripts/ruleset.lua catalog --check <folder>` (exit code 1 when one is). Names the rules that are in no layout |
 | `:Rules messages` | — | — | Opens this plugin's notify history (toast + `:messages` log, via `lib.nvim.notify.popup`) |
+| `:Rules new` | `[<FAMILY> [title...]]` | `severity=`, `text=`, `ruleset=`, `--to=`, `--after=`, `--before=`, `--first`, `--dry` | Makes a rule at the next free id of the family. With the family, a title and `severity=` the rule is made and opened; with less, the [form](#the-form) opens, filled in with what was given. See [Making, changing, retiring and moving rules](#making-changing-retiring-and-moving-rules) |
+| `:Rules set` | `<id>` | `severity=`, `title=`, `text=`, `check=`, `agent=`, `--dry` | Changes parts of a rule's file; everything else in the file stays byte for byte |
+| `:Rules retire` | `<id>` | `--by=<id>`, `reason=`, `--yes`, `--dry` | Moves a rule's file to `_retired/` and out of every layout; the id stays taken. Asks first |
+| `:Rules move` | `<id>` | `--to=<file>#<section>`, `--after=<id>`, `--before=<id>`, `--first`, `--dry` | Moves the rule's `{{rule ID}}` line within its layout or into another; the rule's own file is not touched |
+| `:Rules list` | — | `--family=<PREFIX>`, `--severity=<level>`, `--format=json` | Puts the rules in the quickfix list, each at its source line; `--format=json` prints the `rules.list` document of the [machine contract](CONTRACT.md) |
 
-No default keymaps are bound. `--family=`, a gate's `<name>`, and `:Rules
-show`'s `<id>` all tab-complete against whatever is actually loaded/
-configured right now.
+No default keymaps are bound (the form binds a few keys in its own buffer, see
+below). `--family=`, a gate's `<name>`, the `<id>` of `show`, `set`, `retire`
+and `move`, `--by=`, `--after=`, `--before=`, the severities, `--ruleset=` and
+the places of `--to=` (the layouts, then the headings of one layout) all
+tab-complete against whatever is actually loaded/configured right now.
+
+## Making, changing, retiring and moving rules
+
+`new`, `set`, `retire` and `move` are a thin layer over the write door of the
+machine contract, [`rules-ops/1`](CONTRACT.md#rules-ops1-write) (the same door
+an app or an agent uses): the command line is turned into one operation, the
+door does the work and answers, the answer is told. The commands check nothing
+of a rule themselves: a severity that is none, a title that is too long, an id
+that is not there, a layout that does not exist is what the door answers, word
+for word (`invalid_argument: severity must be one of ...`). The door only
+writes a ruleset in the one-file-per-rule form ([RULESET-FORMAT.md](RULESET-FORMAT.md)).
+
+```vim
+:Rules new DEP Use vim.uv instead of vim.loop severity=critical --after=DEP-01
+:Rules set DEP-06 severity=recommended title=A better title
+:Rules set DEP-06 check={"type":"grep","pattern":"vim%.loop"}
+:Rules set DEP-06 check=
+:Rules retire DEP-03 --by=DEP-09 reason=superseded by DEP-09
+:Rules move DEP-06 --to=regeln/DEP.md#Core
+:Rules move DEP-06 --to=regeln/DEP.md#Core\ Rules --first
+:Rules list --family=DEP --severity=critical
+```
+
+- **Words and values.** `key=value` words take a value with spaces: a word that
+  is no known `key=` goes on with the value before it (`title=A better title
+  severity=critical`). The words after the family of `new` and before the first
+  `key=` are the title. `check=` and `agent=` take a JSON object, or nothing to
+  remove the key (`null` in the patch); `text=` with nothing is an empty text.
+- **A place** is one of `--to=<file>#<section>` (`<file>` is the `output` path
+  of a layout, `<section>` the text of a heading; `--first` puts the rule at the
+  start of the section instead of its end), `--to=<file>` alone (the top of the
+  layout), `--after=<id>` or `--before=<id>` (in the layout that holds that
+  rule). A blank in a section is written with a backslash before it
+  (`#Core\ Rules`); `<Tab>` writes it so. A word that is left over is refused
+  with that hint, never taken for something else.
+- **`--dry`** is the door's `dry_run`: everything is checked and told, nothing is
+  written, no buffer is touched. `set --dry` shows the change as a diff.
+- **`retire` asks first** (`No` is the button the dialog starts on; `--yes`
+  skips the question). The door is asked with a dry run before the question,
+  so a rule that is not there or a `--by=` that does not exist is told without a
+  question. A session without a screen to ask on needs `--yes`. A retired rule
+  is brought back through the API (`reinstate`), there is no command for it yet.
+- **The open buffers of the ruleset** are looked after around every write: an
+  unmodified buffer of a file that changed (the rule, a layout, a generated
+  document) is reloaded; a buffer with **unsaved changes** is left as it is and
+  named as a conflict (the file on disk changed under it: `:edit!` takes the
+  file's version, `:write!` the buffer's); the buffer of a retired rule is left
+  open and named. A file the write did not change is never touched.
+- `list` shows the title without the id in front of it, which is the id column.
+
+### The form
+
+`:Rules new` with less than family, title and `severity=` opens a Markdown form
+in a scratch buffer (`rules://rule-new`), filled in with the family, title,
+severity, text and place the command line gave:
+
+```markdown
+# New rule
+Family: DEP
+Title: One line that names the rule
+Place: after DEP-03
+
+## severity (one)
+- [ ] critical
+- [x] recommended
+- [ ] nice-to-have
+
+## text
+The prose of the rule, as long as it needs.
+```
+
+Family, Title and one severity are required; Place is optional (`after <ID>`,
+`before <ID>`, `<file>#<section>` or `<file>`), a `Ruleset:` line appears when
+several rulesets are configured, and everything below `## text` is the prose.
+`<C-s>` submits: first the form says what is missing, all at once, as `!` lines
+at the top (they go away on the next submit); then the door runs a `dry_run`
+and a refusal is shown in the form too; then a question shows what would be
+made (id, severity, title, file, place) with `Back to the form` as the answer
+the dialog starts on; only `Create the rule` writes, closes the form and opens
+the new file. Nothing typed is lost on a refusal.
+
+Keys of the form (buffer-local, `g?` lists them):
+
+| Key | Does |
+| --- | --- |
+| `<Space>`, `<CR>` | tick or untick the severity under the cursor (one tick), anywhere else the key is what it always is |
+| `<C-s>` (normal and insert) | check, dry run, ask, write |
+| `q`, `<C-q>` | cancel; asks first when something was typed |
+| `g?` | help |
 
 `:Rules check`/`gate`/`stats`'s readable-buffer report reuses a still-open
 report window (any tab) instead of opening a fresh tab on every call — a

@@ -138,6 +138,14 @@ the first rule that stands above every heading, else under the frontmatter).
 
 ## Entry points
 
+### Neovim
+
+`:Rules new`, `set`, `retire`, `move` and `list` are a thin layer over `rules-ops/1` and `rules-export/1`
+(`rules.write`, `rules.ui.cmd`, [BINDINGS.md](BINDINGS.md#making-changing-retiring-and-moving-rules)): a command line
+or the Markdown form becomes one operation of the door, `dry_run` first where the user is asked, the answer is told as it
+is. The editor has no write logic of its own; after a write it reloads the open buffers of the files that changed and
+reports one with unsaved changes as a conflict.
+
 ### Command line
 
 ```bash
