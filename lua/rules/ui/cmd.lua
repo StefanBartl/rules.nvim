@@ -100,7 +100,8 @@ end
 ---Open the file of a rule.
 ---@param id string
 local function open_rule(id)
-  local scan = require("rules.contract").view(nil)
+  local contract = require("rules.contract")
+  local scan = contract.view(contract.editor_opts())
   local path = scan and scan.abs[id]
   if not path then
     return
@@ -443,7 +444,11 @@ end
 function M.list(ctx)
   local params = { family = ctx.flags.family, severity = ctx.flags.severity }
   if ctx.flags.format == "json" then
-    local text = require("rules.api").call("list", { params = vim.tbl_extend("force", params, { limit = 500 }) })
+    local text = require("rules.api").call(
+      "list",
+      { params = vim.tbl_extend("force", params, { limit = 500 }) },
+      require("rules.contract").editor_opts()
+    )
     print(text)
     return
   end
@@ -451,7 +456,8 @@ function M.list(ctx)
   local found, offset = {}, 0
   local total
   repeat
-    local doc, err = contract.list(vim.tbl_extend("force", params, { limit = contract.MAX_LIST_ITEMS, offset = offset }))
+    local doc, err =
+      contract.list(vim.tbl_extend("force", params, { limit = contract.MAX_LIST_ITEMS, offset = offset }), contract.editor_opts())
     if not doc then
       notify.error(("%s: %s"):format(err and err.code or "error", err and err.message or "the rules could not be listed"))
       return
@@ -469,7 +475,7 @@ function M.list(ctx)
     notify.info("no rule matches")
     return
   end
-  local scan = contract.view(nil)
+  local scan = contract.view(contract.editor_opts())
   local items = {}
   for _, item in ipairs(found) do
     local file = scan and scan.abs[item.id]

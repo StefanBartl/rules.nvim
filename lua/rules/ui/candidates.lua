@@ -23,7 +23,8 @@ local places_cache
 ---@return Rules.Contract.View|nil
 local function view()
   local ok, result = pcall(function()
-    return (require("rules.contract").view(nil))
+    local contract = require("rules.contract")
+    return (contract.view(contract.editor_opts()))
   end)
   return ok and result or nil
 end
