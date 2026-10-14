@@ -1,5 +1,5 @@
 > **Alpha — small, working surface.** The engine, the four check types,
-> `:Rules check`/`gate`/`show`/`stats`/`new`/`set`/`retire`/`move`/`list`, and waivers are real and tested.
+> `:Rules check`/`gate`/`show`/`stats`/`new`/`set`/`retire`/`move`/`list`, `:RulesVault`, and waivers are real and tested.
 > Pin a commit if you depend on this.
 
 # rules.nvim
@@ -50,7 +50,7 @@ provide — the same way you'd point ESLint at your own `.eslintrc`.
 ## Documentation
 
 - [Ruleset format](docs/RULESET-FORMAT.md) — how a rule and its `check` are written.
-- [Bindings](docs/BINDINGS.md) — the `:Rules` command and its subcommands, including the form of `:Rules new`.
+- [Bindings](docs/BINDINGS.md) — the `:Rules` command and its subcommands, including the form of `:Rules new`, and `:RulesVault` (find a rule, a family or a ruleset in the vault; make a vault).
 - [Settings files and the rules-vault](docs/CONFIG.md) — `.rules.json` in a project and in a vault, which place wins, `vault` / `$RULES_VAULT`, `@vault/<name>`.
 - [Agent-run manual rules](docs/AGENT.md) — planned, not built: how the rules with no `check` could be worked by an agent, as proposals a person reviews.
 - [Machine contract](docs/CONTRACT.md) — `rules-export/1` (the ruleset as JSON documents for apps, agents and CI) and `rules-ops/1` (create, change, retire and move a rule through the engine).
@@ -93,6 +93,12 @@ writer, the open buffers of a changed file are reloaded (a buffer with unsaved
 changes is reported, not overwritten). See
 [docs/BINDINGS.md](docs/BINDINGS.md#making-changing-retiring-and-moving-rules).
 
+`:RulesVault open DEP-06` goes to the file of a rule, `:RulesVault open DEP` to the folder of a family, `:RulesVault tree lua`
+shows a ruleset family by family, `:RulesVault clipboard DEP-06 --link` copies `[DEP-06](path)` (for a finding that
+becomes a task), and `:RulesVault create ~/rules-vault` makes a vault: it lists what happens and the one step that is
+yours (`vault = ...` in `setup()` or `$RULES_VAULT`), never overwrites a file and never adds a remote. See
+[docs/BINDINGS.md](docs/BINDINGS.md#finding-rules-in-the-vault).
+
 ## Why no bundled rules
 
 Most rule/lint tools that ship an opinionated default get forked or fought
@@ -116,16 +122,18 @@ installing it either.
 {
   "StefanBartl/rules.nvim",
   dependencies = { "StefanBartl/lib.nvim" },
-  cmd = { "Rules" },
+  cmd = { "Rules", "RulesVault" },
   opts = {
     rulesets = { "~/path/to/your/checklists" },
   },
 }
 ```
 
-`cmd = { "Rules" }`: the whole surface today is one usercommand (`check`,
-`gate`, `show`, `stats`, `catalog`, `new`, `set`, `retire`, `move`, `list`), run on
-demand — nothing here needs to run at startup.
+`cmd = { "Rules", "RulesVault" }`: the whole surface today is two usercommands, `:Rules` (`check`,
+`gate`, `show`, `stats`, `catalog`, `new`, `set`, `retire`, `move`, `list`) and
+`:RulesVault` (`open`, `clipboard`, `link`, `find`, `grep`, `tree`, `cdx`, `create`), run on
+demand — nothing here needs to run at startup. Without `RulesVault` in `cmd`, lazy.nvim
+does not know the command until `:Rules` has loaded the plugin.
 
 ## Quickstart
 

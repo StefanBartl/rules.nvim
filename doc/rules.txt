@@ -86,6 +86,9 @@ folder name (`lua`, `native`).
 :checkhealth rules shows the vault, where it came from, its rulesets, and
 whether it is a clean git repository (read-only, no network).
 
+|:RulesVault| opens, copies, links, searches and shows what is in the vault,
+and makes one (`:RulesVault create <dir>`).
+
 ==============================================================================
 COMMANDS                                                        *rules-commands*
 
@@ -199,6 +202,48 @@ COMMANDS                                                        *rules-commands*
 :Rules list [--family={PREFIX}] [--severity={level}] [--format=json]
     Puts the rules in the quickfix list, each at its source line. With
     --format=json prints the `rules.list` document of the machine contract.
+
+                                                                   *:RulesVault*
+:RulesVault {verb} [{ruleset}|{id}|{family}] [{part}]
+    Navigates to where the rules are, like :TasksVault does for tasks. It
+    reads and points; it writes nothing but the scaffold of `create`. A rule
+    is made by |:Rules_new|, so there is no `new` and no `paste`. The vault is
+    found as |rules-vault| says; without one every verb but `create` says so
+    once. A word is read as a ruleset of the vault (its folder name), a part,
+    a rule id or a family, in that order; `<Tab>` offers all of them. {part}
+    is one of
+    rules                   the rule files, `_rules/` (default)
+    layouts                 `_layouts/`
+    catalogs                the generated reading documents
+    all                     the ruleset folder
+    Without a word the ruleset is the one of the current buffer, the only
+    one, or a pick. A rule id or a family has no part.
+
+    open                    a rule file (a retired rule too), the folder of a
+                            family, or a part of a ruleset
+    clipboard               the path to the + register; --rel relative to the
+                            current file; --link as `[DEP-06](path)`
+    link                    a Markdown link at the cursor, relative to the
+                            current file
+    find, grep              a pickers.nvim picker in the ruleset (for an id:
+                            searching for the id), the family or the part
+    tree                    the ruleset as a tree, family then rules, counts
+                            per family, retired rules marked `[retired]`
+    cdx                     a prompt for an agent session to the + register
+    create [{dir}] [{name}] a vault: README.md, .rules.json,
+                            .gitattributes, .gitignore, the CI workflow and a
+                            first ruleset (default name `default`). Lists
+                            first what happens and the step that is left to
+                            you (set `vault` in setup() or $RULES_VAULT: it
+                            is marked REQUIRED), then asks. A file that is
+                            there is never overwritten; no remote is ever
+                            added.
+
+    --git                   create: run `git init` (only then)
+    --yes                   create: skip the question (needed without a screen)
+    --force                 create: make a vault although one is in use
+    --rel                   clipboard, cdx: relative to the current file
+    --link                  clipboard: a Markdown link
 
                                                                     *rules-form*
 THE FORM OF :Rules new ~
