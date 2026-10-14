@@ -47,6 +47,15 @@ local function rule_text(id, severity, body)
   return ("---\nid: %s\nseverity: %s\n---\n\n%s"):format(id, severity, body)
 end
 
+--- How long `fn` takes, in seconds.
+---@param fn fun()
+---@return number
+local function seconds(fn)
+  local started = vim.uv.hrtime()
+  fn()
+  return (vim.uv.hrtime() - started) / 1e9
+end
+
 describe("rules.engine.catalog.slug", function()
   it("drops what is not an ASCII letter, digit, hyphen or space and joins runs with one hyphen", function()
     assert.are.equal("lua-01-hart-oder-weich-aber-konsistent", catalog.slug("`LUA-01` — Hart oder weich, aber konsistent"))
@@ -70,6 +79,32 @@ describe("rules.engine.catalog.slug", function()
     )
     assert.are.equal("großes-ö", catalog.slug("Großes Ö", params))
     assert.are.equal("a_b-c", catalog.slug("a_b C", params))
+  end)
+
+  it("keeps the letters and digits of scripts that have no case with unicode = 1", function()
+    local params = vim.tbl_extend("force", catalog.TOC_DEFAULTS, { unicode = 1 })
+    assert.are.equal("日本語-regeln", catalog.slug("日本語 Regeln", params))
+    assert.are.equal("한국어-x", catalog.slug("한국어 x", params))
+    assert.are.equal("עברית-x", catalog.slug("עברית x", params))
+    assert.are.equal("ไทย-x", catalog.slug("ไทย x", params))
+    assert.are.equal("हिन्दी-x", catalog.slug("हिन्दी x", params))
+    assert.are.equal("١٢٣-x", catalog.slug("١٢٣ x", params))
+    -- punctuation, symbols and emoji still go
+    assert.are.equal("ab", catalog.slug("a€b", params))
+    assert.are.equal("ab", catalog.slug("a😀b", params))
+    assert.are.equal("ab", catalog.slug("a—b", params))
+    -- the signs × and ÷ are no letters, whatever 'iskeyword' says
+    assert.are.equal("3--4-matrix", catalog.slug("3 × 4 matrix", params))
+    assert.are.equal("10--2", catalog.slug("10 ÷ 2", params))
+  end)
+
+  it("does not depend on 'iskeyword' for the anchors of Latin-1 letters", function()
+    local params = vim.tbl_extend("force", catalog.TOC_DEFAULTS, { unicode = 1 })
+    local saved = vim.o.iskeyword
+    vim.o.iskeyword = "a-z,A-Z,_"
+    local slug = catalog.slug("Größe Café × ÿ", params)
+    vim.o.iskeyword = saved
+    assert.are.equal("größe-café--ÿ", slug)
   end)
 
   it("leaves no hyphen at either end", function()
@@ -121,6 +156,33 @@ describe("rules.engine.catalog table of contents", function()
     )
   end)
 
+  it("hands the anchor parameters on to the anchors", function()
+    local headings = { "# T", "## `WEB-11` — `if_match`", "## Große Straße" }
+    local function anchors(params)
+      return vim.tbl_map(function(line)
+        return line:match("%(#(.-)%)")
+      end, catalog.toc_lines(headings, vim.tbl_extend("force", catalog.TOC_DEFAULTS, params)))
+    end
+    assert.are.same({ "web-11-if_match", "groe-strae" }, anchors({}))
+    assert.are.same({ "web-11-ifmatch", "groe-strae" }, anchors({ underscore = 0 }))
+    assert.are.same({ "web-11--if_match", "große-straße" }, anchors({ unicode = 1 }))
+  end)
+
+  it("hands the parameters of a {{toc}} token on to the anchors of the document", function()
+    local layout = assert(catalog.parse_layout(layout_text("a.md", { "{{toc underscore=0}}", "## if_match", "## if_match" })))
+    local text = catalog.render(layout, function()
+      return nil, "unused"
+    end)
+    assert.are.equal("  - [if_match](#ifmatch)\n  - [if_match](#ifmatch-1)\n## if_match\n## if_match\n", text)
+  end)
+
+  it("numbers every repeat of an anchor", function()
+    assert.are.same(
+      { "  - [A](#a)", "  - [A](#a-1)", "  - [A](#a-2)", "  - [A](#a-3)" },
+      catalog.toc_lines({ "# T", "## A", "## A", "## A", "## A" })
+    )
+  end)
+
   it("reads the token", function()
     assert.are.same(catalog.TOC_DEFAULTS, catalog.parse_toc_token("{{toc}}"))
     assert.are.same(catalog.TOC_DEFAULTS, catalog.parse_toc_token("{{toc }}"))
@@ -128,6 +190,46 @@ describe("rules.engine.catalog table of contents", function()
     assert.are.same({ max = 2, base = 0, step = 2, unicode = 1, underscore = 1 }, params)
     assert.are.same({ nil, nil }, { catalog.parse_toc_token("not a token") })
     assert.are.same({ nil, nil }, { catalog.parse_toc_token("{{rule A-1}}") })
+  end)
+
+  it("takes whitespace after the token, but not before it", function()
+    assert.are.same(catalog.TOC_DEFAULTS, catalog.parse_toc_token("{{toc}}  "))
+    assert.are.same(catalog.TOC_DEFAULTS, catalog.parse_toc_token("{{toc}}\t"))
+    assert.are.same(catalog.TOC_DEFAULTS, catalog.parse_toc_token("{{toc}}\r"))
+    assert.are.same({ max = 2, base = 2, step = 2, unicode = 0, underscore = 1 }, catalog.parse_toc_token("{{toc max=2}} "))
+    assert.are.same({ nil, nil }, { catalog.parse_toc_token("  {{toc}}") })
+    assert.are.same({ nil, nil }, { catalog.parse_toc_token("{{toc}} and more") })
+  end)
+
+  it("is not slowed down by a hostile line", function()
+    -- a run of blanks, then a character that ends the token for good: the pattern this replaced was cubic in the run
+    local blanks = "{{toc" .. (" "):rep(3000) .. "x"
+    assert.are.same({ nil, nil }, { catalog.parse_toc_token(blanks) })
+    assert.is_true(seconds(function()
+      catalog.parse_toc_token(blanks)
+    end) < 0.25)
+
+    -- a long token: its parameters are searched for `=`, which a run of non-blanks makes quadratic
+    local long = "{{toc " .. ("a"):rep(20000) .. "}}"
+    local params, err = catalog.parse_toc_token(long)
+    assert.is_nil(params)
+    assert.matches("longer than", err)
+    assert.is_true(seconds(function()
+      catalog.parse_toc_token(long)
+    end) < 0.25)
+
+    -- a long line that only starts like a token is text, as before
+    assert.are.same({ nil, nil }, { catalog.parse_toc_token("{{toc " .. ("a"):rep(20000)) })
+  end)
+
+  it("is not slowed down by a heading with a long run of blanks in it", function()
+    local spaced = { "# T", "## a" .. (" "):rep(40000) .. "b" }
+    local lines
+    assert.is_true(seconds(function()
+      lines = catalog.toc_lines(spaced)
+    end) < 0.25)
+    assert.are.equal(1, #lines)
+    assert.matches("^  %- %[a +b%]%(#a%-b%)$", lines[1])
   end)
 
   it("refuses a bad token", function()
@@ -207,6 +309,25 @@ describe("rules.engine.catalog.parse_layout", function()
     local missing, err = catalog.parse_layout("---\nkind: layout\n---\nbody\n")
     assert.is_nil(missing)
     assert.matches("`output`", err)
+  end)
+
+  it("refuses an output that is not a valid file name on every system", function()
+    for _, output in ipairs({
+      "docs/x:y.md", -- on NTFS a stream of the file `x`
+      "docs/q?.md",
+      "docs/a*.md",
+      "docs/bad<name>.md",
+      "docs/a|b.md",
+      'docs/"q".md',
+      "a//b.md",
+      "docs./x.md", -- Windows drops the dot: `docs/x.md`
+      "docs /x.md",
+    }) do
+      local parsed, err = catalog.parse_layout(layout(output))
+      assert.is_nil(parsed, output)
+      assert.is_string(err, output)
+    end
+    assert.are.equal("my docs/a-b_c.md", assert(catalog.parse_layout(layout("my docs/a-b_c.md"))).output)
   end)
 end)
 
@@ -378,6 +499,26 @@ describe("rules.engine.catalog.render", function()
     assert.are.equal("say {{rule A-1}} in prose\n  {{toc}}\n", text)
   end)
 
+  it("takes a token followed by whitespace, as the editors leave it", function()
+    local layout = assert(catalog.parse_layout(layout_text("a.md", { "{{rule A-1}} ", "{{rule A-2}}\t", "{{toc}}  " })))
+    local text, problems, used = catalog.render(layout, lookup)
+    assert.are.same({}, problems)
+    assert.are.same({ "A-1", "A-2" }, used)
+    assert.is_nil(text:find("{{", 1, true))
+    assert.matches("%- %[`A%-1` — One%]", text)
+  end)
+
+  it("is not slowed down by a hostile line", function()
+    local hostile = "{{toc" .. (" "):rep(3000) .. "x"
+    local layout = assert(catalog.parse_layout(layout_text("a.md", { hostile, "{{rule" .. (" "):rep(30000) .. "x" })))
+    local text, problems
+    assert.is_true(seconds(function()
+      text, problems = catalog.render(layout, lookup)
+    end) < 0.5)
+    assert.are.same({}, problems)
+    assert.are.equal(hostile .. "\n{{rule" .. (" "):rep(30000) .. "x\n", text)
+  end)
+
   it("makes a header that cannot end its comment early", function()
     local header = catalog.header("a--b>/c.md")
     assert.matches("^" .. vim.pesc(parser.GENERATED_PREFIX), header)
@@ -491,6 +632,35 @@ describe("rules.engine.catalog.build", function()
     assert.are.same({ "ERR-01" }, results[1].unused)
   end)
 
+  it("names only rule files as in no layout, and reads a document once however many rules it holds", function()
+    --- Build a ruleset with a layout and one document of `n` rules; how often the document was read, and the result.
+    local function build_with_document(n)
+      local root = ruleset()
+      local blocks = {}
+      for i = 1, n do
+        blocks[#blocks + 1] = ('## R%d\n\n```rule\nid = "OLD-%d",\nseverity = "critical",\n```\n'):format(i, i)
+      end
+      write(root .. "/legacy.md", "# Legacy\n\n" .. table.concat(blocks, "\n"))
+      local reads = 0
+      local original = vim.fn.readfile
+      vim.fn.readfile = function(path, ...)
+        if tostring(path):find("legacy.md", 1, true) then
+          reads = reads + 1
+        end
+        return original(path, ...)
+      end
+      local ok, results = pcall(catalog.build, root, { check = true })
+      vim.fn.readfile = original
+      assert(ok, results)
+      return reads, results
+    end
+
+    local few, results = build_with_document(3)
+    local many = build_with_document(40)
+    assert.are.same({ "ERR-01" }, results[1].unused)
+    assert.are.equal(few, many, "the document is read the same number of times for 3 rules and for 40")
+  end)
+
   it("reports a layout it cannot fill and writes nothing for it", function()
     local root = ruleset()
     write(root .. "/_layouts/regeln/BAD.md", "---\nkind: layout\noutput: regeln/BAD.md\n---\n{{rule NOPE-9}}\n")
@@ -520,6 +690,222 @@ describe("rules.engine.catalog.build", function()
     end
     assert.are.equal(1, statuses.error)
     assert.is_nil(read(vim.fs.dirname(root) .. "/escape.md"))
+  end)
+
+  --- The result of the layout `name` (a part of its path).
+  ---@param results Rules.CatalogResult[]
+  ---@param name string
+  ---@return Rules.CatalogResult
+  local function result_of(results, name)
+    for _, result in ipairs(results) do
+      if result.layout:find(name, 1, true) then
+        return result
+      end
+    end
+    error("no result for " .. name)
+  end
+
+  describe("with an output that would destroy something", function()
+    it("keeps a layout whose output is the layout itself", function()
+      local root = ruleset()
+      local text = layout_text("_layouts/self.md", { "{{rule DEP-01}}" })
+      write(root .. "/_layouts/self.md", text)
+
+      for _, opts in ipairs({ {}, { check = true }, {} }) do
+        local self = result_of(catalog.build(root, opts), "self.md")
+        assert.are.equal("error", self.status)
+        assert.matches("is a layout", self.problems[1])
+        assert.are.equal(text, read(root .. "/_layouts/self.md"))
+      end
+      assert.are.equal(1, select(3, require("rules").catalog(root)))
+    end)
+
+    it("keeps a rule file whose path is the output", function()
+      local root = ruleset()
+      local rule_path = root .. "/_rules/DEP/DEP-02.md"
+      local before = read(rule_path)
+      write(root .. "/_layouts/EVIL.md", layout_text("_rules/DEP/DEP-02.md", { "{{rule DEP-01}}" }))
+
+      local evil = result_of(catalog.build(root), "EVIL.md")
+
+      assert.are.equal("error", evil.status)
+      assert.matches("is a rule file", evil.problems[1])
+      assert.are.equal(before, read(rule_path))
+      assert.are.equal(3, #require("rules.engine.loader").load({ root }))
+    end)
+
+    it("keeps another layout whose path is the output", function()
+      local root = ruleset()
+      local other = layout_text("other.md", { "{{rule ERR-01}}" })
+      write(root .. "/_layouts/other.md", other)
+      write(root .. "/_layouts/EVIL.md", layout_text("_layouts/other.md", { "{{rule DEP-01}}" }))
+
+      local results = catalog.build(root)
+
+      assert.are.equal("error", result_of(results, "EVIL.md").status)
+      assert.are.equal(other, read(root .. "/_layouts/other.md"))
+      assert.are.equal("written", result_of(results, "other.md").status)
+    end)
+
+    it("keeps a document with rules whose path is the output", function()
+      local root = ruleset()
+      local legacy = '```rule\nid = "OLD-1",\nseverity = "critical",\n```\n'
+      write(root .. "/legacy.md", legacy)
+      write(root .. "/_layouts/EVIL.md", layout_text("legacy.md", { "{{rule DEP-01}}" }))
+
+      for _, adopt in ipairs({ false, true }) do
+        local evil = result_of(catalog.build(root, { adopt = adopt }), "EVIL.md")
+        assert.are.equal("error", evil.status)
+        assert.matches("document with rules", evil.problems[1])
+        assert.are.equal(legacy, read(root .. "/legacy.md"))
+      end
+    end)
+
+    it("says the same of a path that only spells another one differently", function()
+      if vim.fn.has("win32") == 0 and vim.fn.has("mac") == 0 then
+        return -- the file system tells the cases apart
+      end
+      local root = ruleset()
+      -- the folder in another case: the same file
+      local text = layout_text("_LAYOUTS/self.md", { "{{rule DEP-01}}" })
+      write(root .. "/_layouts/self.md", text)
+
+      local self = result_of(catalog.build(root), "self.md")
+
+      assert.are.equal("error", self.status)
+      assert.matches("is a layout", self.problems[1])
+      assert.are.equal(text, read(root .. "/_layouts/self.md"))
+    end)
+
+    it("gives an output to the first layout and refuses it to the next", function()
+      local root = ruleset()
+      write(root .. "/_layouts/regeln/DEP2.md", layout_text("regeln/DEP.md", { "{{rule ERR-01}}" }))
+
+      local results = catalog.build(root)
+      assert.are.equal("written", result_of(results, "regeln/DEP.md").status)
+      local second = result_of(results, "DEP2.md")
+      assert.are.equal("error", second.status)
+      assert.matches("already the output of _layouts/regeln/DEP.md", second.problems[1])
+      local first_text = read(root .. "/regeln/DEP.md")
+      assert.matches("from _layouts/regeln/DEP.md", first_text)
+
+      -- not "written" over and over, and not "stale" for good: the second is an error every time, the first is done
+      for _, opts in ipairs({ { check = true }, {}, { check = true } }) do
+        results = catalog.build(root, opts)
+        assert.are.equal("unchanged", result_of(results, "regeln/DEP.md").status)
+        assert.are.equal("error", result_of(results, "DEP2.md").status)
+      end
+      assert.are.equal(first_text, read(root .. "/regeln/DEP.md"))
+      assert.are.equal(1, select(3, require("rules").catalog(root, { check = true })))
+    end)
+
+    it("counts the rules of a layout that is refused as placed: the output is the fault to tell", function()
+      local root = ruleset()
+      write(root .. "/_layouts/EVIL.md", layout_text("_layouts/EVIL.md", { "{{rule ERR-01}}" }))
+      local results = catalog.build(root)
+      assert.are.same({}, results[1].unused)
+    end)
+  end)
+
+  describe("with an output that already exists", function()
+    it("does not replace a document nobody generated", function()
+      local root = ruleset()
+      local readme = "# My notes\n\nWritten by hand.\n"
+      write(root .. "/regeln/DEP.md", readme)
+
+      for _, opts in ipairs({ { check = true }, {} }) do
+        local result = catalog.build(root, opts)[1]
+        assert.are.equal("error", result.status)
+        assert.matches("not a generated document", result.problems[1])
+        assert.are.equal(readme, read(root .. "/regeln/DEP.md"))
+      end
+      assert.are.equal(1, select(3, require("rules").catalog(root)))
+    end)
+
+    it("replaces it when it is adopted, and from then on it is a generated document", function()
+      local root = ruleset()
+      write(root .. "/regeln/DEP.md", "# My notes\n")
+
+      assert.are.equal("stale", catalog.build(root, { adopt = true, check = true })[1].status)
+      assert.are.equal("written", catalog.build(root, { adopt = true })[1].status)
+      assert.matches("^" .. vim.pesc(parser.GENERATED_PREFIX), read(root .. "/regeln/DEP.md"))
+      assert.are.equal("unchanged", catalog.build(root, { check = true })[1].status)
+    end)
+
+    it("replaces an empty file and a generated document", function()
+      local root = ruleset()
+      write(root .. "/regeln/DEP.md", "")
+      assert.are.equal("written", catalog.build(root)[1].status)
+      write(root .. "/_rules/DEP/DEP-01.md", rule_text("DEP-01", "critical", "#### `DEP-01` — Eins\n\nAnders.\n"))
+      assert.are.equal("written", catalog.build(root)[1].status)
+      write(root .. "/regeln/DEP.md", "\n  \n")
+      assert.are.equal("written", catalog.build(root)[1].status)
+    end)
+
+    it("knows a generated document that starts with a byte order mark", function()
+      local root = ruleset()
+      catalog.build(root)
+      write(root .. "/_rules/DEP/DEP-01.md", rule_text("DEP-01", "critical", "#### `DEP-01` — Eins\n\nAnders.\n"))
+      write(root .. "/regeln/DEP.md", "\239\187\191" .. read(root .. "/regeln/DEP.md"))
+      assert.are.equal("written", catalog.build(root)[1].status)
+    end)
+  end)
+
+  describe("with a link on the way of the output", function()
+    --- A directory link at `link` to `target`; false when the system does not let this user make one.
+    ---@param target string
+    ---@param link string
+    ---@return boolean
+    local function link_dir(target, link)
+      return vim.uv.fs_symlink(target, link, { dir = true, junction = true }) == true
+    end
+
+    it("does not write through it out of the ruleset", function()
+      local root = ruleset()
+      local outside = tmp_dir()
+      write(outside .. "/keep.md", "ORIGINAL\n")
+      if not link_dir(outside, root .. "/link") then
+        return -- no right to make a link here
+      end
+      write(root .. "/_layouts/EVIL.md", layout_text("link/keep.md", { "{{rule DEP-01}}" }))
+      write(root .. "/_layouts/EVIL2.md", layout_text("link/new/pwn.md", { "{{rule DEP-01}}" }))
+
+      for _, opts in ipairs({ { check = true }, {} }) do
+        local results = catalog.build(root, opts)
+        for _, name in ipairs({ "EVIL.md", "EVIL2.md" }) do
+          assert.are.equal("error", result_of(results, name).status, name)
+          assert.matches("leaves the ruleset", result_of(results, name).problems[1])
+        end
+      end
+      assert.are.equal("ORIGINAL\n", read(outside .. "/keep.md"))
+      assert.are.same({ "keep.md" }, vim.fn.readdir(outside), "nothing else was made there")
+      assert.are.equal("unchanged", result_of(catalog.build(root), "regeln/DEP.md").status, "the honest layout was written above")
+    end)
+
+    it("does not write through a link below a folder either", function()
+      local root = ruleset()
+      local outside = tmp_dir()
+      vim.fn.mkdir(root .. "/docs", "p")
+      if not link_dir(outside, root .. "/docs/sub") then
+        return -- no right to make a link here
+      end
+      write(root .. "/_layouts/EVIL.md", layout_text("docs/sub/deep/x.md", { "{{rule DEP-01}}" }))
+
+      assert.are.equal("error", result_of(catalog.build(root), "EVIL.md").status)
+      assert.are.same({}, vim.fn.readdir(outside))
+    end)
+
+    it("writes through a link that stays inside the ruleset", function()
+      local root = ruleset()
+      vim.fn.mkdir(root .. "/real", "p")
+      if not link_dir(root .. "/real", root .. "/alias") then
+        return
+      end
+      write(root .. "/_layouts/ALIAS.md", layout_text("alias/x.md", { "{{rule DEP-01}}" }))
+
+      assert.are.equal("written", result_of(catalog.build(root), "ALIAS.md").status)
+      assert.is_truthy(read(root .. "/real/x.md"))
+    end)
   end)
 
   it("reports a rule that is not in a rule file", function()
@@ -576,6 +962,25 @@ describe("rules.catalog", function()
     assert.are.equal(0, code_after)
 
     require("rules.config").setup({ rulesets = {} })
+  end)
+
+  it("gives exit code 1 for an output that would destroy a file, and writes nothing", function()
+    local root = tmp_dir()
+    write(root .. "/_rules/DEP/DEP-01.md", rule_text("DEP-01", "critical", "#### `DEP-01` — Eins\n\nText.\n"))
+    write(root .. "/README.md", "# Hand-written\n")
+    write(root .. "/_layouts/DEP.md", "---\nkind: layout\noutput: README.md\n---\n{{rule DEP-01}}\n")
+
+    for _, opts in ipairs({ { check = true }, {} }) do
+      local results, errors, code = require("rules").catalog(root, opts)
+      assert.are.equal(1, code)
+      assert.are.equal("error", results[1].status)
+      assert.are.same({}, errors)
+      assert.are.equal("# Hand-written\n", read(root .. "/README.md"))
+    end
+
+    local _, _, adopted = require("rules").catalog(root, { adopt = true })
+    assert.are.equal(0, adopted)
+    assert.matches("^" .. vim.pesc(parser.GENERATED_PREFIX), read(root .. "/README.md"))
   end)
 
   it("ignores a ruleset entry that is a single file", function()
