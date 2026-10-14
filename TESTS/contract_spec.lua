@@ -342,7 +342,9 @@ describe("rules.api", function()
     local root, opts = fixture()
     opts.rulesets = { root, root .. "/", root .. "/./" }
     local paths, names = contract.rulesets(opts)
-    assert.are.same({ vim.fs.normalize(root) }, paths)
+    -- compared by the real path: a runner's temp folder may be spelled with an 8.3 short name
+    assert.are.equal(1, #paths)
+    assert.are.equal(vim.uv.fs_realpath(root), vim.uv.fs_realpath(paths[1]))
     assert.are.equal("Checklists", names[paths[1]])
 
     local doc = call("snapshot", nil, opts)
