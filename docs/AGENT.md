@@ -36,7 +36,9 @@ An agent's answer is a proposal, never a verdict:
 3. `engine/agent/plan.lua` and `engine/agent/validate.lua`, pure functions with
    no `vim.api` and no network. `plan(rules, root)` returns requests batched
    per scope: several rules that look at the same files share one request, the
-   scope is set per family in `.rules.json` or `setup()` and can be overridden
+   scope is set per family in `.rules.json` or `setup()` (both are read, checked and merged
+   today, [CONFIG.md](CONFIG.md): `agent.scopes`, `batch_size`, `max_context_bytes`,
+   `deny`, `backends`, `models`; nothing consumes them yet) and can be overridden
    per rule. `validate(rule, text, root)` parses the answer and checks every
    quoted line
    against the tree as it is now, dropping what does not occur there. Sending

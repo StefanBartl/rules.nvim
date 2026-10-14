@@ -8,7 +8,7 @@
 | `:Rules gate` | `<name>` (required), `[path]` (defaults to cwd) | `--diff=<git-ref>` (optional), `--format=json` (optional) | Runs every family configured for gate `name` (`setup({ gates = {...} })`) as one combined report. `--diff=<git-ref>` narrows findings to files changed since that ref (`git diff --name-only` + untracked files) — a rule with no findings inside the diff reports as `pass` even if the repo has standing issues elsewhere. `--format=json` behaves like `:Rules check`'s. A configured family matching zero loaded rules (typo, or not migrated yet) warns instead of silently shrinking the gate |
 | `:Rules show` | `<id>` (required) | — | Jumps to one rule's source location by its exact id, without running a family check. Errors if no loaded rule has that id |
 | `:Rules stats` | — | `--format=json` (optional) | Structural overview of every loaded rule: per-family totals, automated-vs-manual split, severity breakdown. No check runs — pure catalog metadata |
-| `:Rules catalog` | `[path]` (default: every folder in `rulesets`) | `--check` (optional) | For a ruleset in the one-file-per-rule form: builds the reading documents from their layouts ([RULESET-FORMAT.md](RULESET-FORMAT.md#layouts-and-catalogs)). A document is written only when its content changed. `--check` writes nothing and warns about every document that is out of date — for CI use `scripts/ruleset.lua catalog --check <folder>` (exit code 1 when one is). Names the rules that are in no layout |
+| `:Rules catalog` | `[path]` (default: every folder in the settings' `rulesets`, or of the vault; `@vault/<name>` names one) | `--check` (optional) | For a ruleset in the one-file-per-rule form: builds the reading documents from their layouts ([RULESET-FORMAT.md](RULESET-FORMAT.md#layouts-and-catalogs)). A document is written only when its content changed. `--check` writes nothing and warns about every document that is out of date — for CI use `scripts/ruleset.lua catalog --check <folder>` (exit code 1 when one is). Names the rules that are in no layout |
 | `:Rules messages` | — | — | Opens this plugin's notify history (toast + `:messages` log, via `lib.nvim.notify.popup`) |
 | `:Rules new` | `[<FAMILY> [title...]]` | `severity=`, `text=`, `ruleset=`, `--to=`, `--after=`, `--before=`, `--first`, `--yes`, `--dry` | Makes a rule at the next free id of the family (1 to 12 uppercase letters `A-Z`). With the family, a title and `severity=` the rule is made and opened (a family no rule has yet is asked about first, `--yes` skips the question); with less, the [form](#the-form) opens, filled in with what was given. See [Making, changing, retiring and moving rules](#making-changing-retiring-and-moving-rules) |
 | `:Rules set` | `<id>` | `severity=`, `title=`, `text=`, `check=`, `agent=`, `--dry` | Changes parts of a rule's file; every line it was not asked to change stays byte for byte (see [what `set` leaves alone](#making-changing-retiring-and-moving-rules)) |
@@ -199,6 +199,11 @@ require("rules").setup({
   },
 })
 ```
+
+Gates (and `rulesets`) can also come from a `.rules.json` in the project root or in a
+[vault](CONFIG.md): `setup()` wins over the project file, which wins over the vault's file,
+gate by gate. The project for `:Rules check` and `:Rules gate` is their `path` argument
+(default: the working directory).
 
 A `rulesets` entry is expanded (`~`, `$VAR`/`${VAR}`, `%VAR%`) before it is
 checked, so the `~/...` form above works as written. A path that still
