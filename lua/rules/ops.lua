@@ -396,6 +396,7 @@ end
 ---@param where table
 ---@return string|nil output
 ---@return string|nil why
+---@return "io"|nil kind   "io" when the layout could not be written (the place itself was fine)
 local function place_in_layout(ctx, tx, root, id, where)
   local all = layouts_of(root)
   local target
@@ -429,10 +430,10 @@ local function place_in_layout(ctx, tx, root, id, where)
   if not ctx.dry then
     local ok, err = write_in(tx, target.path, new_text)
     if not ok then
-      return nil, tostring(err)
+      return nil, tostring(err), "io"
     end
   end
-  return target.output, nil
+  return target.output, nil, nil
 end
 
 ---Put the token of the rule of `op` at every place of `wheres`. The answer is `{ layout }` for one place given as
@@ -444,12 +445,13 @@ end
 ---@param wheres table[]
 ---@return table|nil placed
 ---@return string|nil why
+---@return "io"|nil kind   "io" when a layout could not be written
 local function place_all(ctx, tx, root, op, wheres)
   local outs = {}
   for _, where in ipairs(wheres) do
-    local out, why = place_in_layout(ctx, tx, root, op.id, where)
+    local out, why, kind = place_in_layout(ctx, tx, root, op.id, where)
     if not out then
-      return nil, tostring(why)
+      return nil, tostring(why), kind
     end
     outs[#outs + 1] = out
   end
@@ -575,6 +577,9 @@ local function do_new(op, ctx)
       return bad
     end
     local id = contract.next_free(view, op.family)
+    if not id then
+      return refuse("invalid_argument", ("the family %s has no id left (an id has at most 100 bytes)"):format(op.family))
+    end
     local text, terr = rule_edit.render_new({
       id = id,
       severity = op.severity,
@@ -609,10 +614,11 @@ local function do_new(op, ctx)
     end
     tx.created[#tx.created + 1] = path
     if where then
-      local out, pwhy = place_in_layout(ctx, tx, root, id, where)
+      local out, pwhy, pkind = place_in_layout(ctx, tx, root, id, where)
       if not out then
         local stop = stopped(ctx, tx, tostring(pwhy))
-        if stop.error.code == "io" then
+        -- a refused place is the caller's bad input; a layout that could not be written is an io failure
+        if stop.error.code == "io" and pkind ~= "io" then
           stop.error.code = "invalid_argument"
         end
         return stop
@@ -1005,10 +1011,10 @@ local function do_reinstate(op, ctx)
       return fail(ctx, err == "exists" and errors.fail("conflict", "a file is where the rule would go back to") or err)
     end
     tx.created[#tx.created + 1] = target
-    local placed, pwhy = place_all(ctx, tx, root, op, wheres)
+    local placed, pwhy, pkind = place_all(ctx, tx, root, op, wheres)
     if pwhy then
       local stop = stopped(ctx, tx, pwhy)
-      if stop.error.code == "io" then
+      if stop.error.code == "io" and pkind ~= "io" then
         stop.error.code = "invalid_argument"
       end
       return stop
@@ -1030,6 +1036,25 @@ local function do_reinstate(op, ctx)
 end
 
 -- ── move ────────────────────────────────────────────────────────────────────────
+
+---Whether two layout texts hold the same lines in the same order, blank lines apart: taking a token out collapses a
+---doubled blank line, so a rule put back at its own place need not give back the same text.
+---@param a string
+---@param b string
+---@return boolean
+local function same_order(a, b)
+  local function content(text)
+    local out = {}
+    for _, line in ipairs(vim.split(text, "\n", { plain = true })) do
+      local bare = line:gsub("%s+$", "")
+      if bare ~= "" then
+        out[#out + 1] = bare
+      end
+    end
+    return out
+  end
+  return vim.deep_equal(content(a), content(b))
+end
 
 ---@param op table
 ---@param ctx Rules.OpsCtx
@@ -1060,11 +1085,23 @@ local function do_move(op, ctx)
 
   return locked(ctx, root, function()
     local all = layouts_of(root)
+    -- the layout the rule is taken from: of those that hold it, the one that is named (a move inside it), else the
+    -- first that also holds the anchor, else the first
     local home
+    local anchor0 = where.after or where.before
     for _, layout in ipairs(all) do
       if layout_edit.has(layout.text, op.id) then
-        home = layout
-        break
+        if where.layout ~= nil and layout.output == where.layout then
+          home = layout
+          break
+        end
+        if not home then
+          home = layout
+        end
+        if where.layout == nil and anchor0 and layout_edit.has(layout.text, anchor0) then
+          home = layout
+          break
+        end
       end
     end
     local entry = { ok = true, id = op.id, changed_ids = {} }
@@ -1108,7 +1145,7 @@ local function do_move(op, ctx)
     if not placed_text then
       return refuse("invalid_argument", tostring(why))
     end
-    if home and target.path == home.path and placed_text == home.text then
+    if home and target.path == home.path and same_order(placed_text, home.text) then
       entry.outcome = "unchanged"
       return entry
     end

@@ -618,10 +618,14 @@ local function numbering(view)
   return seen
 end
 
----The id one past the highest number of a family, in the width the family uses (at least two digits).
+---The longest id a rule may have (`docs/RULESET-FORMAT.md`): a longer one would not read back.
+local MAX_ID_BYTES = 100
+
+---The id one past the highest number of a family, in the width the family uses (at least two digits). `nil` when
+---that id would be longer than an id may be: there is no id left in the family.
 ---@param family string
 ---@param s { top: string, width: integer }|nil  nil: nothing is numbered in this family yet
----@return string
+---@return string|nil
 local function successor(family, s)
   local top, width = s and s.top or "", s and s.width or 2
   local out, carry = {}, 1
@@ -634,14 +638,18 @@ local function successor(family, s)
     out[#out + 1] = "1"
   end
   local digits = table.concat(out):reverse()
-  return family .. "-" .. ("0"):rep(width - #digits) .. digits
+  local id = family .. "-" .. ("0"):rep(width - #digits) .. digits
+  if #id > MAX_ID_BYTES then
+    return nil
+  end
+  return id
 end
 
 ---The next free id of a family in a scan: one past the highest id taken, loaded or retired, with the width the
----family uses (at least two digits). An id is never given twice.
+---family uses (at least two digits). An id is never given twice. `nil` when the id would be longer than an id may be.
 ---@param view Rules.Contract.View
 ---@param family string
----@return string id
+---@return string|nil id
 function M.next_free(view, family)
   return successor(family, numbering(view)[family])
 end

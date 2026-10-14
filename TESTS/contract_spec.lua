@@ -264,6 +264,31 @@ describe("rules.api", function()
     assert.are.equal("BIG-100000000000000000", contract.next_free(assert(contract.view({ rulesets = { root } })), "BIG"))
   end)
 
+  it("next_id never gives an id longer than an id may be: the family has no `next` once none is left", function()
+    local root = tmp_dir() .. "/fixture/Checklists"
+    -- FIT-1 and 95 zeros is exactly 100 bytes; BIG-<96 nines> is 100 bytes already, one past it would be 103
+    for _, id in ipairs({ "FIT-" .. ("9"):rep(95), "BIG-" .. ("9"):rep(96) }) do
+      local family = id:match("^(%a+)")
+      assert.is_true(#id <= 100)
+      write_raw(
+        ("%s/_rules/%s/%s.md"):format(root, family, id),
+        ("---\nid: %s\nseverity: nice-to-have\nfamily: %s\n---\n\n#### `%s` — big\n\nText.\n"):format(id, family, id)
+      )
+    end
+    local doc, code = call("next_id", nil, { rulesets = { root } })
+    assert.is_nil(code, vim.inspect(doc))
+    local by_family = {}
+    for _, item in ipairs(doc.items) do
+      by_family[item.family] = item
+    end
+    assert.are.equal(2, #doc.items, vim.inspect(doc.items))
+    assert.are.equal("FIT-1" .. ("0"):rep(95), by_family.FIT.next)
+    assert.are.equal(100, #by_family.FIT.next)
+    assert.is_nil(by_family.BIG.next, "the id after BIG-99...9 would be longer than an id may be")
+    assert.are.equal(1, by_family.BIG.count)
+    assert.is_nil(contract.next_free(assert(contract.view({ rulesets = { root } })), "BIG"))
+  end)
+
   it("sources lists the files with an etag each", function()
     local _, opts = fixture()
     local doc = call("sources", nil, opts)
