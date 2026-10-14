@@ -95,13 +95,15 @@ is true only if all entries are. `dry_run` checks everything and writes nothing.
 | --- | --- | --- |
 | `new` | `family`, `title`, `severity`, `text`?, `check`?, `agent`?, a place?, `ruleset`? | Creates `<ruleset>/_rules/<FAMILY>/<ID>.md` with the next free id (loaded and retired ids count) under the ruleset's lock. With a place the rule also goes into a layout. `inverse`: `retire`. |
 | `set` | `id`, `patch` { `severity`?, `title`?, `text`?, `check`?, `agent`? }, `if_match`? | Changes parts of the rule's file by editing lines: everything else (other prose, line endings, the final newline) stays byte for byte. `null` for `check` or `agent` removes it. `inverse`: `set` with the values before. |
-| `retire` | `id`, `replaced_by`?, `reason`?, `if_match`? | Moves the file to `_retired/` (the id stays taken) and takes the rule out of the layouts. `inverse`: `reinstate`. |
-| `reinstate` | `id`, a place? | Brings a retired rule back to the file it came from. `inverse`: `retire`. |
+| `retire` | `id`, `replaced_by`?, `reason`?, `if_match`? | Moves the file to `_retired/` (the id stays taken) and takes the rule out of every layout that holds it. `inverse`: `reinstate` with `places`, one entry for each layout the rule stood in. |
+| `reinstate` | `id`, a place? or `places`? | Brings a retired rule back to the file it came from. `places` (`{ "regeln/DEP.md": { "after": "DEP-01" } }`, keyed by the `output` of the layout, goes alone) puts it back into each of those layouts. `inverse`: `retire`. |
 | `move` | `id`, a place | Moves the `{{rule ID}}` line of the rule within a layout or to another one; the rule's file is not touched. `inverse`: `move` back. |
 
 A **place** is `after` or `before` (an id that stands in a layout; the layout
-is the one that holds it) or `section` (a heading text) with `layout` (the
-`output` path of the layout, `regeln/DEP.md`) and optionally `first`.
+is the one that holds it, or the one named by `layout`), `section` (a heading
+text) with `layout` (the `output` path of the layout, `regeln/DEP.md`) and
+optionally `first`, or `top` with `layout` (the start of the layout: before
+the first rule that stands above every heading, else under the frontmatter).
 
 - **Compare-and-set.** `if_match` is the `etag` the client saw. A file that is
   another version is a `conflict` entry with `details.expected` and
@@ -121,7 +123,9 @@ is the one that holds it) or `section` (a heading text) with `layout` (the
   with a comment; the prose and the severity of such a rule can still change.
 - **The documents.** After a write the generated documents (`catalog`) are made
   again, once; each changed entry says how many were written and how many had
-  an error.
+  an error, for its own ruleset. A ruleset whose operation started to write is
+  made again also when the operation failed after it started to write (a step
+  back that fails leaves files half changed).
 
 ## Entry points
 
