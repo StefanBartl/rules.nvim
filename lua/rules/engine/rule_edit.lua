@@ -7,8 +7,10 @@
 --- The boundaries are the reader's own (`parser.text_range`, the block and heading the splitter found).
 ---
 --- What can be patched: `severity` (frontmatter, and the block's own `severity` when it repeats it), `title` (the
---- heading), `text` (the prose), `check` and `agent` (the block; `vim.NIL` removes a key). The block is written again
---- from its evaluated table, so a block with a Lua function or a comment is refused: it stays a thing to edit by hand.
+--- heading), `text` (the prose), `check` and `agent` (the block; `vim.NIL` removes a key). A `check` or `agent` patch
+--- writes the block again from its evaluated table, so a block with a Lua function or a comment is refused for it: it
+--- stays a thing to edit by hand. A `severity` or `text` patch never writes the block again: the block's own
+--- `severity` literal is changed in place, comments and functions stay.
 ---
 --- The result is read back with the loader's own parser and compared with what was asked for; a text that would
 --- not read as the patch says (a prose with a heading in it, an invalid `agent`) is refused, never written.
@@ -141,6 +143,80 @@ local function holds_function(value)
   return false
 end
 
+---Walks the source of a block the way Lua reads it, so a string or a long bracket is never taken for a comment. Tells
+---whether the source holds a comment, and where the string literals of its top-level `severity = "..."` stand (the
+---line of the source, the first and the last column of the literal, quotes included).
+---@param source string
+---@return boolean comment
+---@return { line: integer, from: integer, to: integer }[] severities
+local function scan(source)
+  local comment, found = false, {}
+  local depth, i, n = 0, 1, #source
+
+  ---the index after the long bracket that opens at `at`, nil when none opens there
+  local function skip_long(at)
+    local eq = source:match("^%[(=*)%[", at)
+    if not eq then
+      return nil
+    end
+    local _, close = source:find("]" .. eq .. "]", at + #eq + 2, true)
+    return (close or n) + 1
+  end
+
+  ---the index of the closing quote of the short string that opens at `at` (an unfinished one ends at its line)
+  local function skip_string(at)
+    local quote_char = source:sub(at, at)
+    local j = at + 1
+    while j <= n do
+      local d = source:sub(j, j)
+      if d == BACKSLASH then
+        j = j + 2
+      elseif d == quote_char or d == "\n" then
+        break
+      else
+        j = j + 1
+      end
+    end
+    return j
+  end
+
+  while i <= n do
+    local c = source:sub(i, i)
+    if c == "-" and source:sub(i + 1, i + 1) == "-" then
+      comment = true
+      i = skip_long(i + 2) or ((source:find("\n", i, true) or n) + 1)
+    elseif c == '"' or c == "'" then
+      i = skip_string(i) + 1
+    elseif c == "[" and skip_long(i) then
+      i = skip_long(i)
+    elseif c == "{" then
+      depth, i = depth + 1, i + 1
+    elseif c == "}" then
+      depth, i = depth - 1, i + 1
+    elseif c:match("[%a_]") then
+      local name = source:match("^[%a_][%w_]*", i)
+      local after = i + #name
+      i = after
+      if name == "severity" and depth == 0 and source:sub(after - #name - 1, after - #name - 1) ~= "." then
+        local from = source:match([=[^%s*=%s*()["']]=], after)
+        if from then
+          local stop = skip_string(from)
+          local before = source:sub(1, from - 1)
+          local _, breaks = before:gsub("\n", "")
+          local line_start = before:match(".*\n()") or 1
+          if source:sub(stop, stop) == source:sub(from, from) and not source:sub(from, stop):find("\n", 1, true) then
+            found[#found + 1] = { line = breaks + 1, from = from - line_start + 1, to = stop - line_start + 1 }
+          end
+          i = stop + 1
+        end
+      end
+    else
+      i = i + 1
+    end
+  end
+  return comment, found
+end
+
 ---The lines of a block (without the fences) for a table: `id`, `severity`, `check`, `agent`, then the rest in byte
 ---order.
 ---@param tbl table
@@ -192,17 +268,19 @@ local function split_lines(text)
     lines[#lines] = nil
     final = true
   end
+  -- without a final newline the last line has no line break of its own, so it has no CR to count
+  local counted = final and #lines or #lines - 1
   local crlf = 0
-  for _, line in ipairs(lines) do
-    if line:sub(-1) == "\r" then
+  for i = 1, counted do
+    if lines[i]:sub(-1) == "\r" then
       crlf = crlf + 1
     end
   end
-  local mixed = crlf > 0 and crlf < #lines
+  local mixed = crlf > 0 and crlf < counted
   local eol = (crlf > 0 and not mixed) and "\r\n" or "\n"
   if eol == "\r\n" then
-    for i, line in ipairs(lines) do
-      lines[i] = line:sub(1, -2)
+    for i = 1, counted do
+      lines[i] = lines[i]:sub(1, -2)
     end
   end
   return lines, eol, final, mixed
@@ -287,7 +365,20 @@ function M.apply(path, text, patch)
     end
   end
 
-  if edit_block or (patch.severity ~= nil and rule_file.block) then
+  if not edit_block and patch.severity ~= nil and rule_file.block then
+    -- the block repeats the severity: change that one literal in place, the rest of the block stays as it is
+    local block = rule_file.block
+    if block.fence > 0 then
+      return nil, "the rule block sits inside a longer fence; edit it by hand"
+    end
+    local s, e = off + block.s, off + block.e
+    local _, found = scan(table.concat(lines, "\n", s + 1, e - 1))
+    for k = #found, 1, -1 do
+      local at, row = found[k], lines[s + found[k].line]
+      local quote_char = row:sub(at.from, at.from)
+      lines[s + at.line] = row:sub(1, at.from - 1) .. quote_char .. patch.severity .. quote_char .. row:sub(at.to + 1)
+    end
+  elseif edit_block then
     local block = rule_file.block
     local tbl = {}
     local s, e
@@ -296,22 +387,16 @@ function M.apply(path, text, patch)
         return nil, "the rule block sits inside a longer fence; edit it by hand"
       end
       s, e = off + block.s, off + block.e
-      local inner = {}
-      for i = s + 1, e - 1 do
-        inner[#inner + 1] = lines[i]
-      end
-      local source = table.concat(inner, "\n")
-      if source:find("--", 1, true) then
-        if edit_block then
-          return nil, "the rule block has a comment; edit it by hand"
-        end
+      local source = table.concat(lines, "\n", s + 1, e - 1)
+      if scan(source) then
+        return nil, "the rule block has a comment; edit it by hand"
       end
       local value, why = sandbox.eval_table(source, "rule@" .. path)
       if not value then
         return nil, ("the rule block does not evaluate: %s"):format(tostring(why))
       end
       tbl = value
-      if holds_function(tbl) and edit_block then
+      if holds_function(tbl) then
         return nil, "the rule block holds a Lua function; edit it by hand"
       end
     end
@@ -324,35 +409,33 @@ function M.apply(path, text, patch)
     if patch.agent ~= nil then
       tbl.agent = patch.agent ~= vim.NIL and patch.agent or nil
     end
-    if edit_block or (block and tbl.severity ~= nil) then
-      if next(tbl) == nil then
-        if block then
-          -- the block says nothing now: take it out with one blank line, so no double blank is left behind
-          local to = e
-          if lines[e + 1] == "" then
-            to = e + 1
-          end
-          replace(lines, s, to, {})
+    if next(tbl) == nil then
+      if block then
+        -- the block says nothing now: take it out with one blank line, so no double blank is left behind
+        local to = e
+        if lines[e + 1] == "" then
+          to = e + 1
         end
+        replace(lines, s, to, {})
+      end
+    else
+      local rendered, why = block_lines(tbl)
+      if not rendered then
+        return nil, why
+      end
+      local fenced = { "```rule" }
+      vim.list_extend(fenced, rendered)
+      fenced[#fenced + 1] = "```"
+      if block then
+        replace(lines, s, e, fenced)
       else
-        local rendered, why = block_lines(tbl)
-        if not rendered then
-          return nil, why
+        local at = rule_file.heading and (off + rule_file.heading) or off
+        local insert = { "" }
+        vim.list_extend(insert, fenced)
+        if not rule_file.heading then
+          insert[#insert + 1] = ""
         end
-        local fenced = { "```rule" }
-        vim.list_extend(fenced, rendered)
-        fenced[#fenced + 1] = "```"
-        if block then
-          replace(lines, s, e, fenced)
-        else
-          local at = rule_file.heading and (off + rule_file.heading) or off
-          local insert = { "" }
-          vim.list_extend(insert, fenced)
-          if not rule_file.heading then
-            insert[#insert + 1] = ""
-          end
-          replace(lines, at + 1, at, insert)
-        end
+        replace(lines, at + 1, at, insert)
       end
     end
   end
