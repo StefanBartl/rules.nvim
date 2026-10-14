@@ -763,7 +763,7 @@ describe("rules.engine.catalog.build", function()
 
     it("says the same of a path that only spells another one differently", function()
       if vim.fn.has("win32") == 0 and vim.fn.has("mac") == 0 then
-        return -- the file system tells the cases apart
+        pending("the file system tells the cases apart")
       end
       local root = ruleset()
       -- the folder in another case: the same file
@@ -865,7 +865,7 @@ describe("rules.engine.catalog.build", function()
       local outside = tmp_dir()
       write(outside .. "/keep.md", "ORIGINAL\n")
       if not link_dir(outside, root .. "/link") then
-        return -- no right to make a link here
+        pending("no right to make a link here")
       end
       write(root .. "/_layouts/EVIL.md", layout_text("link/keep.md", { "{{rule DEP-01}}" }))
       write(root .. "/_layouts/EVIL2.md", layout_text("link/new/pwn.md", { "{{rule DEP-01}}" }))
@@ -887,7 +887,7 @@ describe("rules.engine.catalog.build", function()
       local outside = tmp_dir()
       vim.fn.mkdir(root .. "/docs", "p")
       if not link_dir(outside, root .. "/docs/sub") then
-        return -- no right to make a link here
+        pending("no right to make a link here")
       end
       write(root .. "/_layouts/EVIL.md", layout_text("docs/sub/deep/x.md", { "{{rule DEP-01}}" }))
 

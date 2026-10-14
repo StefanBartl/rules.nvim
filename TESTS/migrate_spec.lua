@@ -788,7 +788,7 @@ describe("rules.engine.migrate.run", function()
       local root = ruleset()
       local outside = tmp_dir()
       if not link_dir(outside, root .. "/_rules") then
-        return -- no right to make a link here
+        pending("no right to make a link here")
       end
       local report = migrate.run(root, { write = true })
       assert.is_true(#report.problems >= 1)
@@ -868,7 +868,7 @@ describe("rules.engine.migrate.run", function()
       local report = migrate.run(root, { write = true })
       vim.uv.fs_chmod(path, tonumber("644", 8))
       if not honoured then
-        return -- this user can write to anything (root): nothing to refuse
+        pending("this user can write to anything (root): nothing to refuse")
       end
       assert.matches("is not writable", table.concat(report.problems, "\n"), 1, true)
       assert.are.same({}, report.written)
@@ -909,7 +909,7 @@ describe("rules.engine.migrate.run", function()
 
   it("refuses two rules that would be one file on a case-insensitive system", function()
     if vim.fn.has("win32") == 0 and vim.fn.has("mac") == 0 then
-      return -- there `A/A-1.md` and `a/a-1.md` are two files
+      pending("on a case-sensitive file system A/A-1.md and a/a-1.md are two files")
     end
     local root = tmp_dir()
     write(
