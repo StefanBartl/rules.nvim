@@ -180,6 +180,46 @@ function M.find_rule(id)
   return nil
 end
 
+--- Build the reading documents ("catalogs") of a ruleset in the one-file-per-rule form from its
+--- layouts (`docs/RULESET-FORMAT.md`), or with `check` only say which are out of date (CI).
+--- Without `path` every directory in `setup({ rulesets })` is built. Headless/CI use: no
+--- notification, no quit -- `(results, errors, exit_code)`, the exit code is `1` when a document is
+--- stale (check), a layout cannot be filled, or the ruleset has load errors.
+---@param path string|nil  a ruleset directory
+---@param opts? { check?: boolean }
+---@return Rules.CatalogResult[] results
+---@return string[] errors
+---@return 0|1 exit_code
+function M.catalog(path, opts)
+  opts = opts or {}
+  local catalog = require("rules.engine.catalog")
+  local roots = {}
+  if path then
+    roots[1] = path
+  else
+    for _, ruleset in ipairs(config.get().rulesets) do
+      if vim.fn.isdirectory(require("lib.nvim.cross.fs.expand_path")(ruleset)) == 1 then
+        roots[#roots + 1] = ruleset
+      end
+    end
+  end
+  local results, errors, code = {}, {}, 0
+  for _, root in ipairs(roots) do
+    local built, load_errors = catalog.build(root, opts)
+    for _, result in ipairs(built) do
+      results[#results + 1] = result
+      if result.status == "stale" or result.status == "error" or #result.problems > 0 then
+        code = 1
+      end
+    end
+    for _, err in ipairs(load_errors) do
+      errors[#errors + 1] = err
+      code = 1
+    end
+  end
+  return results, errors, code
+end
+
 ---@class Rules.FamilyStats
 ---@field total integer
 ---@field checked integer  rules with a `check` field

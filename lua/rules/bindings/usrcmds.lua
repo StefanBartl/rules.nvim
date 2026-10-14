@@ -176,6 +176,44 @@ function M.setup()
         end,
       },
       {
+        path = { "catalog" },
+        args = { { name = "path", type = "DIR", optional = true, desc = "Ruleset folder (default: every folder in rulesets)" } },
+        flags = {
+          { name = "check", bool = true, desc = "Only report documents that are out of date, write nothing" },
+        },
+        desc = "Build the reading documents of a one-file-per-rule ruleset from its layouts; --check for CI",
+        run = function(ctx)
+          local results, errors, code = require("rules").catalog(ctx.args.path, { check = ctx.flags.check == true })
+          local counts = { written = 0, unchanged = 0, stale = 0, error = 0 }
+          for _, result in ipairs(results) do
+            counts[result.status] = counts[result.status] + 1
+            for _, problem in ipairs(result.problems) do
+              notify.error(problem)
+            end
+            if result.status == "stale" then
+              notify.warn(("%s is out of date -- run :Rules catalog"):format(result.output))
+            end
+            for _, id in ipairs(result.unused or {}) do
+              notify.warn(("rule %s is in no layout"):format(id))
+            end
+          end
+          for _, err in ipairs(errors) do
+            notify.warn(err)
+          end
+          local summary = ("catalog: %d written, %d unchanged, %d stale, %d with errors"):format(
+            counts.written,
+            counts.unchanged,
+            counts.stale,
+            counts.error
+          )
+          if code == 0 then
+            notify.info(summary)
+          else
+            notify.warn(summary)
+          end
+        end,
+      },
+      {
         path = { "messages" },
         desc = "Open this plugin's notify history (toast + :messages log)",
         run = function()
