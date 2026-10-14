@@ -68,7 +68,12 @@ writes a ruleset in the one-file-per-rule form ([RULESET-FORMAT.md](RULESET-FORM
   document) is reloaded; a buffer with **unsaved changes** is left as it is and
   named as a conflict (the file on disk changed under it: `:edit!` takes the
   file's version, `:write!` the buffer's); the buffer of a retired rule is left
-  open and named. A file the write did not change is never touched.
+  open and named. A file the write did not change is never touched. A buffer
+  that cannot be reloaded (a window with `'winfixbuf'`, an autocmd that fails
+  `BufReadPre`) keeps its old text and is set `modified` and `readonly`, so `:w`
+  cannot put the old text (or an empty one) over the new file; it is named, and
+  `:edit!` reads the file again. An autocmd that fails only after the read
+  (`BufReadPost`) leaves a buffer that holds the new file: it counts as reloaded.
 - `list` shows the title without the id in front of it, which is the id column.
 
 ### The form
