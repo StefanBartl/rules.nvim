@@ -11,6 +11,18 @@ local function write_raw(path, text)
   f:close()
 end
 
+---@param path string
+---@return string|nil
+local function read_bytes(path)
+  local f = io.open(path, "rb")
+  if not f then
+    return nil
+  end
+  local text = f:read("*a")
+  f:close()
+  return text
+end
+
 ---@param buf integer
 ---@return string
 local function text_of(buf)
@@ -135,20 +147,74 @@ describe("rules.buffers", function()
     assert.are.same({}, buffers.snapshot({ root }))
   end)
 
-  it("names a buffer it could not reload as stale (an autocmd vetoes the read)", function()
-    local buf = open(file)
-    local snaps = buffers.snapshot({ root })
-    write_raw(file, "two\n")
-    local veto = vim.api.nvim_create_autocmd("BufReadPre", {
+  ---Refresh with a throwaway autocmd that throws on `event`.
+  ---@param event string
+  ---@param snaps Rules.BufferSnap[]
+  ---@return Rules.BufferReport
+  local function refresh_vetoed(event, snaps)
+    local veto = vim.api.nvim_create_autocmd(event, {
       callback = function()
         error("vetoed")
       end,
     })
-    local report = buffers.refresh(snaps)
+    local ok, report = pcall(buffers.refresh, snaps)
     vim.api.nvim_del_autocmd(veto)
+    assert(ok, report)
+    return report
+  end
+
+  it("names a buffer it could not reload as stale, with its old text kept (an autocmd vetoes the read)", function()
+    local buf = open(file)
+    local snaps = buffers.snapshot({ root })
+    write_raw(file, "two\n")
+    local report = refresh_vetoed("BufReadPre", snaps)
     assert.are.equal(1, #report.stale)
     assert.are.same({}, report.reloaded)
     assert.is_true(vim.api.nvim_buf_is_valid(buf))
+    -- the vetoed `:edit` had emptied the buffer: the text is the old text again, not "" that looks unmodified
+    assert.are.equal("one", text_of(buf))
+    assert.is_true(vim.bo[buf].modified)
+    assert.is_true(vim.bo[buf].readonly)
+    -- `:w` cannot put the old text over the file the write made, nor an empty one
+    assert.is_false(pcall(vim.api.nvim_buf_call, buf, function()
+      vim.cmd("silent write")
+    end))
+    assert.are.equal("two\n", (read_bytes(file)))
+    -- `:edit!` reads the file again and takes the marks away
+    vim.api.nvim_buf_call(buf, function()
+      vim.cmd("silent keepalt edit!")
+    end)
+    assert.are.equal("two", text_of(buf))
+    assert.is_false(vim.bo[buf].modified)
+    assert.is_false(vim.bo[buf].readonly)
+  end)
+
+  it("does not call a buffer stale whose read went through and was vetoed only afterwards", function()
+    local buf = open(file)
+    local snaps = buffers.snapshot({ root })
+    write_raw(file, "two\n")
+    local report = refresh_vetoed("BufReadPost", snaps)
+    assert.are.same({}, report.stale)
+    assert.are.equal(1, #report.reloaded)
+    assert.are.equal("two", text_of(buf))
+    assert.is_false(vim.bo[buf].modified)
+    assert.is_false(vim.bo[buf].readonly)
+  end)
+
+  it("finds the buffer of a file that is not there yet under a link to the ruleset", function()
+    local link = vim.fn.tempname() .. "-link"
+    if vim.uv.fs_symlink(root, link, { dir = true, junction = true }) ~= true then
+      pending("no right to make a link here")
+      return
+    end
+    local ghost = link .. "/_rules/DEP/DEP-09.md"
+    local buf = open(ghost)
+    -- the ruleset is named by its real path, the buffer by the link (macOS: /var and /private/var)
+    local snaps = buffers.snapshot({ root })
+    vim.uv.fs_unlink(link)
+    vim.uv.fs_rmdir(link)
+    assert.are.equal(1, #snaps)
+    assert.are.equal(buf, snaps[1].buf)
   end)
 
   it("takes a ruleset that is one file", function()

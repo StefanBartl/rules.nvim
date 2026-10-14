@@ -169,7 +169,10 @@ function M.messages(result, op_list)
     if #report.stale > 0 then
       out[#out + 1] = {
         level = "warn",
-        text = ("%s changed on disk and could not be reloaded: :edit! reads it again"):format(shown(report.stale)),
+        text = (
+          "%s changed on disk and could not be reloaded: the buffer shows the old text and is set modified and"
+          .. " readonly, so :w cannot put it over the new file (:edit! reads the file again)"
+        ):format(shown(report.stale)),
       }
     end
   end
