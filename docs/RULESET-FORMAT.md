@@ -254,6 +254,15 @@ in a document and in a rule file is a `duplicate rule id` error, the first wins.
 `source_file` is the rule file; `source_line` is the line of the block, or of
 the heading when there is none (`:Rules show` jumps there).
 
+### Retired rules
+
+A rule that is retired (`rules-ops/1` `retire`, see [CONTRACT.md](CONTRACT.md))
+moves to `<ruleset>/_retired/<FAMILY>/<ID>.md` with some facts added to its
+frontmatter (`status: retired`, `retired`, `was`, `replaced_by`, `reason`). The
+loader does not read a `_retired/` folder, so the rule is no longer run, in no
+gate, in no document; its id stays taken, and `next_id` counts it. Bringing it
+back (`reinstate`) puts the file where it was.
+
 ## Layouts and catalogs
 
 With a rule per file there is no document to read top to bottom. The documents

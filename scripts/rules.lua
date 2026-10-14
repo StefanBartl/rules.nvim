@@ -7,7 +7,7 @@
 -- OPTIONS  --ruleset=<path>        a ruleset file or folder (repeatable); default `$RULES_RULESETS`
 --          --gate=<name>=<FAM,FAM> a gate (repeatable); default `$RULES_GATES`
 --
--- call   one method of the contract (`hello`, `snapshot`, `list`, `rule`, `next_id`, `sources`); the document goes
+-- call   one method of the contract (`hello`, `snapshot`, `list`, `rule`, `next_id`, `sources`, `ops`); the document goes
 --        to stdout. `--params` is the JSON of the method's parameters (`-` reads it from stdin).
 -- list   `rules.list` with the parameters as flags; `--format=json` is the only format.
 --
@@ -114,7 +114,9 @@ if command == "call" then
     params = io.stdin:read("*a")
   end
   if params ~= nil and params ~= "" then
-    request = '{"params":' .. params .. "}"
+    -- a write method carries its fields at the top of the request, a read method under `params`
+    local def = require("rules.api").METHODS[method]
+    request = (def and def.flat) and params or ('{"params":' .. params .. "}")
   end
 else
   if #positional ~= 0 or flags.format ~= "json" then

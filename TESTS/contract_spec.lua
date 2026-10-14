@@ -111,7 +111,7 @@ describe("rules.api", function()
     assert.are.equal("rules.nvim", doc.plugin)
     assert.are.equal(1, doc.schema)
     assert.are.same({ 1 }, doc.schemas)
-    assert.is_true(doc.read_only)
+    assert.is_false(doc.read_only)
     assert.is_true(vim.tbl_contains(doc.capabilities, "next_id"))
     assert.are.same({ "critical", "recommended", "nice-to-have" }, doc.enums.severity)
   end)
@@ -233,7 +233,7 @@ describe("rules.api", function()
     assert.are.equal("NEW-01", fresh.items[1].next)
     local all = call("next_id", nil, opts)
     assert.are.equal(3, #all.items)
-    assert.are.same({ "loaded" }, all.basis)
+    assert.are.same({ "loaded", "retired" }, all.basis)
     local _, bad = call("next_id", { family = "A-B" }, opts)
     assert.are.equal("invalid_argument", bad)
   end)
@@ -377,6 +377,9 @@ describe("rules-export/1 golden files", function()
     expect_golden("next_id", (api.call("next_id", '{"params":{"family":"DEP"}}', opts)))
     expect_golden("sources", (api.call("sources", nil, opts)))
     expect_golden("error", (api.call("rule", '{"params":{"id":"NOPE-1"}}', opts)))
+    local request =
+      '{"client_op_id":"c-1","dry_run":true,"ops":[{"op":"new","family":"DEP","title":"golden","severity":"critical"}]}'
+    expect_golden("result", (api.call("ops", request, opts)))
   end)
 end)
 
@@ -430,6 +433,18 @@ describe("scripts/rules.lua", function()
     assert.are.equal(2, run({ "frobnicate" }).code)
     assert.are.equal(2, run({ "list" }).code)
     assert.are.equal(2, run({ "call", "hello", "--colour=red" }).code)
+
+    -- the write door: the fields of the request are its own, not under `params`
+    local dry = run({
+      "call",
+      "ops",
+      '--params={"dry_run":true,"ops":[{"op":"new","family":"DEP","title":"t","severity":"critical"}]}',
+      "--ruleset=" .. root,
+    })
+    assert.are.equal(0, dry.code, dry.stdout)
+    local result = vim.json.decode(dry.stdout)
+    assert.are.equal("rules.result", result.kind)
+    assert.are.equal("would_create", result.results[1].outcome)
   end)
 end)
 

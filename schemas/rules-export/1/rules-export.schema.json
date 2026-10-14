@@ -10,6 +10,7 @@
     { "$ref": "#/$defs/rule" },
     { "$ref": "#/$defs/next_id" },
     { "$ref": "#/$defs/sources" },
+    { "$ref": "#/$defs/result" },
     { "$ref": "#/$defs/error" }
   ],
   "$defs": {
@@ -56,7 +57,19 @@
         "has_agent": { "type": "boolean" },
         "editable": { "type": "boolean", "description": "false when the check holds a Lua function: it cannot be written as data and a client must not write it back" },
         "etag": { "type": "string", "pattern": "^sha256:[0-9a-f]{16}$", "description": "the version of the FILE the rule lives in" },
-        "etag_scope": { "enum": ["rule", "file"], "description": "rule: the only rule of its file; file: a document with many rules, any change changes every etag in it" }
+        "etag_scope": { "enum": ["rule", "file"], "description": "rule: the rule is a file of its own (one file per rule), the form rules-ops/1 writes; file: a document that holds rules, any change to it changes every etag in it, and rules-ops/1 does not write it" }
+      }
+    },
+    "retired": {
+      "type": "object",
+      "required": ["id", "family", "source"],
+      "properties": {
+        "id": { "type": "string" },
+        "family": { "type": "string" },
+        "source": { "type": "string" },
+        "replaced_by": { "type": "string" },
+        "retired": { "type": "string", "description": "the date it was retired, YYYY-MM-DD" },
+        "reason": { "type": "string" }
       }
     },
     "source_file": {
@@ -88,7 +101,8 @@
               }
             },
             "enums": { "type": "object", "properties": { "severity": { "type": "array", "items": { "type": "string" } } } },
-            "read_only": { "type": "boolean" }
+            "read_only": { "type": "boolean", "description": "false when the engine has the write door (`ops`)" },
+            "ops": { "type": "array", "items": { "type": "string" }, "description": "the operations of rules-ops/1 the engine knows" }
           }
         }
       ]
@@ -134,6 +148,7 @@
                 }
               }
             },
+            "retired": { "type": "array", "items": { "$ref": "#/$defs/retired" } },
             "load_errors": { "type": "array", "items": { "type": "string" } }
           }
         }
@@ -220,6 +235,53 @@
             "kind": { "const": "rules.sources" },
             "items": { "type": "array", "items": { "$ref": "#/$defs/source_file" } },
             "load_errors": { "type": "array", "items": { "type": "string" } }
+          }
+        }
+      ]
+    },
+    "result": {
+      "title": "rules.result: the answer of the write door (rules-ops/1), one entry per operation.",
+      "allOf": [
+        { "$ref": "#/$defs/head" },
+        {
+          "type": "object",
+          "required": ["kind", "ok", "dry_run", "results", "digest"],
+          "properties": {
+            "kind": { "const": "rules.result" },
+            "client_op_id": { "type": "string" },
+            "dry_run": { "type": "boolean" },
+            "ok": { "type": "boolean", "description": "true only if every entry is" },
+            "results": {
+              "type": "array",
+              "items": {
+                "type": "object",
+                "required": ["n", "op", "ok", "changed_ids"],
+                "properties": {
+                  "n": { "type": "integer", "minimum": 1 },
+                  "op": { "enum": ["new", "set", "retire", "reinstate", "move"] },
+                  "ok": { "type": "boolean" },
+                  "id": { "type": "string" },
+                  "outcome": { "type": "string", "description": "created, changed, unchanged, retired, reinstated, moved, would_*, conflict, failed" },
+                  "etag_before": { "type": "string" },
+                  "etag_after": { "type": "string" },
+                  "changed_ids": { "type": "array", "items": { "type": "string" } },
+                  "before": { "type": "object", "description": "set: the values the patch replaced, in the shape of a patch" },
+                  "inverse": { "type": "object", "description": "the operation that undoes this one" },
+                  "placed": { "type": "object", "properties": { "layout": { "type": "string" } } },
+                  "diff": { "type": "object", "description": "dry run of set: the file text before and after" },
+                  "catalog": { "type": "object", "description": "the documents made again after the write", "properties": { "written": { "type": "integer" }, "errors": { "type": "integer" } } },
+                  "error": {
+                    "type": "object",
+                    "properties": {
+                      "code": { "type": "string", "description": "invalid_argument, not_found, conflict (details: expected, actual), locked, io, rollback_incomplete (details: not_restored), internal" },
+                      "message": { "type": "string" },
+                      "retryable": { "type": "boolean" },
+                      "details": { "type": "object" }
+                    }
+                  }
+                }
+              }
+            }
           }
         }
       ]

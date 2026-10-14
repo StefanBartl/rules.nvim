@@ -34,7 +34,8 @@ local function md_files_under(path)
     -- `fswalk` never interprets `path`, only lists what is actually there.
     local files = {}
     for _, file in ipairs(fswalk.files(expanded)) do
-      if file:match("%.md$") then
+      -- `_retired/` holds the rules `rules-ops/1` retired: kept for their ids, never loaded
+      if file:match("%.md$") and not file:find("/_retired/", 1, true) then
         files[#files + 1] = file
       end
     end
