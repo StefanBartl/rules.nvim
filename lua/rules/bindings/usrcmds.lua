@@ -55,7 +55,7 @@ local function register_argtypes()
       return true, raw, nil
     end,
     complete = function(arg_lead)
-      local names = vim.tbl_keys(require("rules.config").get().gates)
+      local names = vim.tbl_keys(require("rules.settings").resolve({ project = vim.fn.getcwd() }).gates)
       table.sort(names)
       return argtypes.prefix(names, arg_lead)
     end,
@@ -98,8 +98,12 @@ function M.setup()
           return
         end
         if ctx.flags.format == "json" then
-          local json = require("rules").check_family_json(ctx.flags.family, ctx.args.path)
-          print(json)
+          local json, _, _, err = require("rules").check_family_json(ctx.flags.family, ctx.args.path)
+          if err then
+            notify.error(err)
+          else
+            print(json)
+          end
         else
           require("rules").check_family(ctx.flags.family, ctx.args.path)
         end

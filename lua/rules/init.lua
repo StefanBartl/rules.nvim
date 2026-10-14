@@ -8,6 +8,7 @@ local runner = require("rules.engine.runner")
 local waivers = require("rules.engine.waivers")
 local gate = require("rules.engine.gate")
 local notify = require("rules.util.notify")
+local settings = require("rules.settings")
 
 ---@type table<"critical"|"recommended"|"nice-to-have", integer>
 local ZERO_SEVERITY = { critical = 0, recommended = 0, ["nice-to-have"] = 0 }
@@ -21,12 +22,51 @@ function M.setup(opts)
   require("rules.bindings.usrcmds").setup()
 end
 
---- Load every configured ruleset, notifying on any parse error or ID collision.
----@return Rules.ParsedRule[]
-function M.load_rules()
-  local rules, errors = loader.load(config.get().rulesets)
+---Whether the "nothing is configured" hint was shown: once per session, not on every command.
+local hinted = false
+
+--- The settings of the project at `root` (`rules.settings`): `setup()` over the project's `.rules.json` over the vault,
+--- its warnings shown once. A file that cannot be used comes back as the error text, never as empty settings.
+---@param root string|nil  defaults to the working directory
+---@return Rules.Settings res
+---@return string|nil err
+local function settings_for(root)
+  local res = settings.resolve({ project = root or vim.fn.getcwd() })
+  settings.notify(res)
+  return res, settings.error_text(res, false)
+end
+
+--- Load every configured ruleset of the project at `root`, notifying on any parse error or ID collision.
+---@param root string|nil
+---@return Rules.ParsedRule[]|nil rules  nil when the settings cannot be used
+---@return string|nil err
+---@return Rules.Settings|nil res
+local function load(root)
+  local res, settings_err = settings_for(root)
+  if settings_err then
+    return nil, settings_err, res
+  end
+  local hint = settings.nothing_configured(res)
+  if hint and not hinted then
+    hinted = true
+    notify.info(hint)
+  end
+  local rules, errors = loader.load(res.rulesets)
   for _, err in ipairs(errors) do
     notify.warn(err)
+  end
+  return rules, nil, res
+end
+
+--- Load every configured ruleset, notifying on any parse error or ID collision. When the settings (a `.rules.json`, the
+--- vault) cannot be used the error is shown and nothing is loaded.
+---@param root string|nil  the project whose `.rules.json` counts; defaults to the working directory
+---@return Rules.ParsedRule[]
+function M.load_rules(root)
+  local rules, err = load(root)
+  if not rules then
+    notify.error(err)
+    return {}
   end
   return rules
 end
@@ -57,14 +97,18 @@ end
 --- `gate.unknown_families`.
 ---@param family_prefix string
 ---@param path string|nil
----@return Rules.Result[]
+---@return Rules.Result[]|nil results
+---@return string|nil err  the settings of the project cannot be used
 local function run_family(family_prefix, path)
   local root = path or vim.fn.getcwd()
-  local rules = M.load_rules()
+  local rules, err = load(root)
+  if not rules then
+    return nil, err
+  end
   if #gate.unknown_families(rules, { family_prefix }) > 0 then
     notify.warn(("--family=%q matches no loaded rule -- typo in the prefix, or not loaded/migrated yet"):format(family_prefix))
   end
-  return runner.check_family(rules, family_prefix, root, load_waivers(root), run_opts())
+  return runner.check_family(rules, family_prefix, root, load_waivers(root), run_opts()), nil
 end
 
 --- Shared by `run_gate`/`run_gate_json`.
@@ -74,16 +118,23 @@ end
 ---@return Rules.Result[]|nil results
 ---@return string|nil error
 local function run_gate_results(gate_name, path, diff_ref)
-  local families = config.get().gates[gate_name]
+  local root = path or vim.fn.getcwd()
+  local res, settings_err = settings_for(root)
+  if settings_err then
+    return nil, settings_err
+  end
+  local families = res.gates[gate_name]
   if not families then
-    local known = vim.tbl_keys(config.get().gates)
+    local known = vim.tbl_keys(res.gates)
     table.sort(known)
     local hint = #known > 0 and ("configured gates: " .. table.concat(known, ", ")) or "no gates configured"
     return nil, ("unknown gate %q (%s)"):format(gate_name, hint)
   end
 
-  local root = path or vim.fn.getcwd()
-  local rules = M.load_rules()
+  local rules, load_err = load(root)
+  if not rules then
+    return nil, load_err
+  end
   for _, family in ipairs(gate.unknown_families(rules, families)) do
     notify.warn(
       ("gate %q: family %q matches no loaded rule -- typo in gates config, or not migrated yet"):format(gate_name, family)
@@ -105,9 +156,13 @@ end
 --- Run one rule family against a path and report it (quickfix + buffer).
 ---@param family_prefix string
 ---@param path string|nil  defaults to the current working directory
----@return Rules.Result[]
+---@return Rules.Result[]|nil results  nil when the settings of the project cannot be used (the error is shown)
 function M.check_family(family_prefix, path)
-  local results = run_family(family_prefix, path)
+  local results, err = run_family(family_prefix, path)
+  if not results then
+    notify.error(err)
+    return nil
+  end
   require("rules.report.quickfix").set(results)
   require("rules.report.buffer").open(results)
   return results
@@ -120,13 +175,17 @@ end
 --- interactively is harmless.
 ---@param family_prefix string
 ---@param path string|nil  defaults to the current working directory
----@return string json
----@return 0|1 exit_code
----@return Rules.Result[] results
+---@return string|nil json
+---@return 0|1|nil exit_code
+---@return Rules.Result[]|nil results
+---@return string|nil error  the settings of the project cannot be used (a broken `.rules.json`, a vault that is no folder)
 function M.check_family_json(family_prefix, path)
-  local results = run_family(family_prefix, path)
+  local results, err = run_family(family_prefix, path)
+  if not results then
+    return nil, nil, nil, err
+  end
   local json = require("rules.report.json")
-  return json.encode(results), json.exit_code(results), results
+  return json.encode(results), json.exit_code(results), results, nil
 end
 
 --- Run a configured gate (`setup({ gates = { <name> = {family_prefix, ...} } })`)
@@ -188,7 +247,7 @@ end
 --- another layout's output, a place outside the ruleset, a file nobody generated), or the ruleset has
 --- load errors. `adopt` lets a layout replace an existing output that is not a generated document (a
 --- hand-written one); nothing else.
----@param path string|nil  a ruleset directory
+---@param path string|nil  a ruleset directory (`@vault/<name>` names one of the vault)
 ---@param opts? Rules.CatalogOpts
 ---@return Rules.CatalogResult[] results
 ---@return string[] errors
@@ -198,9 +257,17 @@ function M.catalog(path, opts)
   local catalog = require("rules.engine.catalog")
   local roots = {}
   if path then
-    roots[1] = path
+    local resolved, resolve_err = settings.resolve_entry(path, { project = vim.fn.getcwd() })
+    if not resolved then
+      return {}, { resolve_err }, 1
+    end
+    roots[1] = resolved
   else
-    for _, ruleset in ipairs(config.get().rulesets) do
+    local res, settings_err = settings_for()
+    if settings_err then
+      return {}, { settings_err }, 1
+    end
+    for _, ruleset in ipairs(res.rulesets) do
       if vim.fn.isdirectory(require("lib.nvim.cross.fs.expand_path")(ruleset)) == 1 then
         roots[#roots + 1] = ruleset
       end

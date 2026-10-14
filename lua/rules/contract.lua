@@ -76,21 +76,45 @@ M.doc = d
 -- ── the source ───────────────────────────────────────────────────────────────────
 
 ---@class Rules.Contract.Opts
----@field rulesets? string[]            files or directories; default `setup({ rulesets })`
----@field gates? table<string, string[]>  default `setup({ gates })`
+---@field rulesets? string[]            files or directories (`@vault/<name>`: one of the vault); default: `rules.settings`
+---@field gates? table<string, string[]>  default: see `rules.settings`
+---@field vault? string                 the rules-vault; default `setup({ vault })`, `$RULES_VAULT`, then the project file
+---@field project? string               the root whose `.rules.json` is read; no project, no project file
 
 ---Paths that differ only in case are one folder on Windows and (by default) on macOS.
 local CASE_INSENSITIVE = vim.fn.has("win32") == 1 or vim.fn.has("mac") == 1
 
+---What the call asked for and `setup()`, the project file and the vault say, ranked (`rules.settings`). The warnings are
+---shown once each.
+---@param opts Rules.Contract.Opts|nil
+---@return Rules.Settings
+local function settings_of(opts)
+  local settings = require("rules.settings")
+  local res = settings.resolve({
+    rulesets = opts and opts.rulesets,
+    gates = opts and opts.gates,
+    vault = opts and opts.vault,
+    project = opts and opts.project,
+  })
+  settings.notify(res)
+  return res
+end
+
+---The options a front end that works on the project in its working directory (the editor) hands to the contract.
+---@param extra? Rules.Contract.Opts
+---@return Rules.Contract.Opts
+function M.editor_opts(extra)
+  return vim.tbl_extend("force", { project = vim.fn.getcwd() }, extra or {})
+end
+
 ---@param opts Rules.Contract.Opts|nil
 ---@return string[] paths  expanded, `/`-separated, absolute; a ruleset listed twice (or spelled another way) once
+---@return string|nil err  a settings file that cannot be used, a vault that is no folder: no path of this machine in it
 local function ruleset_paths(opts)
-  local given = opts and opts.rulesets
-  if given == nil then
-    given = require("rules.config").get().rulesets
-  end
+  local res = settings_of(opts)
+  local given = res.rulesets
   local out, seen = {}, {}
-  for _, path in ipairs(given or {}) do
+  for _, path in ipairs(given) do
     local expanded = (vim.fs.normalize(vim.fn.fnamemodify(expand_path(path), ":p")):gsub("/+$", ""))
     -- the real path unifies spellings the string cannot (8.3 short names on Windows, links); a path that does not
     -- exist (yet) keeps its own spelling
@@ -104,24 +128,20 @@ local function ruleset_paths(opts)
       out[#out + 1] = expanded
     end
   end
-  return out
+  return out, require("rules.settings").error_text(res, true)
 end
 
 ---@param opts Rules.Contract.Opts|nil
 ---@return table<string, string[]>
 local function gates_of(opts)
-  local gates = opts and opts.gates
-  if gates == nil then
-    gates = require("rules.config").get().gates
-  end
-  return gates or {}
+  return settings_of(opts).gates
 end
 
 ---The root a document is scoped to (`source.id` is its last part); `nil` when no ruleset is configured.
 ---@param opts Rules.Contract.Opts|nil
 ---@return string|nil
 function M.root_of(opts)
-  return ruleset_paths(opts)[1]
+  return (ruleset_paths(opts))[1]
 end
 
 ---The name each ruleset goes by in a document: the last part of its path. Only where two rulesets would get the
@@ -178,9 +198,10 @@ end
 ---@param opts Rules.Contract.Opts|nil
 ---@return string[] paths
 ---@return table<string, string> names
+---@return string|nil err  the settings cannot be used (`invalid_argument` as a document)
 function M.rulesets(opts)
-  local paths = ruleset_paths(opts)
-  return paths, root_names(paths)
+  local paths, err = ruleset_paths(opts)
+  return paths, root_names(paths), err
 end
 
 ---What the scan of these rulesets would read, as one text: every `.md` file with its size and modification time.
@@ -415,7 +436,10 @@ end
 ---@return Rules.Contract.View|nil view
 ---@return Lib.Contract.Error|nil err
 function M.view(opts)
-  local paths = ruleset_paths(opts)
+  local paths, settings_err = ruleset_paths(opts)
+  if settings_err then
+    return nil, errors.fail("invalid_argument", settings_err)
+  end
   if #paths == 0 then
     return nil, errors.fail("not_found", "no ruleset is configured (rulesets is empty)")
   end

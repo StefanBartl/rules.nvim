@@ -1245,7 +1245,10 @@ door = ops_lib.make({
     },
   },
   context = function(params, opts)
-    local paths, names = contract.rulesets(opts)
+    local paths, names, settings_err = contract.rulesets(opts)
+    if settings_err then
+      return nil, errors.fail("invalid_argument", settings_err)
+    end
     if #paths == 0 then
       return nil, errors.fail("not_found", "no ruleset is configured (rulesets is empty)")
     end
@@ -1253,7 +1256,12 @@ door = ops_lib.make({
       root = paths[1],
       paths = paths,
       names = names,
-      opts = { rulesets = opts and opts.rulesets, gates = opts and opts.gates },
+      opts = {
+        rulesets = opts and opts.rulesets,
+        gates = opts and opts.gates,
+        vault = opts and opts.vault,
+        project = opts and opts.project,
+      },
       dry = params.dry_run == true,
       touched = {},
       owner = {},

@@ -1,7 +1,12 @@
 ---@module 'rules.config'
 ---@brief Merge setup() options over DEFAULTS.
+---@description
+--- This is the `setup()` layer only. What a run actually uses is `rules.settings.resolve()`: `setup()` on top of the
+--- `.rules.json` of the project and of the vault (ranked there, in one place), on top of these defaults.
 
 local DEFAULTS = require("rules.config.DEFAULTS")
+local schema = require("rules.config.schema")
+local merge = require("rules.config.merge")
 local notify = require("rules.util.notify")
 
 local M = {}
@@ -9,58 +14,27 @@ local M = {}
 ---@type Rules.Opts
 local state = vim.deepcopy(DEFAULTS)
 
----@param list any
----@return boolean
-local function is_string_list(list)
-  if not vim.islist(list) then
-    return false
-  end
-  for _, v in ipairs(list) do
-    if type(v) ~= "string" then
-      return false
-    end
-  end
-  return true
-end
-
----@type table<string, true>
-local KNOWN_KEYS = { rulesets = true, gates = true, lua_predicates = true }
-
---- An unknown top-level key, with the nearest known one as a hint when
---- there is a plausible one -- same shape as lib.config's own
---- `describe_unknown`.
----@param key any
----@return string
-local function describe_unknown(key)
-  local levenshtein = require("lib.lua.strings.distance").levenshtein
-  local name = tostring(key)
-  local best, best_distance = nil, nil
-  for known in pairs(KNOWN_KEYS) do
-    local d = levenshtein(name, known)
-    if d <= 3 and (best_distance == nil or d < best_distance) then
-      best, best_distance = known, d
-    end
-  end
-  return best and ("%s (did you mean %s?)"):format(name, best) or name
-end
+---What `setup()` set, validated: only the keys it named. `settings.resolve` ranks these above the files; the
+---defaults are not in here.
+---@type table
+local explicit = {}
 
 --- ERR-50: unknown-key detection runs before the merge -- a typo'd top-
 --- level option (`ruleset` for `rulesets`) must not vanish silently into
 --- the default; the same mechanism that discards a bad *value* (ERR-22)
 --- discarded a bad *key* with no notification at all.
----@param opts table
+---@param unknown Rules.Config.Unknown[]
 ---@return nil
-local function warn_unknown_keys(opts)
-  local unknown = {}
-  for key in pairs(opts) do
-    if not KNOWN_KEYS[key] then
-      unknown[#unknown + 1] = describe_unknown(key)
-    end
+local function warn_unknown_keys(unknown)
+  if #unknown == 0 then
+    return
   end
-  if #unknown > 0 then
-    table.sort(unknown)
-    notify.warn(("setup(): unknown option(s) ignored: %s"):format(table.concat(unknown, ", ")))
+  local names = {}
+  for _, entry in ipairs(unknown) do
+    names[#names + 1] = schema.unknown_text(entry)
   end
+  table.sort(names)
+  notify.warn(("setup(): unknown option(s) ignored: %s"):format(table.concat(names, ", ")))
 end
 
 --- ERR-22: an invalid config value degrades to its default instead of
@@ -75,43 +49,12 @@ local function validate(opts)
     return {}
   end
 
-  warn_unknown_keys(opts)
-  local out = {}
-
-  if opts.rulesets ~= nil then
-    if is_string_list(opts.rulesets) then
-      out.rulesets = opts.rulesets
-    else
-      notify.warn("setup({ rulesets = ... }) must be a list of strings -- ignoring, falling back to default")
-    end
+  local checked = schema.check(opts, "setup")
+  warn_unknown_keys(checked.unknown)
+  for _, problem in ipairs(checked.problems) do
+    notify.warn(("setup(): %s %s -- ignoring, falling back to default"):format(problem.key, problem.message))
   end
-
-  if opts.gates ~= nil then
-    local gates_ok = type(opts.gates) == "table"
-    if gates_ok then
-      for name, families in pairs(opts.gates) do
-        if type(name) ~= "string" or not is_string_list(families) then
-          gates_ok = false
-          break
-        end
-      end
-    end
-    if gates_ok then
-      out.gates = opts.gates
-    else
-      notify.warn('setup({ gates = ... }) must be { name = {"PREFIX", ...}, ... } -- ignoring, falling back to default')
-    end
-  end
-
-  if opts.lua_predicates ~= nil then
-    if type(opts.lua_predicates) == "boolean" then
-      out.lua_predicates = opts.lua_predicates
-    else
-      notify.warn("setup({ lua_predicates = ... }) must be a boolean -- ignoring, falling back to default")
-    end
-  end
-
-  return out
+  return checked.clean
 end
 
 ---@param opts Rules.Opts|nil
@@ -120,7 +63,19 @@ function M.setup(opts)
   if opts == nil then
     opts = {}
   end
-  state = vim.tbl_deep_extend("force", vim.deepcopy(DEFAULTS), validate(opts))
+  explicit = validate(opts)
+  state = vim.deepcopy(DEFAULTS)
+  for key, value in pairs(explicit) do
+    if key == "agent" then
+      state.agent = merge.agent(DEFAULTS.agent, value)
+    elseif key == "gates" then
+      state.gates = merge.gates(DEFAULTS.gates, value)
+    else
+      state[key] = vim.deepcopy(value)
+    end
+  end
+  -- the settings of the last run were resolved with the old `setup()`
+  require("rules.settings").reset()
 end
 
 --- ERR-54: a live reference to the internal state, not a copy -- every
@@ -131,6 +86,13 @@ end
 ---@return Rules.Opts
 function M.get()
   return state
+end
+
+--- The keys `setup()` set (validated), nothing from the defaults: the layer `rules.settings` ranks above the files.
+--- A live reference, like `get`; do not change it.
+---@return table
+function M.explicit()
+  return explicit
 end
 
 return M

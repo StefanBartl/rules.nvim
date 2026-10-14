@@ -36,9 +36,9 @@ function M.run(op_list, opts)
   opts = opts or {}
   local snaps
   if not opts.dry then
-    snaps = buffers.snapshot((contract.rulesets(opts.contract)))
+    snaps = buffers.snapshot((contract.rulesets(opts.contract or contract.editor_opts())))
   end
-  local doc, err = ops.run({ ops = op_list, dry_run = opts.dry == true }, opts.contract)
+  local doc, err = ops.run({ ops = op_list, dry_run = opts.dry == true }, opts.contract or contract.editor_opts())
   if not doc then
     return { ok = false, err = err, entries = {} }
   end
