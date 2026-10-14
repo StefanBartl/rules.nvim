@@ -1276,6 +1276,14 @@ door = ops_lib.make({
   end,
 })
 
+---The layouts of a ruleset folder (the `output` path each one is the order of, and its text): where a rule can be
+---placed. Reads, writes nothing; the editor completes `--to=` from it.
+---@param root string
+---@return Rules.Layout[]
+function M.layouts(root)
+  return layouts_of(root)
+end
+
 ---The method entry for `rules.api`.
 ---@return table
 function M.method()
