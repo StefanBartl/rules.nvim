@@ -25,6 +25,12 @@
 | `:RulesVault cdx` | `[<ruleset>\|<ID>\|<FAMILY>] [<part>]` | `--rel` | Copies a prompt for an agent session to the `+` register (the same thin path as `:TasksVault cdx`) |
 | `:RulesVault create` | `[<dir>] [<name>]` | `--git`, `--yes`, `--force` | Makes a rules vault: lists what happens and the step that is left to you, asks, then makes the missing files. Never overwrites a file, never adds a remote |
 
+**In a vault on more than one machine: pull before you create** (`git pull` in the vault). Ids are given under a lock per
+machine, so two machines that make a rule in one family without a pull in between make the same id. When the vault is a git
+repository that lies behind its upstream (what the last `git fetch` knows; the engine never fetches), `:Rules new` makes the
+rule and adds a **warning** to the messages, and the form's question shows it before you confirm; a duplicate id is a load
+error that fails the vault's CI. The engine never pulls, commits or pushes. See [CONFIG.md](CONFIG.md#pull-before-you-make-a-rule).
+
 No default keymaps are bound (the form binds a few keys in its own buffer, see
 below). `--family=`, a gate's `<name>`, the `<id>` of `show`, `set`, `retire`
 and `move`, `--by=`, `--after=`, `--before=`, the severities, `--ruleset=` and

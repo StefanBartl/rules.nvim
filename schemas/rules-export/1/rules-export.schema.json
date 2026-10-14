@@ -268,6 +268,7 @@
                   "before": { "type": "object", "description": "set: the values the patch replaced, in the shape of a patch" },
                   "inverse": { "type": "object", "description": "the operation that undoes this one" },
                   "placed": { "type": "object", "properties": { "layout": { "type": "string" } } },
+                  "warnings": { "type": "array", "items": { "type": "string" }, "description": "new: things to know that did not stop the operation (the rules-vault is behind its upstream, so another machine may make the same id); absent when there are none" },
                   "diff": { "type": "object", "description": "dry run of set: the file text before and after" },
                   "catalog": { "type": "object", "description": "the documents made again after the write", "properties": { "written": { "type": "integer" }, "errors": { "type": "integer" } } },
                   "error": {

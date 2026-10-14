@@ -102,7 +102,7 @@ is true only if all entries are. `dry_run` checks everything and writes nothing.
 
 | Operation | Fields | What it does |
 | --- | --- | --- |
-| `new` | `family` (1 to 12 uppercase letters `A-Z`; anything else is `invalid_argument: family must be 1 to 12 uppercase letters A-Z (e.g. DEP)`), `title`, `severity`, `text`?, `check`?, `agent`?, a place?, `ruleset`? | Creates `<ruleset>/_rules/<FAMILY>/<ID>.md` with the next free id (loaded and retired ids count) under the ruleset's lock. With a place the rule also goes into a layout. `inverse`: `retire`. |
+| `new` | `family` (1 to 12 uppercase letters `A-Z`; anything else is `invalid_argument: family must be 1 to 12 uppercase letters A-Z (e.g. DEP)`), `title`, `severity`, `text`?, `check`?, `agent`?, a place?, `ruleset`? | Creates `<ruleset>/_rules/<FAMILY>/<ID>.md` with the next free id (loaded and retired ids count) under the ruleset's lock. With a place the rule also goes into a layout. `inverse`: `retire`. The entry may carry `warnings` (see below). |
 | `set` | `id`, `patch` { `severity`?, `title`?, `text`?, `check`?, `agent`? }, `if_match`? | Changes parts of the rule's file by editing lines: everything else (other prose, line endings, the final newline, a `check` or `agent` the patch does not name) stays byte for byte; a block whose fields share a line is written again from its table. `null` for `check` or `agent` removes it. `inverse`: `set` with the values before. |
 | `retire` | `id`, `replaced_by`?, `reason`?, `if_match`? | Moves the file to `_retired/` (the id stays taken) and takes the rule out of every layout that holds it. `inverse`: `reinstate` with `places`, one entry for each layout the rule stood in. |
 | `reinstate` | `id`, a place? or `places`? | Brings a retired rule back to the file it came from. `places` (`{ "regeln/DEP.md": { "after": "DEP-01" } }`, keyed by the `output` of the layout, goes alone) puts it back into each of those layouts. `inverse`: `retire`. |
@@ -114,6 +114,13 @@ text) with `layout` (the `output` path of the layout, `regeln/DEP.md`) and
 optionally `first`, or `top` with `layout` (the start of the layout: before
 the first rule that stands above every heading, else under the frontmatter).
 
+- **Warnings.** An entry of `new` (also in a `dry_run`) may carry `warnings`, a list of texts: things to know that did not
+  stop the operation. Today there is one: the rules-vault the ruleset lies in is a git repository that is behind its
+  upstream (`git rev-list --count HEAD..@{u}`, read only, no network, a short timeout), so another machine may make the same
+  id: *pull before you create*. The field is absent when there is nothing to say, and always absent without git, without an
+  upstream or for a ruleset outside the vault. It is additive: `schema` stays `1`, no golden file changes (the fixtures are no
+  git repository), a client that does not know it ignores it. The engine never pulls, fetches or commits; a duplicate id is a
+  `load_errors` entry of the `snapshot` document, not a warning of the write.
 - **Compare-and-set.** `if_match` is the `etag` the client saw. A file that is
   another version is a `conflict` entry with `details.expected` and
   `details.actual`; nothing is written.

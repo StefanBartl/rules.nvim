@@ -154,6 +154,11 @@ COMMANDS                                                        *rules-commands*
     itself: it hands one operation of `rules-ops/1` to the engine and tells
     the answer. --dry checks everything and writes nothing.
 
+    In a rules-vault that lies behind its upstream (what the last `git fetch`
+    knows) the rule is made and a warning follows: pull before you make a
+    rule, or another machine may make the same id. The engine never pulls,
+    fetches or commits.
+
     {family} is 1 to 12 uppercase letters A-Z (DEP): `Fix` or `dep` is
     refused, so a mistyped title does not make a family. A family that no
     rule has yet is asked about before the first rule is made (--yes skips

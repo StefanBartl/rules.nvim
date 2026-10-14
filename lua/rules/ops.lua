@@ -9,7 +9,9 @@
 ---
 ---  - `new` { family, title, severity, text?, check?, agent?, after? | before? | (layout, section, first?), ruleset? }
 ---    creates the file with the next free id (loaded and retired ids count: an id is never given twice) under the
----    ruleset's lock, and puts the rule in a layout when a place is given. `inverse`: `retire`.
+---    ruleset's lock, and puts the rule in a layout when a place is given. `inverse`: `retire`. The entry may carry
+---    `warnings` (a list of texts): the vault is behind its upstream, so another machine may make the same id.
+---    A warning, not a refusal; the engine never pulls, commits or pushes.
 ---  - `set` { id, patch = { severity?, title?, text?, check?, agent? }, if_match? } changes parts of the rule's file by
 ---    editing lines (`rules.engine.rule_edit`); `if_match` is the etag the client saw, a changed file is a
 ---    `conflict` with `expected` and `actual`. `null` in `check`/`agent` removes it. `inverse`: `set` back.
@@ -534,6 +536,40 @@ local function conflict(current, if_match)
   }
 end
 
+---The warnings that go with a rule made in the ruleset `root`: the rules-vault it lies in is a git repository that is
+---behind its upstream. Two machines that make a rule in one family without a pull in between make the same id, and
+---the clash is found only when their commits meet (a duplicate id is a load error, so the CI of the vault turns red).
+---Read only: what the last `git fetch` knows, no network, no pull, never a commit; silent without a vault, without git
+---and without an upstream. A warning, not a refusal: the rule is made.
+---@param ctx Rules.OpsCtx
+---@param root string
+---@return string[]|nil warnings
+local function behind_warnings(ctx, root)
+  local vault = require("rules.settings").resolve({ vault = ctx.opts.vault, project = ctx.opts.project }).vault
+  if not (vault and vault.exists and vault.root) then
+    return nil
+  end
+  -- by real path: a vault named by a link, a short Windows name or /var against /private/var is the same folder
+  ---@param path string
+  ---@return string
+  local function real(path)
+    return vim.fs.normalize(vim.uv.fs_realpath(path) or path)
+  end
+  if not contract.doc.relative(real(vault.root), real(root)) then
+    return nil
+  end
+  local behind = require("rules.vault").behind(vault.root)
+  if not behind or behind < 1 then
+    return nil
+  end
+  return {
+    (
+      "the vault is %d commit(s) behind its upstream: pull before you make a rule (git pull in the vault), or another machine"
+      .. " may have made the same id; a duplicate id fails the check"
+    ):format(behind),
+  }
+end
+
 -- ── new ─────────────────────────────────────────────────────────────────────────
 
 ---@param op table
@@ -585,6 +621,8 @@ local function do_new(op, ctx)
     return refuse("invalid_argument", "the ruleset is a single file; new needs a ruleset folder")
   end
 
+  local warnings = behind_warnings(ctx, root)
+
   return locked(ctx, root, function()
     local view, bad = fresh(ctx)
     if not view then
@@ -606,6 +644,9 @@ local function do_new(op, ctx)
       return refuse("invalid_argument", tostring(terr))
     end
     local entry = { ok = true, id = id, etag_after = etag.of(text), changed_ids = {} }
+    if warnings then
+      entry.warnings = json.array(warnings)
+    end
     if ctx.dry then
       -- the placement is checked too: a dry run that says "yes" must not fail on the place
       entry.outcome = "would_create"
