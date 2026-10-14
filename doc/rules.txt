@@ -81,6 +81,18 @@ COMMANDS                                                        *rules-commands*
 
     --format={FORMAT}     optional, only "json" is recognized
 
+                                                                *:Rules_catalog*
+:Rules catalog [{path}]
+    For a ruleset in the one-file-per-rule form (see |rules-ruleset-format|):
+    builds the reading documents from their layouts. {path} is a ruleset
+    folder (default: every folder in `rulesets`). A document is written only
+    when its content changed. With --check nothing is written and every
+    document that is out of date is reported; for CI use
+    `nvim --headless -u NONE -l scripts/ruleset.lua catalog --check {folder}`
+    (exit code 1 when one is). Rules that are in no layout are named.
+
+    --check               optional, only report
+
 ==============================================================================
 GATES                                                              *rules-gates*
 
@@ -135,5 +147,12 @@ A rule is a Markdown section with a fenced ```rule code block:
 <
 `check` is optional. A rule without one is never given an automatic
 pass/fail — it appears as a worklist entry instead.
+
+A rule can also be a file of its own: a frontmatter with `id` and `severity`
+(and optionally `family`), then the rule as it reads; a ```rule block only
+when the rule has a `check` or an `agent`, and then without the two identity
+lines. The reading documents are generated from layouts (|:Rules_catalog|), and
+`scripts/ruleset.lua migrate` converts a ruleset of documents into that form.
+Both forms load side by side. See docs/RULESET-FORMAT.md.
 
  vim:tw=78:ts=8:noet:ft=help:norl:

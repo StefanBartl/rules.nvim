@@ -110,7 +110,7 @@ installing it either.
 ```
 
 `cmd = { "Rules" }`: the whole surface today is one usercommand (`check`,
-`gate`, `show`, `stats`), run on demand — nothing here needs to run at
+`gate`, `show`, `stats`, `catalog`), run on demand — nothing here needs to run at
 startup.
 
 ## Quickstart
@@ -158,6 +158,16 @@ even old table-based rule text in the same file — is invisible to the
 loader, so a ruleset can migrate one rule at a time. Full field reference,
 the four `check` types, and why they're Lua patterns rather than regex:
 [docs/RULESET-FORMAT.md](docs/RULESET-FORMAT.md).
+
+**One file per rule.** A rule can also be a file of its own
+(`_rules/DEP/DEP-06.md`: frontmatter with `id` and `severity`, then the rule as
+it reads), so a tool can change one rule without touching any other. The
+documents a person reads are then generated from *layouts*
+(`:Rules catalog`, `--check` for CI), and `scripts/ruleset.lua migrate` converts
+a ruleset of documents into that form and proves the result byte for byte. Both
+forms load side by side; see
+[Layouts and catalogs](docs/RULESET-FORMAT.md#layouts-and-catalogs) and
+[Migrating a ruleset](docs/RULESET-FORMAT.md#migrating-a-ruleset).
 
 ## Contributing
 

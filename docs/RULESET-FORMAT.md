@@ -1,5 +1,17 @@
 # Ruleset format
 
+A ruleset comes in two forms, which load side by side in one run:
+
+- **documents**: many rules in one Markdown file, each with a fenced `rule`
+  block (this page, up to [One file per rule](#one-file-per-rule));
+- **one file per rule**: each rule is its own file, and the documents a person
+  reads are generated from *layouts*
+  ([One file per rule](#one-file-per-rule), [Layouts and catalogs](#layouts-and-catalogs)).
+  [Migrating](#migrating-a-ruleset) converts the one into the other and proves
+  that nothing is lost.
+
+## Documents
+
 A ruleset is one or more Markdown files. Each rule is a normal Markdown
 section with one fenced code block tagged `rule` somewhere in it:
 
@@ -159,3 +171,181 @@ error handling, security review that needs to read the surrounding code, not
 just grep it. Omit `check` entirely for those. `:Rules check` never invents
 a pass/fail for a rule like this; it lists it as a worklist entry (ID, title,
 source location) instead, for a human or an agent session to work through.
+
+## One file per rule
+
+A rule is a file of its own, so a tool can create, change or retire exactly one
+rule without touching the text of any other (`tasks.nvim` keeps tasks the same
+way). Convention for where it lives: `<FAMILY>/<ID>.md` under a folder of the
+ruleset, `_rules/` by default (`_rules/DEP/DEP-06.md`); the loader reads every
+`.md` file under a `rulesets` path, so the place is yours to choose.
+
+````markdown
+---
+id: DEP-06
+severity: recommended
+family: DEP
+---
+
+#### `DEP-06` — `vim.tbl_flatten()` is deprecated
+
+Throws instead of silently corrupting dict-shaped tables. Wrap in `pcall`
+for unchecked or mixed structures.
+````
+
+The **frontmatter** (flat `key: value` lines) holds `id` and `severity`, the
+two things every rule has; they have one home. `family` is optional and, when
+given, must be the id's leading letters. Any other key is an error (a typo such
+as `severtiy` is not silently ignored). A file with an `id` or a `severity`
+in a frontmatter is a rule file; a file whose frontmatter has neither is an
+ordinary document.
+
+**Under the frontmatter**, one blank line and then the rule as it reads: the
+heading that names it, the prose, a `---` that frames it. `title` and `text` are
+read from there exactly as for a document (`text` ends at the next heading;
+`section` is not set: which section a rule sits in is the layout's business).
+A heading or `#` line inside a fence is not a heading.
+
+A ` ```rule ` **block** is only there when the rule says more than `id` and
+`severity`: a `check`, an `agent`, anything else a block may hold. Write it
+without the two identity lines:
+
+````markdown
+#### `DEP-06` — `vim.tbl_flatten()` is deprecated
+
+```rule
+check = { type = "grep", pattern = "vim%.tbl_flatten%(" },
+```
+
+Throws instead of silently corrupting dict-shaped tables.
+````
+
+If the block does repeat `id` or `severity`, they must agree with the
+frontmatter: a rule file that says `DEP-06` above and `DEP-07` below is an error
+for that file, there is no silent choice. The block is evaluated in the same
+empty environment as in a document, `agent` is validated the same way, and the
+same limits apply to the id (at most 100 bytes, no control character, and here
+also no `"` or `\`), so a rule means the same in either form. An *empty* block
+(` ```rule ` and ` ``` ` with nothing between) is valid: it marks where the
+block sits in the generated document when the rule file is written by hand with
+prose above it.
+
+A rule file has at most one block. Duplicates are found across both forms: an id
+in a document and in a rule file is a `duplicate rule id` error, the first wins.
+
+`source_file` is the rule file; `source_line` is the line of the block, or of
+the heading when there is none (`:Rules show` jumps there).
+
+## Layouts and catalogs
+
+With a rule per file there is no document to read top to bottom. The documents
+are **generated**, like `TASKS.md`, from a *layout*:
+
+````markdown
+---
+kind: layout
+output: regeln/LUA_NVIM.md
+---
+# Rules for Lua
+
+## Table of content
+
+{{toc}}
+
+## Using lib.nvim
+
+Introduction that belongs to this section.
+
+{{rule LUA-01}}
+{{rule LUA-02}}
+````
+
+`output` is the path of the document, relative to the ruleset folder, with `/`;
+it must stay inside it, name a `.md` file and not be a layout itself. The body
+is the document as it reads, and two kinds of **whole-line** tokens are
+replaced; everything else (headings, introductions, separators, notes) is
+copied as written:
+
+| Token | Becomes |
+| --- | --- |
+| `{{rule ID}}` | the rule as it reads in the document: its heading and text, and a ` ```rule ` block with `id` and `severity` put back in (and the rest of the block, if the file has one). The order of the tokens is the order in the document; a rule file carries no order. A rule placed twice, or an id with no rule file, is an error and nothing is written |
+| `{{toc}}` | the table of contents of the finished document |
+
+A rule file without a block gets one: right under its heading and the blank
+lines below it. A rule file *with* a block keeps it where it is.
+
+**Table of contents.** One line per heading from level 2 on, each a link to its
+anchor, without the title (level 1) and without the heading called "Table of
+content". A repeated anchor gets `-1`, `-2`. The existing rulesets spell it in
+different ways, so the token has parameters (`{{toc max=2 base=0 unicode=1}}`):
+
+| Parameter | Default | Meaning |
+| --- | --- | --- |
+| `max` | 4 | deepest level listed (2 to 6) |
+| `base` | 2 | indentation, in spaces, of level 2 |
+| `step` | 2 | further indentation per level |
+| `unicode` | 0 | 1: the anchor keeps letters of every alphabet and turns every space into a hyphen (the renderers' way); 0: ASCII only, runs of spaces and hyphens become one hyphen |
+| `underscore` | 1 | 0: an anchor drops `_` (only with `unicode = 0`) |
+
+**The generated document** starts with one line,
+`<!-- GENERATED by rules.nvim from <layout>: do not edit ... -->`. The loader
+skips a file that starts with it, so a document and the rule files it was made
+from never load as duplicates; a layout is skipped too. Edit the layout or the
+rule files and generate again.
+
+```vim
+:Rules catalog                 " every folder of setup({ rulesets })
+:Rules catalog ~/Checklists    " one folder
+:Rules catalog --check         " write nothing; report documents that are out of date
+```
+
+For CI (exit code 0 when everything is up to date, 1 otherwise):
+
+```sh
+nvim --headless -u NONE -i NONE -n -l scripts/ruleset.lua catalog --check <folder>
+```
+
+A document is written only when its content changed. Line endings are ignored
+in the comparison, and an existing CRLF document stays CRLF. The run also names
+the rules that are in no layout (they are in no reading document). The same call
+is `require("rules").catalog(path, { check = true })`, which returns
+`(results, errors, exit_code)`.
+
+**Links.** A document is generated at the path the old one had, with the same
+headings and the same anchors, so links into it from elsewhere (to the file or to
+`#anchor`) stay valid. A *relative* link inside the text of a rule is copied as
+written: it is right in the generated document, and one folder level deeper in the
+rule file. A rule text that needs to be readable from both places should link to
+something stable.
+
+## Migrating a ruleset
+
+`scripts/ruleset.lua migrate` converts a ruleset of documents (every `.md` file
+with ` ```rule ` blocks) into rule files and layouts:
+
+```sh
+nvim --headless -u NONE -i NONE -n -l scripts/ruleset.lua migrate <folder>          # only look
+nvim --headless -u NONE -i NONE -n -l scripts/ruleset.lua migrate --write <folder>  # do it
+```
+
+It never converts a document it cannot give back **byte for byte**. For each
+document it builds the rule files and the layout, renders them in memory and
+compares with the original text; any difference (a CRLF file, a block that does
+not start with the `id` and `severity` lines, a block with no heading above it,
+no blank line around the block, an id twice) makes it refuse that document and
+write nothing at all. The hand-kept table of contents is replaced by `{{toc}}`
+with the parameters that give exactly those lines; if none do, the generated
+table differs, and the number of lines that change is printed. After writing, it
+generates the documents from the new files and checks that they are what it
+wrote. Run it on a clean git tree: the old documents are replaced by the
+generated ones, and `git diff` shows the change.
+
+What stays: the text of every document apart from the blocks (introductions, the
+notes in `>` quotes, separators) moves into the layout unchanged. Whether the
+migration notes belong in the ruleset at all is a decision for its author; with
+the rule files and the layout in place it is a plain edit of the layout.
+
+To prove nothing changed in effect: load the ruleset before and after
+(`rules.engine.migrate.compare` does: same ids, severity, `check`, `agent`, text
+and title for every rule) and run the gates before and after; both give the same
+results.
