@@ -70,6 +70,14 @@ local LAYOUT = table.concat({
   "",
 }, "\n")
 
+---The real path: a temporary folder may be reached through a link (macOS: /var -> /private/var, Windows: 8.3 names),
+---and the editor names a buffer by one spelling, the test by the other.
+---@param path string
+---@return string
+local function real(path)
+  return vim.fs.normalize(vim.uv.fs_realpath(path) or path)
+end
+
 ---@param text string
 ---@param needle string
 ---@return integer
@@ -188,7 +196,7 @@ describe(":Rules new, set, retire, move, list", function()
       local layout = layout_text()
       assert.is_true(index_of(layout, "{{rule DEP-01}}") < index_of(layout, "{{rule DEP-03}}"))
       assert.is_true(index_of(layout, "{{rule DEP-03}}") < index_of(layout, "## Extra"))
-      assert.are.equal(vim.fs.normalize(path), vim.fs.normalize(vim.api.nvim_buf_get_name(0)))
+      assert.are.equal(real(path), real(vim.api.nvim_buf_get_name(0)))
       assert.is_true(told("created DEP-03 in regeln/DEP.md"))
       assert.are.same({}, asked)
     end)
@@ -321,7 +329,7 @@ describe(":Rules new, set, retire, move, list", function()
       assert.is_truthy(text:find("Prose line one.\n\nProse line two.", 1, true))
       assert.is_true(index_of(layout_text(), "{{rule DEP-03}}") > index_of(layout_text(), "## Two Words"))
       assert.is_false(vim.api.nvim_buf_is_valid(buf))
-      assert.are.equal(vim.fs.normalize(root .. "/_rules/DEP/DEP-03.md"), vim.fs.normalize(vim.api.nvim_buf_get_name(0)))
+      assert.are.equal(real(root .. "/_rules/DEP/DEP-03.md"), real(vim.api.nvim_buf_get_name(0)))
       assert.is_true(told("created DEP-03 in regeln/DEP.md"))
     end)
 
@@ -627,7 +635,7 @@ describe(":Rules new, set, retire, move, list", function()
       assert.are.equal(2, #items)
       assert.is_truthy(items[1].text:find("DEP-01 [recommended] one", 1, true))
       assert.is_truthy(items[2].text:find("DEP-02 [critical] two", 1, true))
-      assert.are.equal(vim.fs.normalize(rule_path("DEP-01")), vim.fs.normalize(vim.api.nvim_buf_get_name(items[1].bufnr)))
+      assert.are.equal(real(rule_path("DEP-01")), real(vim.api.nvim_buf_get_name(items[1].bufnr)))
       assert.are.equal("rules list", vim.fn.getqflist({ title = 1 }).title)
     end)
 
