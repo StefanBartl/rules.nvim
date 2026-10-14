@@ -1,12 +1,20 @@
 # CI of a rules-vault, made by `:RulesVault create` (template: templates/rules-vault-ci.yml of rules.nvim).
 #
-# Read only: nothing here changes a file or talks to anything but GitHub. Three checks, each of which turns the run red:
-#   1. the reading documents of every ruleset are up to date with the layouts and rule files (`catalog --check`)
-#   2. every ruleset loads without errors (a duplicate id, an invalid severity, a gap in the numbering)
-#   3. writing keeps every rule file byte for byte (`roundtrip.lua`)
+# Read only: nothing here changes a file or talks to anything but GitHub. Four steps, each of which turns the run red:
+#   1. the files are checked out with one line ending (`.gitattributes` has `eol=lf`, which `:RulesVault create` makes)
+#   2. the reading documents of every ruleset are up to date with the layouts and rule files (`catalog --check`)
+#   3. all rulesets load together without errors: a duplicate rule id (also two rule files of two machines that made
+#      the same id), an invalid severity, a rule file that does not read (`ruleset.lua check`, the snapshot document)
+#   4. writing keeps every rule file byte for byte (`roundtrip.lua`)
+# No `jq`, no other tool than Neovim and bash: the same four commands run on a laptop, from the vault folder, with
+# the path of rules.nvim in place of `.deps/rules.nvim`.
+#
+# Ubuntu and Windows (bash on both). The files are compared byte for byte, so a checkout that turns line endings into
+# CRLF would turn every step red: that is what step 1 and `.gitattributes` are for.
 #
 # rules.nvim and lib.nvim are checked out below `.deps/`. If rules.nvim is not readable with the token of this
-# repository (a private fork), give `actions/checkout` a `token:` of your own for that step.
+# repository (a private fork), give the `actions/checkout` of rules.nvim a `token:` of your own (a personal access
+# token with read access to that repository, kept as a repository secret).
 
 name: rules-vault
 
@@ -17,9 +25,18 @@ on:
 
 jobs:
   rules:
-    name: catalogs, load, round trip
-    runs-on: ubuntu-latest
+    name: catalogs, load, round trip (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
     timeout-minutes: 15
+    strategy:
+      # One platform failing must not hide the other: which of the two broke is the information.
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest]
+    defaults:
+      run:
+        # Windows runners default to PowerShell; one shell on both keeps the commands the same.
+        shell: bash
     env:
       LIB_NVIM_DIR: ${{ github.workspace }}/.deps/lib.nvim
     steps:
@@ -38,26 +55,25 @@ jobs:
           neovim: true
           version: stable
 
+      - name: The files have one line ending (.gitattributes, eol=lf)
+        run: |
+          set -euo pipefail
+          grep -q 'eol=lf' .gitattributes || { echo "::error::.gitattributes needs '* text=auto eol=lf'"; exit 1; }
+
       - name: The reading documents are up to date (catalog --check, every ruleset)
-        shell: bash
         run: |
           set -euo pipefail
           for ruleset in rulesets/*/; do
             echo "== $ruleset"
-            nvim --headless -u NONE -i NONE -n -l .deps/rules.nvim/scripts/ruleset.lua catalog --check "$ruleset"
+            nvim --headless -u NONE -i NONE -n -l .deps/rules.nvim/scripts/ruleset.lua catalog --check "${ruleset%/}"
           done
 
-      - name: Every ruleset loads without errors
-        shell: bash
+      - name: Every ruleset loads without errors (duplicate id, invalid severity)
         run: |
           set -euo pipefail
-          nvim --headless -u NONE -i NONE -n -l .deps/rules.nvim/scripts/rules.lua call snapshot --vault=. > snapshot.json
-          jq -r '.load_errors[]' snapshot.json
-          jq -e '(.load_errors | length) == 0' snapshot.json > /dev/null
-          jq -r '"\(.counts.rules) rules in \(.counts.files) files"' snapshot.json
+          nvim --headless -u NONE -i NONE -n -l .deps/rules.nvim/scripts/ruleset.lua check --vault=.
 
       - name: Writing keeps the rule files byte for byte (round trip)
-        shell: bash
         run: |
           set -euo pipefail
           nvim --headless -u NONE -i NONE -n -l .deps/rules.nvim/scripts/roundtrip.lua rulesets/*/

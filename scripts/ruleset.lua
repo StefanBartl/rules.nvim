@@ -1,6 +1,7 @@
 -- scripts/ruleset.lua -- the headless tools for a ruleset in the one-file-per-rule form.
 --
 --   nvim --headless -u NONE -i NONE -n -l scripts/ruleset.lua catalog [--check] [--vault=D] [--project=D] [<ruleset-folder>]
+--   nvim --headless -u NONE -i NONE -n -l scripts/ruleset.lua check [--vault=D] [--project=D] [<ruleset-folder>]
 --   nvim --headless -u NONE -i NONE -n -l scripts/ruleset.lua migrate [--write] [--rules-dir=D] [--layouts-dir=D] <folder>
 --
 -- The folder may be `@vault/<name>`, a ruleset of the rules-vault (`--vault=D`, else `$RULES_VAULT`, else `vault` in the
@@ -9,6 +10,9 @@
 --
 -- catalog   builds the reading documents from the layouts; with --check it writes nothing and exits 1
 --           when a document is out of date (for CI, like `tasks index --check`).
+-- check     loads every ruleset together (the snapshot document of `rules-export/1`) and exits 1 on any `load_errors`:
+--           a duplicate rule id (also across two rulesets), an invalid severity, a rule file that does not read. Writes
+--           nothing; this is the "loads without errors" step of the CI of a rules-vault (templates/rules-vault-ci.yml).
 -- migrate   turns the documents with ```rule blocks into one file per rule plus layouts. Without --write it
 --           only converts in memory and says what it would do and whether the result reads back byte for
 --           byte (apart from the table of contents, which is counted). With --write it writes the files and
@@ -60,6 +64,7 @@ vim.opt.rtp:append(lib)
 local function usage()
   io.stderr:write(
     "usage: ruleset.lua catalog [--check] [--vault=D] [--project=D] [<folder>] | "
+      .. "check [--vault=D] [--project=D] [<folder>] | "
       .. "migrate [--write] [--rules-dir=D] [--layouts-dir=D] [--vault=D] [--project=D] <folder>\n"
   )
   os.exit(2)
@@ -69,6 +74,7 @@ end
 --- `--chek` must not run the command without the flag (that would write the documents `--check` is there to check).
 local FLAGS = {
   catalog = { check = "bool", vault = "value", project = "value" },
+  check = { vault = "value", project = "value" },
   migrate = {
     write = "bool",
     ["rules-dir"] = "value",
@@ -100,11 +106,12 @@ for i = 2, #arg do
     positional[#positional + 1] = a
   end
 end
-if #positional > 1 or (#positional == 0 and command ~= "catalog") then
+if #positional > 1 or (#positional == 0 and command ~= "catalog" and command ~= "check") then
   usage()
 end
 
--- the folders to work on: the one given (`@vault/<name>` through the vault), or for `catalog` every ruleset the settings name
+-- the folders to work on: the one given (`@vault/<name>` through the vault), or for `catalog` and `check` every
+-- ruleset the settings name
 local settings = require("rules.settings")
 local settings_opts = { vault = flags.vault, project = flags.project or vim.env.RULES_PROJECT }
 local roots = {}
@@ -134,6 +141,34 @@ else
   end
 end
 local root = roots[1]
+
+if command == "check" then
+  -- all rulesets together, through the snapshot document: a duplicate id across two rulesets is only seen this way
+  local text, failure = require("rules.api").call("snapshot", nil, { rulesets = roots })
+  local ok, doc = pcall(vim.json.decode, text)
+  if failure ~= nil or not ok or type(doc) ~= "table" or doc.kind ~= "rules.snapshot" then
+    io.stdout:write("FAILED: the rulesets could not be read: " .. tostring(text):sub(1, 400) .. "\n")
+    os.exit(1)
+  end
+  for _, err in ipairs(doc.load_errors or {}) do
+    io.stdout:write("  load error: " .. err .. "\n")
+  end
+  local counts = doc.counts or {}
+  io.stdout:write(
+    ("%d rule(s) in %d file(s), %d family(ies), %d ruleset(s)\n"):format(
+      counts.rules or 0,
+      counts.files or 0,
+      counts.families or 0,
+      #roots
+    )
+  )
+  if #(doc.load_errors or {}) > 0 then
+    io.stdout:write(("FAILED: %d load error(s)\n"):format(#doc.load_errors))
+    os.exit(1)
+  end
+  io.stdout:write("ok: every ruleset loads without errors\n")
+  os.exit(0)
+end
 
 if command == "catalog" then
   local catalog = require("rules.engine.catalog")

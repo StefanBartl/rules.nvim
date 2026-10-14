@@ -113,6 +113,90 @@ describe("scripts/ruleset.lua @spawn", function()
     assert.are.equal(made, read(root .. "/D.md"))
   end)
 
+  describe("check", function()
+    ---@param root string
+    ---@param id string
+    ---@param severity? string
+    local function rule(root, id, severity)
+      write(
+        root .. "/_rules/DEP/" .. id .. ".md",
+        doc({
+          "---",
+          "id: " .. id,
+          "severity: " .. (severity or "critical"),
+          "family: DEP",
+          "---",
+          "",
+          "#### `" .. id .. "`",
+          "",
+          "Text.",
+        })
+      )
+    end
+
+    it("is wrong usage with a flag it does not know, a second folder, or the flags of another command", function()
+      local root = ruleset()
+      for _, args in ipairs({
+        { "check", "--chek", root },
+        { "check", "--check", root },
+        { "check", "--write", root },
+        { "check", "--vault", root },
+        { "check", root, root },
+      }) do
+        local result = run(unpack(args))
+        assert.are.equal(2, result.code, table.concat(args, " "))
+        assert.matches("usage:", result.stderr, 1, true)
+      end
+    end)
+
+    it("exits 0 for rulesets that load, and says how many rules", function()
+      local root = ruleset()
+      local result = run("check", root)
+      assert.are.equal(0, result.code, result.stdout .. result.stderr)
+      assert.matches("1 rule(s) in 1 file(s), 1 family(ies), 1 ruleset(s)", result.stdout, 1, true)
+      assert.matches("ok: every ruleset loads without errors", result.stdout, 1, true)
+    end)
+
+    it("exits 1 for a rule id that two files have, and names it", function()
+      local root = ruleset()
+      write(root .. "/_rules/DEP/DEP-01-twice.md", read(root .. "/_rules/DEP/DEP-01.md"))
+      local result = run("check", root)
+      assert.are.equal(1, result.code, result.stdout)
+      assert.matches("duplicate rule id DEP-01", result.stdout, 1, true)
+      assert.matches("FAILED: 1 load error(s)", result.stdout, 1, true)
+    end)
+
+    it("exits 1 for a rule id that two rulesets have, which each ruleset alone does not show", function()
+      local vault = tmp_dir()
+      local one, other = vault .. "/rulesets/one", vault .. "/rulesets/other"
+      rule(one, "DEP-01")
+      rule(other, "DEP-01")
+      assert.are.equal(0, run("check", "--vault=" .. vault, one).code)
+      assert.are.equal(0, run("check", "--vault=" .. vault, other).code)
+      local both = run("check", "--vault=" .. vault)
+      assert.are.equal(1, both.code, both.stdout .. both.stderr)
+      assert.matches("duplicate rule id DEP-01", both.stdout, 1, true)
+      assert.matches("2 ruleset(s)", both.stdout, 1, true)
+    end)
+
+    it("exits 1 for a severity that is none, and writes nothing", function()
+      local vault = tmp_dir()
+      local root = vault .. "/rulesets/one"
+      rule(root, "DEP-01", "urgent")
+      local before = read(root .. "/_rules/DEP/DEP-01.md")
+      local result = run("check", "--vault=" .. vault)
+      assert.are.equal(1, result.code, result.stdout)
+      assert.matches("load error: ", result.stdout, 1, true)
+      assert.are.equal(before, read(root .. "/_rules/DEP/DEP-01.md"))
+    end)
+
+    it("is exit 2 when there is nothing to check", function()
+      local result = run("check", "--vault=" .. tmp_dir())
+      assert.are.equal(2, result.code)
+      assert.matches("no ruleset folder is configured", result.stderr, 1, true)
+    end)
+  end)
+
   it("takes the folder flags of migrate with a value", function()
     local root = tmp_dir()
     write(
