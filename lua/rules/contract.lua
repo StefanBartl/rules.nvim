@@ -92,7 +92,13 @@ local function ruleset_paths(opts)
   local out, seen = {}, {}
   for _, path in ipairs(given or {}) do
     local expanded = (vim.fs.normalize(vim.fn.fnamemodify(expand_path(path), ":p")):gsub("/+$", ""))
-    local key = CASE_INSENSITIVE and vim.fn.tolower(expanded) or expanded
+    -- the real path unifies spellings the string cannot (8.3 short names on Windows, links); a path that does not
+    -- exist (yet) keeps its own spelling
+    local real = vim.uv.fs_realpath(expanded)
+    local key = real and vim.fs.normalize(real):gsub("/+$", "") or expanded
+    if CASE_INSENSITIVE then
+      key = vim.fn.tolower(key)
+    end
     if not seen[key] then
       seen[key] = true
       out[#out + 1] = expanded
