@@ -30,5 +30,17 @@ return {
     spawn = { "git" },
   },
   -- gated: a failed conformance check makes `scripts/test.sh conformance` exit 1 (docs/CONFORMANCE.md of testing.nvim)
-  conformance = { gate = true },
+  conformance = {
+    gate = true,
+    waivers = {
+      {
+        check = "K15",
+        rule = "NEW-08",
+        file = "lua/rules/bindings",
+        level = "warn",
+        reason = "the plugin registers no keymaps or autocmds (user commands only); the files would be empty",
+        expires = "2027-04-14",
+      },
+    },
+  },
 }
