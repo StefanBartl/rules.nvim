@@ -6,6 +6,7 @@ CONTENTS                                                       *rules-contents*
     Introduction ....... |rules-introduction|
     Setup .............. |rules-setup|
     Commands ........... |rules-commands|
+    The form ........... |rules-form|
     Gates .............. |rules-gates|
     Waivers ............ |rules-waivers|
     Ruleset format ...... |rules-ruleset-format|
@@ -93,8 +94,69 @@ COMMANDS                                                        *rules-commands*
 
     --check               optional, only report
 
+                                                                    *:Rules_new*
+:Rules new [{family} [{title}...]] [severity={level}] [text={text}]
+                                  [ruleset={name}] [{place}] [--dry]
+    Makes a rule in a ruleset of the one-file-per-rule form, at the next
+    free id of {family}. With the family, a title and severity= the rule
+    is made, placed and opened. With less, a Markdown form opens, filled in
+    with what was given (|rules-form|). The command checks nothing of a rule
+    itself: it hands one operation of `rules-ops/1` to the engine and tells
+    the answer. --dry checks everything and writes nothing.
+
+    {place} is one of
+    --to={file}#{section}   layout (its `output` path) and heading text; write
+                            a blank in the heading as `\ `; {file} alone is
+                            the top of the layout
+    --after={id}            right after that rule, in the layout that holds it
+    --before={id}           right before that rule
+    --first                 with --to: the start of the section, not its end
+
+                                                                    *:Rules_set*
+:Rules set {id} {key}={value}... [--dry]
+    Changes parts of a rule's file; everything else in the file stays byte
+    for byte. Keys: severity, title, text, check, agent. A value may hold
+    spaces (a word that is no known `key=` goes on with the value before
+    it). check= and agent= take a JSON object, or nothing to remove the key.
+    An open buffer of the file is reloaded; one with unsaved changes is
+    reported as a conflict and left as it is. --dry shows the change as a
+    diff.
+
+                                                                 *:Rules_retire*
+:Rules retire {id} [--by={id}] [reason={text}] [--yes] [--dry]
+    Moves the rule's file to `_retired/` and out of every layout; the id
+    stays taken. Asks first (--yes skips the question; a session without a
+    screen needs it). The engine is asked with a dry run before the
+    question, so a rule that is not there is told without one. --by names
+    the rule that takes its place.
+
+                                                                   *:Rules_move*
+:Rules move {id} {place} [--dry]
+    Moves the rule's `{{rule ID}}` line within its layout or into another;
+    the rule's own file is not touched. {place} as in |:Rules_new|, one is
+    required.
+
+                                                                   *:Rules_list*
+:Rules list [--family={PREFIX}] [--severity={level}] [--format=json]
+    Puts the rules in the quickfix list, each at its source line. With
+    --format=json prints the `rules.list` document of the machine contract.
+
+                                                                    *rules-form*
+THE FORM OF :Rules new ~
+
+A Markdown buffer (`rules://rule-new`) with the lines Family, Title, an
+optional Ruleset and Place, a list of severities and, below `## text`, the
+prose of the rule. Family, Title and one severity are required.
+
+    <Space>, <CR>   tick or untick the severity under the cursor (one tick)
+    <C-s>           check the form (what is missing is listed at the top as
+                    `!` lines), ask the engine with a dry run, show what
+                    would be made and ask; only "Create the rule" writes
+    q, <C-q>        cancel; asks first when something was typed
+    g?              help
+
 ==============================================================================
-GATES                                                              *rules-gates*
+GATES                                                             *rules-gates*
 
 A gate is a named bundle of rule families, run together as one report — the
 one place in this plugin that checks more than one family at once. No gates

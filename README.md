@@ -1,5 +1,5 @@
 > **Alpha — small, working surface.** The engine, the four check types,
-> `:Rules check`/`gate`/`show`/`stats`, and waivers are real and tested.
+> `:Rules check`/`gate`/`show`/`stats`/`new`/`set`/`retire`/`move`/`list`, and waivers are real and tested.
 > Pin a commit if you depend on this.
 
 # rules.nvim
@@ -50,7 +50,7 @@ provide — the same way you'd point ESLint at your own `.eslintrc`.
 ## Documentation
 
 - [Ruleset format](docs/RULESET-FORMAT.md) — how a rule and its `check` are written.
-- [Bindings](docs/BINDINGS.md) — the `:Rules` command and its subcommands.
+- [Bindings](docs/BINDINGS.md) — the `:Rules` command and its subcommands, including the form of `:Rules new`.
 - [Agent-run manual rules](docs/AGENT.md) — planned, not built: how the rules with no `check` could be worked by an agent, as proposals a person reviews.
 - [Machine contract](docs/CONTRACT.md) — `rules-export/1` (the ruleset as JSON documents for apps, agents and CI) and `rules-ops/1` (create, change, retire and move a rule through the engine).
 
@@ -79,6 +79,18 @@ totals, automated vs. manual, severity) without running anything. `:Rules
 show <id>` jumps straight to one rule's source. `--family=`, a gate's name,
 and a rule id all tab-complete against whatever is actually loaded right
 now.
+
+For a ruleset in the one-file-per-rule form the commands also write:
+`:Rules new <FAMILY>` makes a rule at the next free id (with less than a title
+and `severity=` a Markdown form opens, checked up front, with a dry-run preview
+before anything is written), `:Rules set <ID> key=value` changes parts of its
+file, `:Rules retire <ID>` moves it to `_retired/` (it asks first), `:Rules
+move <ID> --to=<file>#<section>` moves it in a layout, `:Rules list` puts the
+rules in the quickfix list. They are a thin layer over the write door of the
+[machine contract](docs/CONTRACT.md) (`rules-ops/1`): the engine is the only
+writer, the open buffers of a changed file are reloaded (a buffer with unsaved
+changes is reported, not overwritten). See
+[docs/BINDINGS.md](docs/BINDINGS.md#making-changing-retiring-and-moving-rules).
 
 ## Why no bundled rules
 
@@ -111,8 +123,8 @@ installing it either.
 ```
 
 `cmd = { "Rules" }`: the whole surface today is one usercommand (`check`,
-`gate`, `show`, `stats`, `catalog`), run on demand — nothing here needs to run at
-startup.
+`gate`, `show`, `stats`, `catalog`, `new`, `set`, `retire`, `move`, `list`), run on
+demand — nothing here needs to run at startup.
 
 ## Quickstart
 
