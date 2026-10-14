@@ -1,5 +1,6 @@
 ---@module 'rules.env'
----@brief Rulesets and gates from the environment, for the headless entry points (host, command line).
+---@brief Rulesets, gates and the project root from the environment, for the headless entry points (host, command line).
+---`$RULES_VAULT` is not here: `rules.settings` reads it itself, ranked below `setup()` and above the project file.
 
 local M = {}
 
@@ -49,7 +50,8 @@ function M.parse_gates(text)
   return gates
 end
 
----`$RULES_RULESETS` and `$RULES_GATES`; unset means "from setup()".
+---`$RULES_RULESETS`, `$RULES_GATES` and `$RULES_PROJECT` (the root whose `.rules.json` is read); unset means "from
+---`setup()`, the project file and the vault" (`rules.settings`).
 ---@return Rules.Contract.Opts
 function M.opts()
   local opts = {}
@@ -60,6 +62,10 @@ function M.opts()
   local gates = vim.env.RULES_GATES
   if gates and gates ~= "" then
     opts.gates = M.parse_gates(gates)
+  end
+  local project = vim.env.RULES_PROJECT
+  if project and project ~= "" then
+    opts.project = project
   end
   return opts
 end
