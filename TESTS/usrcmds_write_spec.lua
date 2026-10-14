@@ -389,6 +389,107 @@ describe(":Rules new, set, retire, move, list", function()
     end)
   end)
 
+  describe("the family of new", function()
+    ---@return string[]
+    local function made_ids()
+      contract.clear_cache()
+      local out = {}
+      for _, rule in ipairs(contract.view(nil).rules) do
+        out[#out + 1] = rule.id
+      end
+      table.sort(out)
+      return out
+    end
+
+    before_each(function()
+      -- a session with a screen: the question can be asked
+      vim.api.nvim_list_uis = function()
+        return { {} }
+      end
+    end)
+
+    it("refuses a mistyped title that was read as a family, and writes nothing", function()
+      local opened = false
+      cmd.form_open = function()
+        opened = true
+      end
+      run("Rules new Fix the bug severity=critical")
+      assert.is_true(told("invalid_argument: family must be 1 to 12 uppercase letters A-Z"))
+      assert.are.same({ "DEP-01", "DEP-02" }, made_ids())
+      -- not even a form: it would open on a family that no submit could pass
+      run("Rules new Fix the bug")
+      assert.is_false(opened)
+      assert.are.same({}, asked)
+    end)
+
+    it("refuses a lowercase or mixed-case family, and says what the door says", function()
+      for _, family in ipairs({ "dep", "Dep", "DEp" }) do
+        notes = {}
+        run(("Rules new %s Title severity=critical"):format(family))
+        assert.is_true(told("invalid_argument: family " .. require("rules.ops").family_error(family)), family)
+      end
+      assert.are.same({ "DEP-01", "DEP-02" }, made_ids())
+    end)
+
+    it("asks first about a family no rule has yet, and makes the rule on Yes", function()
+      answer = 2
+      run("Rules new NEWF Brand new severity=critical")
+      assert.are.equal(1, #asked)
+      assert.is_truthy(asked[1].question:find("New family NEWF", 1, true))
+      assert.is_truthy(asked[1].question:find("NEWF-01", 1, true))
+      assert.are.same({ "No", "Yes, make it" }, asked[1].choices)
+      assert.are.same({ "DEP-01", "DEP-02", "NEWF-01" }, made_ids())
+      assert.is_true(told("created NEWF-01"))
+    end)
+
+    it("makes nothing on No or when the question is dismissed", function()
+      answer = 1
+      run("Rules new NEWF Brand new severity=critical")
+      assert.are.equal(1, #asked)
+      assert.is_true(told("NEWF-01 was not made"))
+      answer = nil
+      run("Rules new NEWF Brand new severity=critical")
+      assert.are.equal(2, #asked)
+      assert.are.same({ "DEP-01", "DEP-02" }, made_ids())
+    end)
+
+    it("--yes makes the rule without asking, --dry asks nothing and writes nothing", function()
+      run("Rules new NEWF Brand new severity=critical --dry")
+      assert.is_true(told("would create NEWF-01"))
+      assert.are.same({ "DEP-01", "DEP-02" }, made_ids())
+      run("Rules new NEWF Brand new severity=critical --yes")
+      assert.are.same({}, asked)
+      assert.are.same({ "DEP-01", "DEP-02", "NEWF-01" }, made_ids())
+    end)
+
+    it("does not ask about a family a rule has, loaded or retired, nor about a rule the door would refuse", function()
+      run("Rules new DEP Fresh severity=critical")
+      assert.are.same({}, asked)
+      run("Rules retire DEP-01 --yes")
+      run("Rules retire DEP-02 --yes")
+      run("Rules retire DEP-03 --yes")
+      assert.are.same({}, made_ids())
+      asked = {}
+      -- the family has only retired rules now: it is not a new one
+      run("Rules new DEP Again severity=critical")
+      assert.are.same({}, asked)
+      assert.are.same({ "DEP-04" }, made_ids())
+      notes = {}
+      run("Rules new NEWF Brand new severity=urgent")
+      assert.are.same({}, asked)
+      assert.is_true(told("severity must be one of"))
+    end)
+
+    it("needs --yes where there is nobody to ask", function()
+      vim.api.nvim_list_uis = saved_uis
+      run("Rules new NEWF Brand new severity=critical")
+      assert.are.same({}, asked)
+      assert.is_true(told("is a new family"))
+      assert.is_true(told("run it with --yes"))
+      assert.are.same({ "DEP-01", "DEP-02" }, made_ids())
+    end)
+  end)
+
   describe("the form", function()
     ---@return integer buf
     local function open_form(command)
@@ -465,6 +566,33 @@ describe(":Rules new, set, retire, move, list", function()
       assert.is_false(vim.api.nvim_buf_is_valid(buf))
       assert.are.equal(real(root .. "/_rules/DEP/DEP-03.md"), real(vim.api.nvim_buf_get_name(0)))
       assert.is_true(told("created DEP-03 in regeln/DEP.md"))
+    end)
+
+    it("shows a new family in the question, and no such line for a family that is there", function()
+      local form_buf = open_form("Rules new NEWF")
+      set_line(form_buf, "Title:", "Title: Made in the form")
+      set_line(form_buf, "- [ ] critical", "- [x] critical")
+      submit(form_buf)
+      assert.are.equal(1, #asked)
+      assert.is_truthy(asked[1].question:find("NEWF (NEW: no rule of any ruleset has it yet)", 1, true))
+      assert.is_true(told("created NEWF-01"))
+
+      local known = open_form("Rules new DEP")
+      set_line(known, "Title:", "Title: Known family")
+      set_line(known, "- [ ] critical", "- [x] critical")
+      submit(known)
+      assert.are.equal(2, #asked)
+      assert.is_nil(asked[2].question:find("NEW:", 1, true))
+    end)
+
+    it("refuses a family that is not uppercase letters in the form, before anything is asked", function()
+      local buf = open_form("Rules new")
+      set_line(buf, "Family:", "Family: Fix")
+      set_line(buf, "Title:", "Title: the bug")
+      set_line(buf, "- [ ] critical", "- [x] critical")
+      submit(buf)
+      assert.is_truthy(form_text(buf):find("Family must be 1 to 12 uppercase letters A-Z", 1, true))
+      assert.are.same({}, asked)
     end)
 
     it("fills the form with what the command line gave", function()

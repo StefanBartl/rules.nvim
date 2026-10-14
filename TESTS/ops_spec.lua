@@ -334,6 +334,30 @@ describe("rules-ops/1 new", function()
     assert.are.equal("DEP-04", next_one.id)
   end)
 
+  it("takes a family of uppercase letters only, 1 to 12 of them, and refuses anything else with one message", function()
+    local ops = require("rules.ops")
+    local root, opts = fixture()
+    -- a mistyped word of a title (`Fix`), lower and mixed case, a digit, a dash, the empty and the too long one
+    for _, family in ipairs({ "Fix", "dep", "DePs", "DEP2", "D-P", "D_P", "D P", "", "ABCDEFGHIJKLM", "DÉP" }) do
+      local entry = one(opts, { op = "new", family = family, title = "t", severity = "critical" })
+      assert.is_false(entry.ok, ("%q"):format(family))
+      assert.are.equal("invalid_argument", entry.error.code, ("%q"):format(family))
+      assert.are.equal("family " .. ops.family_error(family), entry.error.message, ("%q"):format(family))
+      assert.is_truthy(entry.error.message:find("1 to 12 uppercase letters A-Z", 1, true))
+    end
+    -- nothing was made for any of them (a folder of that name may be the one of DEP where the case does not count)
+    assert.are.equal(0, vim.fn.isdirectory(root .. "/_rules/Fix"))
+    for _, id in ipairs(ids_of(opts)) do
+      assert.is_truthy(id:match("^[A-Z]+%-%d+$"), id)
+    end
+    assert.are.equal(4, #ids_of(opts))
+    for _, family in ipairs({ "DEP", "A", "ABCDEFGHIJKL" }) do
+      assert.is_nil(ops.family_error(family), family)
+      local entry = one(opts, { op = "new", family = family, title = "t", severity = "critical" }, { dry_run = true })
+      assert.is_true(entry.ok, family .. vim.inspect(entry))
+    end
+  end)
+
   it("writes nothing on a dry run and says what it would do", function()
     local root, opts = fixture()
     local doc = run(

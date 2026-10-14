@@ -53,6 +53,19 @@ M.MAX_TEXT = 20000
 M.MAX_REASON = 300
 M.FAMILY_MAX = 12
 
+---Why a family cannot be given to `new`, or `nil` when it can: uppercase letters `A-Z` only (the form of every family of
+---a ruleset: `DEP`, `LUA`), 1 to `FAMILY_MAX`. Lower or mixed case is refused, not changed: a mistyped word of a title
+---(`Fix`) must not become a family, and `dep` would be another family than `DEP` where the file system tells the
+---folders apart and the same folder where it does not. The text goes after the word "family" (the form says "Family").
+---@param family any
+---@return string|nil why
+function M.family_error(family)
+  if type(family) ~= "string" or not family:match("^[A-Z]+$") or #family > M.FAMILY_MAX then
+    return ("must be 1 to %d uppercase letters A-Z (e.g. DEP)"):format(M.FAMILY_MAX)
+  end
+  return nil
+end
+
 ---@class Rules.OpsCtx
 ---@field root string               the first ruleset (what an error hides)
 ---@field paths string[]
@@ -530,8 +543,9 @@ local function do_new(op, ctx)
   if op.family == nil or op.title == nil or op.severity == nil then
     return refuse("invalid_argument", "new needs family, title and severity")
   end
-  if not op.family:match("^%a+$") or #op.family > M.FAMILY_MAX then
-    return refuse("invalid_argument", ("family must be letters only, at most %d"):format(M.FAMILY_MAX))
+  local family_why = M.family_error(op.family)
+  if family_why then
+    return refuse("invalid_argument", "family " .. family_why)
   end
   if not vim.tbl_contains(rule_edit.SEVERITIES, op.severity) then
     return refuse("invalid_argument", ("severity must be one of %s"):format(table.concat(rule_edit.SEVERITIES, ", ")))

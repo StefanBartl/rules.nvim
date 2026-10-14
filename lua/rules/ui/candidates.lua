@@ -54,6 +54,26 @@ function M.families()
   return column("family")
 end
 
+---Whether a rule of the family exists in any ruleset, loaded or retired (a retired rule keeps its number, so its
+---family is not a new one). When the rulesets cannot be read the answer is `true`: nobody is asked about a family on
+---the strength of a scan that failed.
+---@param family string
+---@return boolean
+function M.family_known(family)
+  local scan = view()
+  if not scan then
+    return true
+  end
+  for _, list in ipairs({ scan.rules, scan.retired or {} }) do
+    for _, rule in ipairs(list) do
+      if rule.family == family then
+        return true
+      end
+    end
+  end
+  return false
+end
+
 ---The ids of the loaded rules.
 ---@return string[]
 function M.ids()

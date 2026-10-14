@@ -110,9 +110,20 @@ describe("rules.form.validate", function()
     assert.is_truthy(text:find("severity: tick one", 1, true))
   end)
 
-  it("refuses a family that is not letters, several ticks, an unknown tick and a place it cannot read", function()
+  it("refuses a family that is not uppercase letters with the message of the door", function()
+    local ops = require("rules.ops")
+    for _, family in ipairs({ "DEP-1", "Fix", "dep", "DEP2", "ABCDEFGHIJKLM" }) do
+      local op, errors = form.validate(valid({ family = family }))
+      assert.is_nil(op, family)
+      assert.are.same({ "Family " .. ops.family_error(family) }, errors, family)
+      assert.is_truthy(errors[1]:find("1 to 12 uppercase letters A-Z", 1, true))
+    end
+    assert.is_not_nil((form.validate(valid({ family = "ABCDEFGHIJKL" }))))
+  end)
+
+  it("refuses several ticks, an unknown tick and a place it cannot read", function()
     local _, e1 = form.validate(valid({ family = "DEP-1" }))
-    assert.is_truthy(e1[1]:find("letters only", 1, true))
+    assert.is_truthy(e1[1]:find("uppercase letters", 1, true))
     local _, e2 = form.validate(valid({ ticks = { "critical", "recommended" } }))
     assert.is_truthy(e2[1]:find("pick one, 2 are ticked", 1, true))
     local _, e3 = form.validate(valid({ ticks = {}, unknown = { "urgent" } }))

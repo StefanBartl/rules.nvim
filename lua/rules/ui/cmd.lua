@@ -148,6 +148,9 @@ function M.preview_text(op, entry)
     lines[#lines + 1] = ("  %-9s %s"):format(name, value)
   end
   row("id", (entry.id or "?") .. " (given when it is written)")
+  if not candidates.family_known(op.family) then
+    row("family", op.family .. " (NEW: no rule of any ruleset has it yet)")
+  end
   row("severity", op.severity)
   row("title", vim.fn.strcharpart(op.title, 0, 60) .. (vim.fn.strchars(op.title) > 60 and "..." or ""))
   if op.text then
@@ -220,7 +223,46 @@ end
 ---@type (fun(opts: Rules.FormOpenOpts): any)|nil
 M.form_open = nil
 
----`:Rules new [<FAMILY> [title...]] [severity= text= ruleset=] [--to= --after= --before= --first] [--dry]`
+---Make the rule and open its file.
+---@param op table  a `new` operation
+---@param dry boolean|nil
+local function make(op, dry)
+  local result = run({ op }, dry)
+  local entry = ok_entry(result)
+  if entry and entry.outcome == "created" then
+    open_rule(entry.id)
+  end
+end
+
+---The question before a rule is made in a family that no rule has yet: a family is made by its first rule, and the
+---typo of a family (`DPE` for `DEP`) is the way to make one by accident. The door checks first (`dry_run`), so a rule
+---it would refuse is told without a question.
+---@param op table  a `new` operation
+function M.ask_new_family(op)
+  local check = write().run({ op }, { dry = true })
+  local entry = ok_entry(check)
+  if not entry then
+    write().say(check, { op })
+    return
+  end
+  if #vim.api.nvim_list_uis() == 0 then
+    notify.error(("%s is a new family (no rule has it yet) and there is nobody to ask: run it with --yes"):format(op.family))
+    return
+  end
+  require("rules.ui.confirm").yesno(
+    ("New family %s: no rule of any ruleset has it yet.\n\nMake %s as its first rule?"):format(op.family, entry.id or "?"),
+    "make it",
+    function(yes)
+      if yes then
+        make(op, false)
+      else
+        notify.info(("%s was not made"):format(entry.id or "the rule"))
+      end
+    end
+  )
+end
+
+---`:Rules new [<FAMILY> [title...]] [severity= text= ruleset=] [--to= --after= --before= --first] [--yes] [--dry]`
 ---@param ctx table
 function M.new(ctx)
   local routes = require("rules.ui.routes")
@@ -242,6 +284,12 @@ function M.new(ctx)
     return
   end
   local title = cmdline.join(bound.lead)
+  -- the door's own answer, said before anything else: a mistyped title is not a family (`Fix the bug` reads `Fix`)
+  local why = family and require("rules.ops").family_error(family)
+  if why then
+    notify.error(("invalid_argument: family %s"):format(why))
+    return
+  end
   if family and title ~= "" and values.severity and values.severity ~= "" then
     ---@type table
     local op = vim.tbl_extend("force", { op = "new", family = family, title = title, severity = values.severity }, place)
@@ -251,10 +299,10 @@ function M.new(ctx)
     if values.ruleset and values.ruleset ~= "" then
       op.ruleset = values.ruleset
     end
-    local result = run({ op }, ctx.flags.dry)
-    local entry = ok_entry(result)
-    if entry and entry.outcome == "created" then
-      open_rule(entry.id)
+    if ctx.flags.dry or ctx.flags.yes or require("rules.ui.candidates").family_known(family) then
+      make(op, ctx.flags.dry)
+    else
+      M.ask_new_family(op)
     end
     return
   end

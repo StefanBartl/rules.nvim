@@ -6,7 +6,7 @@
 --- `TESTS/usrcmds_help_spec.lua` pins that none is left without. The handlers are in `rules.ui.cmd`; this file only
 --- says what a command line may look like.
 ---
----  - `:Rules new [<FAMILY> [title...]] [severity= text= ruleset=] [--to= --after= --before= --first] [--dry]`
+---  - `:Rules new [<FAMILY> [title...]] [severity= text= ruleset=] [--to= --after= --before= --first] [--yes] [--dry]`
 ---  - `:Rules set <ID> key=value ... [--dry]`
 ---  - `:Rules retire <ID> [--by=<ID>] [reason=...] [--yes] [--dry]`
 ---  - `:Rules move <ID> (--to=<file>#<section> | --after=<ID> | --before=<ID>) [--first] [--dry]`
@@ -54,7 +54,10 @@ end
 ---composer does).
 ---@type table<string, table[]>
 M.FLAGS = {
-  new = concat(PLACE, { DRY }),
+  new = concat(PLACE, {
+    { name = "yes", bool = true, desc = "Make the rule in a family no rule has yet without asking" },
+    DRY,
+  }),
   set = { DRY },
   retire = {
     { name = "by", type = "RULES_ID", desc = "The rule that takes its place (recorded as replaced_by)" },
@@ -77,7 +80,7 @@ function M.routes()
           name = "family",
           type = "RULES_FAMILY",
           optional = true,
-          desc = "Family of the new rule, letters such as DEP (none: open the form)",
+          desc = "Family of the new rule, uppercase letters such as DEP (none: open the form)",
         },
       },
       kv = {
@@ -88,7 +91,8 @@ function M.routes()
       flags = M.FLAGS.new,
       desc = "Make a rule in the next free id of the family. The words after the family are the title; "
         .. "with a title and severity= the rule is made and opened, with less the Markdown form opens "
-        .. "(family, title, severity, place, text; <C-s> checks it, shows what would be made and asks)",
+        .. "(family, title, severity, place, text; <C-s> checks it, shows what would be made and asks). "
+        .. "A family no rule has yet is asked about first (--yes skips the question)",
       run = handler("new"),
     },
     {
