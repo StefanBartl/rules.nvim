@@ -1,0 +1,244 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "rules-export/1",
+  "title": "rules-export/1",
+  "description": "Every document rules.nvim hands to a machine (read only). One of the kinds below, told apart by `kind`. A reader ignores fields it does not know: inside one version the contract only grows. The golden files next to this schema are the documents the engine writes.",
+  "oneOf": [
+    { "$ref": "#/$defs/hello" },
+    { "$ref": "#/$defs/snapshot" },
+    { "$ref": "#/$defs/list" },
+    { "$ref": "#/$defs/rule" },
+    { "$ref": "#/$defs/next_id" },
+    { "$ref": "#/$defs/sources" },
+    { "$ref": "#/$defs/error" }
+  ],
+  "$defs": {
+    "head": {
+      "type": "object",
+      "required": ["schema", "plugin", "kind", "generated_at", "source", "engine"],
+      "properties": {
+        "schema": { "const": 1 },
+        "plugin": { "const": "rules.nvim" },
+        "kind": { "type": "string" },
+        "generated_at": { "type": "string", "description": "UTC, YYYY-MM-DDTHH:MM:SSZ; not part of the digest" },
+        "source": {
+          "type": "object",
+          "required": ["id"],
+          "properties": { "id": { "type": "string", "description": "the last part of the first ruleset path; never a path of this machine" } }
+        },
+        "engine": {
+          "type": "object",
+          "required": ["version", "git", "nvim"],
+          "properties": {
+            "version": { "type": "string" },
+            "git": { "type": "string" },
+            "nvim": { "type": "string" }
+          }
+        },
+        "rev": { "type": "string", "pattern": "^rev:[0-9a-f]+$", "description": "what the source looked like; present on documents that come from a scan" },
+        "digest": { "type": "string", "pattern": "^sha256:[0-9a-f]{16}$", "description": "hash of the document without generated_at and engine" }
+      }
+    },
+    "severity": { "enum": ["critical", "recommended", "nice-to-have"] },
+    "rule_summary": {
+      "type": "object",
+      "required": ["id", "family", "severity", "title", "section", "source", "line", "has_check", "has_agent", "editable", "etag", "etag_scope"],
+      "properties": {
+        "id": { "type": "string" },
+        "family": { "type": "string", "description": "the id up to the first '-' when only letters come before it" },
+        "severity": { "$ref": "#/$defs/severity" },
+        "title": { "type": "string" },
+        "section": { "type": "string" },
+        "source": { "type": "string", "description": "<ruleset folder>/<path inside it>, with /" },
+        "line": { "type": "integer", "minimum": 1 },
+        "has_check": { "type": "boolean" },
+        "check_type": { "type": "string" },
+        "has_agent": { "type": "boolean" },
+        "editable": { "type": "boolean", "description": "false when the check holds a Lua function: it cannot be written as data and a client must not write it back" },
+        "etag": { "type": "string", "pattern": "^sha256:[0-9a-f]{16}$", "description": "the version of the FILE the rule lives in" },
+        "etag_scope": { "enum": ["rule", "file"], "description": "rule: the only rule of its file; file: a document with many rules, any change changes every etag in it" }
+      }
+    },
+    "source_file": {
+      "type": "object",
+      "required": ["path", "rules", "etag"],
+      "properties": {
+        "path": { "type": "string" },
+        "rules": { "type": "integer", "minimum": 1 },
+        "etag": { "type": "string" }
+      }
+    },
+    "hello": {
+      "title": "rules.hello: what this engine is and can do. Reads no rule.",
+      "allOf": [
+        { "$ref": "#/$defs/head" },
+        {
+          "type": "object",
+          "required": ["kind", "schemas", "capabilities", "limits", "enums", "read_only"],
+          "properties": {
+            "kind": { "const": "rules.hello" },
+            "schemas": { "type": "array", "items": { "type": "integer" } },
+            "capabilities": { "type": "array", "items": { "type": "string" } },
+            "limits": {
+              "type": "object",
+              "properties": {
+                "list_items": { "type": "integer" },
+                "request_bytes": { "type": "integer" },
+                "doc_bytes": { "type": "integer" }
+              }
+            },
+            "enums": { "type": "object", "properties": { "severity": { "type": "array", "items": { "type": "string" } } } },
+            "read_only": { "type": "boolean" }
+          }
+        }
+      ]
+    },
+    "snapshot": {
+      "title": "rules.snapshot: families with counters, every rule, the sources, the gates, what failed to load.",
+      "allOf": [
+        { "$ref": "#/$defs/head" },
+        {
+          "type": "object",
+          "required": ["kind", "counts", "families", "rules", "sources", "gates", "load_errors", "rev", "digest"],
+          "properties": {
+            "kind": { "const": "rules.snapshot" },
+            "counts": {
+              "type": "object",
+              "properties": { "rules": { "type": "integer" }, "families": { "type": "integer" }, "files": { "type": "integer" } }
+            },
+            "families": {
+              "type": "array",
+              "items": {
+                "type": "object",
+                "properties": {
+                  "family": { "type": "string" },
+                  "count": { "type": "integer" },
+                  "critical": { "type": "integer" },
+                  "recommended": { "type": "integer" },
+                  "nice_to_have": { "type": "integer" },
+                  "with_check": { "type": "integer" }
+                }
+              }
+            },
+            "rules": { "type": "array", "items": { "$ref": "#/$defs/rule_summary" } },
+            "sources": { "type": "array", "items": { "$ref": "#/$defs/source_file" } },
+            "gates": {
+              "type": "array",
+              "items": {
+                "type": "object",
+                "properties": {
+                  "name": { "type": "string" },
+                  "families": { "type": "array", "items": { "type": "string" } },
+                  "rules": { "type": "integer" },
+                  "unknown": { "type": "array", "items": { "type": "string" }, "description": "families of the gate that match no loaded rule" }
+                }
+              }
+            },
+            "load_errors": { "type": "array", "items": { "type": "string" } }
+          }
+        }
+      ]
+    },
+    "list": {
+      "title": "rules.list: a page of rules, in id order.",
+      "allOf": [
+        { "$ref": "#/$defs/head" },
+        {
+          "type": "object",
+          "required": ["kind", "total", "offset", "limit", "items", "rev", "digest"],
+          "properties": {
+            "kind": { "const": "rules.list" },
+            "total": { "type": "integer" },
+            "offset": { "type": "integer" },
+            "limit": { "type": "integer" },
+            "items": { "type": "array", "items": { "$ref": "#/$defs/rule_summary" } }
+          }
+        }
+      ]
+    },
+    "rule": {
+      "title": "rules.rule: one rule with its text, its check and the etag of its file.",
+      "allOf": [
+        { "$ref": "#/$defs/head" },
+        {
+          "type": "object",
+          "required": ["kind", "rule", "rev", "digest"],
+          "properties": {
+            "kind": { "const": "rules.rule" },
+            "rule": {
+              "allOf": [
+                { "$ref": "#/$defs/rule_summary" },
+                {
+                  "type": "object",
+                  "required": ["text"],
+                  "properties": {
+                    "text": { "type": "string" },
+                    "check": { "type": "object", "description": "the check as data, without functions" },
+                    "agent": { "type": "object" }
+                  }
+                }
+              ]
+            }
+          }
+        }
+      ]
+    },
+    "next_id": {
+      "title": "rules.next_id: the next free id of a family, or of every family.",
+      "allOf": [
+        { "$ref": "#/$defs/head" },
+        {
+          "type": "object",
+          "required": ["kind", "basis", "items", "rev", "digest"],
+          "properties": {
+            "kind": { "const": "rules.next_id" },
+            "basis": { "type": "array", "items": { "enum": ["loaded", "retired"] }, "description": "whose ids were looked at; `retired` joins when rules-ops/1 defines retiring" },
+            "items": {
+              "type": "array",
+              "items": {
+                "type": "object",
+                "properties": {
+                  "family": { "type": "string" },
+                  "highest": { "type": "integer" },
+                  "count": { "type": "integer" },
+                  "next": { "type": "string" }
+                }
+              }
+            }
+          }
+        }
+      ]
+    },
+    "sources": {
+      "title": "rules.sources: the files the rules come from, with the etag of each.",
+      "allOf": [
+        { "$ref": "#/$defs/head" },
+        {
+          "type": "object",
+          "required": ["kind", "items", "load_errors", "rev", "digest"],
+          "properties": {
+            "kind": { "const": "rules.sources" },
+            "items": { "type": "array", "items": { "$ref": "#/$defs/source_file" } },
+            "load_errors": { "type": "array", "items": { "type": "string" } }
+          }
+        }
+      ]
+    },
+    "error": {
+      "title": "rules.error: what went wrong, in a code that is stable.",
+      "allOf": [
+        { "$ref": "#/$defs/head" },
+        {
+          "type": "object",
+          "required": ["kind", "code", "message", "retryable"],
+          "properties": {
+            "kind": { "const": "rules.error" },
+            "code": { "enum": ["invalid_argument", "not_found", "unsupported_schema", "payload_too_large", "io", "internal"] },
+            "message": { "type": "string" },
+            "retryable": { "type": "boolean" }
+          }
+        }
+      ]
+    }
+  }
+}
