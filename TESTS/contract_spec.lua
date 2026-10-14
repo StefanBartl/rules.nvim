@@ -249,13 +249,55 @@ describe("rules.api", function()
   end)
 
   it("tells a duplicate id in load_errors, with both sources named by their ruleset", function()
-    local a, b = tmp_dir(), tmp_dir()
+    local a, b = tmp_dir() .. "/one/Checklists", tmp_dir() .. "/two/Checklists"
     write_raw(a .. "/x.md", DOCUMENT)
     write_raw(b .. "/y.md", DOCUMENT)
     local doc = call("snapshot", nil, { rulesets = { a, b } })
     assert.is_true(#doc.load_errors >= 1)
-    assert.is_truthy(doc.load_errors[1]:find("duplicate rule id", 1, true))
-    assert.is_nil(doc.load_errors[1]:find(vim.fs.normalize(a), 1, true))
+    local message = doc.load_errors[1]
+    assert.is_truthy(message:find("duplicate rule id", 1, true))
+    assert.is_nil(message:find(vim.fs.normalize(a), 1, true))
+    -- both rulesets are called `Checklists`: the folder above tells them apart
+    assert.is_truthy(message:find("one/Checklists/x.md", 1, true))
+    assert.is_truthy(message:find("two/Checklists/y.md", 1, true))
+  end)
+
+  it("names a ruleset by its own folder, never by a folder above it that is not needed", function()
+    local root, opts = fixture()
+    local doc = call("sources", nil, opts)
+    for _, item in ipairs(doc.items) do
+      assert.is_truthy(item.path:find("^Checklists/"), item.path)
+    end
+    assert.is_nil(api.call("snapshot", nil, opts):find("fixture/", 1, true))
+    assert.are.equal("Checklists", vim.fs.basename(root))
+  end)
+
+  it("keeps the scan while no file changed and takes the new one when a file did", function()
+    local root, opts = fixture()
+    local old = os.time() - 3600
+    local function age_all()
+      for _, path in ipairs(vim.fn.globpath(root, "**/*.md", false, true)) do
+        vim.uv.fs_utime(path, old, old)
+      end
+    end
+    age_all()
+    contract.clear_cache()
+    local first = assert(contract.view(opts))
+    assert.are.equal(first, (contract.view(opts)))
+
+    write_raw(root .. "/_rules/ERR/ERR-100.md", RULE_FILE .. "More prose.\n")
+    age_all()
+    local second = assert(contract.view(opts))
+    assert.are_not.equal(first, second)
+    assert.are.equal("More prose.", second.full["ERR-100"].text:match("More prose%."))
+  end)
+
+  it("does not keep a scan of files that changed a moment ago", function()
+    local _, opts = fixture()
+    contract.clear_cache()
+    local first = assert(contract.view(opts))
+    local second = assert(contract.view(opts))
+    assert.are_not.equal(first, second)
   end)
 
   it("answers a request with an unknown parameter, a higher schema, or no ruleset with an error document", function()
@@ -340,7 +382,6 @@ end)
 
 describe("rules.host", function()
   it("answers a request line with the document the api gives, on one line", function()
-    local _, opts = fixture()
     local host = require("rules.host")
     local reply = host.handle("7\thello\t")
     assert.is_truthy(reply)
@@ -348,11 +389,47 @@ describe("rules.host", function()
     assert.are.equal("7", id)
     assert.are.equal("rules.hello", vim.json.decode(text).kind)
     assert.is_nil(text:find("\n", 1, true))
-    assert.is_nil(opts.colour)
   end)
 
   it("skips a line that is no request", function()
     assert.is_nil(require("rules.host").handle("garbage"))
+  end)
+end)
+
+describe("scripts/rules.lua", function()
+  local script = vim.fs.dirname(
+    vim.fs.dirname(vim.fs.normalize(vim.fn.fnamemodify(vim.api.nvim_get_runtime_file("lua/rules/contract.lua", false)[1], ":p")))
+  )
+  script = vim.fs.dirname(script) .. "/scripts/rules.lua"
+
+  ---@param args string[]
+  ---@return vim.SystemCompleted
+  local function run(args)
+    local cmd = { vim.v.progpath, "--headless", "-u", "NONE", "-i", "NONE", "-n", "-l", script }
+    vim.list_extend(cmd, args)
+    return vim.system(cmd, { text = true, env = { LIB_NVIM_DIR = vim.env.LIB_NVIM_DIR } }):wait(20000)
+  end
+
+  it("answers 0 for a document, 1 for an error document and 2 for wrong usage", function()
+    if not vim.env.LIB_NVIM_DIR or vim.env.LIB_NVIM_DIR == "" then
+      return
+    end
+    local root = fixture()
+    local ok = run({ "call", "rule", '--params={"id":"DEP-01"}', "--ruleset=" .. root })
+    assert.are.equal(0, ok.code)
+    assert.are.equal("rules.rule", vim.json.decode(ok.stdout).kind)
+
+    local missing = run({ "call", "rule", '--params={"id":"NOPE-01"}', "--ruleset=" .. root })
+    assert.are.equal(1, missing.code)
+    assert.are.equal("not_found", vim.json.decode(missing.stdout).code)
+
+    local list = run({ "list", "--format=json", "--family=DEP", "--ruleset=" .. root })
+    assert.are.equal(0, list.code)
+    assert.are.equal(2, vim.json.decode(list.stdout).total)
+
+    assert.are.equal(2, run({ "frobnicate" }).code)
+    assert.are.equal(2, run({ "list" }).code)
+    assert.are.equal(2, run({ "call", "hello", "--colour=red" }).code)
   end)
 end)
 

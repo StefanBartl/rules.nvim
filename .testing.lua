@@ -27,7 +27,9 @@ return {
   guard_allow = {
     -- gate_spec.lua builds throwaway git repositories (git init/add/commit/diff) in a temp
     -- directory to test the diff-scoped gate; git is the real tool the plugin integrates.
-    spawn = { "git" },
+    -- contract_spec.lua runs scripts/rules.lua in a headless nvim to prove the exit codes of the
+    -- command line (0 an answer, 1 an error document, 2 wrong usage).
+    spawn = { "git", "nvim" },
   },
   -- gated: a failed conformance check makes `scripts/test.sh conformance` exit 1 (docs/CONFORMANCE.md of testing.nvim)
   conformance = {
