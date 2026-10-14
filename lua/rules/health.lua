@@ -6,6 +6,89 @@
 
 local M = {}
 
+---@class Rules.Health.Report
+---@field ok fun(message: string)
+---@field warn fun(message: string, advice?: string[])
+---@field error fun(message: string, advice?: string[])
+---@field info fun(message: string)
+
+---@param origin table<string, string>
+---@return string
+local function origins(origin)
+  local names = vim.tbl_keys(origin)
+  table.sort(names)
+  local parts = {}
+  for _, name in ipairs(names) do
+    parts[#parts + 1] = ("%s (%s)"):format(name, origin[name])
+  end
+  return table.concat(parts, ", ")
+end
+
+---@param res Rules.Settings
+---@param report Rules.Health.Report
+local function report_files(res, report)
+  local settings = require("rules.settings")
+  local NAME = require("rules.config.file").NAME
+  local cwd = vim.fn.getcwd()
+  if res.project and res.project.exists and #res.project.problems == 0 then
+    report.ok(("project file %s loaded (setup() still wins over it)"):format(res.project.path))
+  elseif not (res.project and res.project.exists) then
+    report.info(("no %s in %s (optional: rulesets, gates and agent settings of this project)"):format(NAME, cwd))
+  end
+  if res.vault_file and res.vault_file.exists and #res.vault_file.problems == 0 then
+    report.ok(("vault file %s loaded"):format(res.vault_file.path))
+  end
+  for _, n in ipairs(res.problems) do
+    report.error(settings.format(n, false), { "Fix the file named in this message; nothing is loaded from it until it is valid" })
+  end
+  for _, n in ipairs(res.warnings) do
+    report.warn(settings.format(n, false))
+  end
+end
+
+---@param res Rules.Settings
+---@param report Rules.Health.Report
+local function report_vault(res, report)
+  local settings = require("rules.settings")
+  if not res.vault then
+    report.info("no vault configured (optional): " .. settings.NO_VAULT_HINT)
+    return
+  end
+  local where = settings.VAULT_WHERE[res.vault.source]
+  if not res.vault.exists then
+    report.error(("vault %s (from %s) is not a folder"):format(res.vault.root, where))
+    return
+  end
+  report.ok(("vault %s (from %s)"):format(res.vault.root, where))
+  local names = {}
+  for _, folder in ipairs(res.vault.loaded or res.vault.rulesets) do
+    names[#names + 1] = vim.fs.basename(folder)
+  end
+  if #names == 0 then
+    report.warn(("the vault offers no ruleset (no folder under %s/)"):format(settings.VAULT_SUBDIR))
+  else
+    report.info(("the vault offers %d ruleset(s): %s"):format(#names, table.concat(names, ", ")))
+  end
+  local git = require("rules.vault").git_state(res.vault.root)
+  if git == nil then
+    return
+  end
+  if git.error then
+    report.warn("vault git state unknown: " .. git.error)
+  elseif not git.repo then
+    report.info(
+      git.inside and ("the vault is not a git repository of its own (it lies inside %s)"):format(git.inside)
+        or "the vault is not a git repository"
+    )
+  elseif git.clean then
+    report.ok("the vault is a git repository, clean (nothing to commit)")
+  else
+    report.warn(("the vault is a git repository with %d uncommitted path(s)"):format(git.changes), {
+      "Commit (and push) the vault so other machines see the same rules",
+    })
+  end
+end
+
 ---@return nil
 function M.check()
   local health = vim.health or require("health")
@@ -53,16 +136,40 @@ function M.check()
     )
   end
 
+  local report = { ok = ok, warn = warn, error = error_, info = info }
+  local settings = require("rules.settings")
+  local res = settings.resolve({ project = vim.fn.getcwd() })
+
+  start("rules.nvim: settings files")
+  report_files(res, report)
+
+  start("rules.nvim: vault")
+  report_vault(res, report)
+
   start("rules.nvim: rulesets")
-  local config = require("rules.config").get()
   local rules = {}
-  if #config.rulesets == 0 then
-    info("no rulesets configured -- setup({ rulesets = {...} }) to point at your own rules")
+  if #res.problems > 0 then
+    error_("rulesets are not loaded: the settings above cannot be used")
+  elseif #res.rulesets == 0 then
+    info(settings.nothing_configured(res) or "no rulesets configured")
   else
+    info(("rulesets come from: %s"):format(res.origin.rulesets))
+    if next(res.origin.gates) then
+      info("gates: " .. origins(res.origin.gates))
+    end
+    local agent_set = {}
+    for key, layer in pairs(res.origin.agent) do
+      if layer ~= "default" then
+        agent_set[key] = layer
+      end
+    end
+    if next(agent_set) then
+      info("agent settings: " .. origins(agent_set))
+    end
     local errors
-    rules, errors = require("rules.engine.loader").load(config.rulesets)
+    rules, errors = require("rules.engine.loader").load(res.rulesets)
     if #errors == 0 then
-      ok(("%d rule(s) loaded from %d ruleset path(s), no errors"):format(#rules, #config.rulesets))
+      ok(("%d rule(s) loaded from %d ruleset path(s), no errors"):format(#rules, #res.rulesets))
     else
       warn(("%d rule(s) loaded, %d error(s)"):format(#rules, #errors))
       for _, e in ipairs(errors) do

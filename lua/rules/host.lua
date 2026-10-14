@@ -4,7 +4,8 @@
 --- `nvim --headless -u NONE -i NONE -n -l scripts/rules-host.lua` answers the contract many times in one process
 --- (protocol and framing: `lib.nvim.contract.host`). The rulesets come from `$RULES_RULESETS` (paths separated by
 --- `;`) and the gates from `$RULES_GATES` (`name=FAM,FAM;name=FAM`), like the command line's `--ruleset` and
---- `--gate`.
+--- `--gate`. Without them the vault (`$RULES_VAULT`) and the project's `.rules.json` (`$RULES_PROJECT`) decide
+--- (`rules.settings`).
 
 return require("lib.nvim.contract.host").make({
   api = require("rules.api"),

@@ -1,7 +1,11 @@
 -- scripts/ruleset.lua -- the headless tools for a ruleset in the one-file-per-rule form.
 --
---   nvim --headless -u NONE -i NONE -n -l scripts/ruleset.lua catalog [--check] <ruleset-folder>
+--   nvim --headless -u NONE -i NONE -n -l scripts/ruleset.lua catalog [--check] [--vault=D] [--project=D] [<ruleset-folder>]
 --   nvim --headless -u NONE -i NONE -n -l scripts/ruleset.lua migrate [--write] [--rules-dir=D] [--layouts-dir=D] <folder>
+--
+-- The folder may be `@vault/<name>`, a ruleset of the rules-vault (`--vault=D`, else `$RULES_VAULT`, else `vault` in the
+-- `.rules.json` of `--project=D` / `$RULES_PROJECT`). `catalog` without a folder builds every ruleset the settings
+-- name: the project file, else the vault's own list, else every folder under `<vault>/rulesets/` (`rules.settings`).
 --
 -- catalog   builds the reading documents from the layouts; with --check it writes nothing and exits 1
 --           when a document is out of date (for CI, like `tasks index --check`).
@@ -55,7 +59,8 @@ vim.opt.rtp:append(lib)
 
 local function usage()
   io.stderr:write(
-    "usage: ruleset.lua catalog [--check] <folder> | migrate [--write] [--rules-dir=D] [--layouts-dir=D] <folder>\n"
+    "usage: ruleset.lua catalog [--check] [--vault=D] [--project=D] [<folder>] | "
+      .. "migrate [--write] [--rules-dir=D] [--layouts-dir=D] [--vault=D] [--project=D] <folder>\n"
   )
   os.exit(2)
 end
@@ -63,8 +68,14 @@ end
 --- The flags each command knows: "bool" takes no value, "value" needs one. Anything else is wrong usage: a typo such as
 --- `--chek` must not run the command without the flag (that would write the documents `--check` is there to check).
 local FLAGS = {
-  catalog = { check = "bool" },
-  migrate = { write = "bool", ["rules-dir"] = "value", ["layouts-dir"] = "value" },
+  catalog = { check = "bool", vault = "value", project = "value" },
+  migrate = {
+    write = "bool",
+    ["rules-dir"] = "value",
+    ["layouts-dir"] = "value",
+    vault = "value",
+    project = "value",
+  },
 }
 
 local command = arg[1]
@@ -89,34 +100,66 @@ for i = 2, #arg do
     positional[#positional + 1] = a
   end
 end
-if #positional ~= 1 then
+if #positional > 1 or (#positional == 0 and command ~= "catalog") then
   usage()
 end
-local root = positional[1]
+
+-- the folders to work on: the one given (`@vault/<name>` through the vault), or for `catalog` every ruleset the settings name
+local settings = require("rules.settings")
+local settings_opts = { vault = flags.vault, project = flags.project or vim.env.RULES_PROJECT }
+local roots = {}
+if #positional == 1 then
+  local path, err = settings.resolve_entry(positional[1], settings_opts)
+  if not path then
+    io.stderr:write("error: " .. err .. "\n")
+    os.exit(2)
+  end
+  roots[1] = path
+else
+  local res = settings.resolve(settings_opts)
+  settings.notify(res)
+  local err = settings.error_text(res, false)
+  if err then
+    io.stderr:write("error: " .. err .. "\n")
+    os.exit(2)
+  end
+  for _, folder in ipairs(res.rulesets) do
+    if vim.fn.isdirectory(require("lib.nvim.cross.fs.expand_path")(folder)) == 1 then
+      roots[#roots + 1] = folder
+    end
+  end
+  if #roots == 0 then
+    io.stderr:write("error: no ruleset folder is configured: name one, or " .. settings.NO_VAULT_HINT .. "\n")
+    os.exit(2)
+  end
+end
+local root = roots[1]
 
 if command == "catalog" then
   local catalog = require("rules.engine.catalog")
-  local results, load_errors = catalog.build(root, { check = flags.check == true })
   local code = 0
-  for _, result in ipairs(results) do
-    io.stdout:write(("%-9s %s\n"):format(result.status, result.output))
-    if result.status == "stale" or result.status == "error" then
+  for _, folder in ipairs(roots) do
+    local results, load_errors = catalog.build(folder, { check = flags.check == true })
+    for _, result in ipairs(results) do
+      io.stdout:write(("%-9s %s\n"):format(result.status, result.output))
+      if result.status == "stale" or result.status == "error" then
+        code = 1
+      end
+      for _, problem in ipairs(result.problems) do
+        io.stdout:write("  problem: " .. problem .. "\n")
+        code = 1
+      end
+      for _, id in ipairs(result.unused or {}) do
+        io.stdout:write("  note: rule " .. id .. " is in no layout\n")
+      end
+    end
+    for _, err in ipairs(load_errors) do
+      io.stdout:write("  load error: " .. err .. "\n")
       code = 1
     end
-    for _, problem in ipairs(result.problems) do
-      io.stdout:write("  problem: " .. problem .. "\n")
-      code = 1
+    if #results == 0 then
+      io.stdout:write("no layouts found under " .. folder .. "\n")
     end
-    for _, id in ipairs(result.unused or {}) do
-      io.stdout:write("  note: rule " .. id .. " is in no layout\n")
-    end
-  end
-  for _, err in ipairs(load_errors) do
-    io.stdout:write("  load error: " .. err .. "\n")
-    code = 1
-  end
-  if #results == 0 then
-    io.stdout:write("no layouts found under " .. root .. "\n")
   end
   os.exit(code)
 end

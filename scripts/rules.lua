@@ -4,8 +4,11 @@
 --   nvim --headless -u NONE -i NONE -n -l scripts/rules.lua list --format=json [--family=F] [--severity=S]
 --                                                           [--limit=N] [--offset=N] [OPTIONS]
 --
--- OPTIONS  --ruleset=<path>        a ruleset file or folder (repeatable); default `$RULES_RULESETS`
---          --gate=<name>=<FAM,FAM> a gate (repeatable); default `$RULES_GATES`
+-- OPTIONS  --ruleset=<path>        a ruleset file or folder (repeatable; `@vault/<name>` is a ruleset of the vault);
+--                                   default `$RULES_RULESETS`, else the project file, else the vault's rulesets
+--          --gate=<name>=<FAM,FAM> a gate (repeatable); default `$RULES_GATES`, merged over the project/vault files
+--          --vault=<dir>           the rules-vault; default `$RULES_VAULT`, then `vault` in the project's .rules.json
+--          --project=<dir>         the root whose `.rules.json` is read; default `$RULES_PROJECT`, else no project file
 --
 -- call   one method of the contract (`hello`, `snapshot`, `list`, `rule`, `next_id`, `sources`, `ops`); the document goes
 --        to stdout. `--params` is the JSON of the method's parameters (`-` reads it from stdin).
@@ -54,7 +57,7 @@ vim.opt.rtp:append(vim.fn.escape(lib, ","))
 local function usage()
   io.stderr:write(
     "usage: rules.lua call <method> [--params=<json>|-] | list --format=json [--family=F] [--severity=S] "
-      .. "[--limit=N] [--offset=N]   (options: --ruleset=PATH --gate=NAME=FAM,FAM)\n"
+      .. "[--limit=N] [--offset=N]   (options: --ruleset=PATH --gate=NAME=FAM,FAM --vault=DIR --project=DIR)\n"
   )
   os.exit(2)
 end
@@ -73,6 +76,8 @@ local KNOWN = {
   offset = "value",
   ruleset = "value",
   gate = "value",
+  vault = "value",
+  project = "value",
 }
 local flags, rulesets, gates, positional = {}, {}, {}, {}
 for i = 2, #_G.arg do
@@ -101,6 +106,10 @@ if #rulesets > 0 then
 end
 if #gates > 0 then
   opts.gates = env.parse_gates(table.concat(gates, ";"))
+end
+opts.vault = flags.vault
+if flags.project then
+  opts.project = flags.project
 end
 
 local method, request
