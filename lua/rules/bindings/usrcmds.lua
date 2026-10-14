@@ -15,20 +15,37 @@ local M = {}
 ---@return nil
 local function register_argtypes()
   local argtypes = require("lib.nvim.bindings.usercmd.composer.argtypes")
-  local runner = require("rules.engine.runner")
+  local candidates = require("rules.ui.candidates")
 
+  -- The completions read the scan of the rulesets that the engine keeps (`rules.ui.candidates`): live on every
+  -- <Tab>, no parse of the rulesets and no load-error notification per key.
   argtypes.register("RULES_FAMILY", {
+    desc = "Family of the rules: the letters before the dash of an id, e.g. DEP",
     validate = function(raw)
       return true, raw, nil
     end,
     complete = function(arg_lead)
-      local seen = {}
-      for _, rule in ipairs(require("rules").load_rules()) do
-        seen[runner.family_of(rule.id)] = true
-      end
-      local families = vim.tbl_keys(seen)
-      table.sort(families)
-      return argtypes.prefix(families, arg_lead)
+      return argtypes.prefix(candidates.families(), arg_lead)
+    end,
+  })
+
+  argtypes.register("RULES_PLACE", {
+    desc = "Place in a layout: <file>#<section>, or <file> for its top",
+    validate = function(raw)
+      return true, raw, nil
+    end,
+    complete = function(arg_lead)
+      return candidates.places(arg_lead)
+    end,
+  })
+
+  argtypes.register("RULES_RULESET", {
+    desc = "Name of a folder of rulesets, as a document names it",
+    validate = function(raw)
+      return true, raw, nil
+    end,
+    complete = function(arg_lead)
+      return argtypes.prefix(candidates.ruleset_names(), arg_lead)
     end,
   })
 
@@ -50,12 +67,7 @@ local function register_argtypes()
       return true, raw, nil
     end,
     complete = function(arg_lead)
-      local ids = {}
-      for _, rule in ipairs(require("rules").load_rules()) do
-        ids[#ids + 1] = rule.id
-      end
-      table.sort(ids)
-      return argtypes.prefix(ids, arg_lead)
+      return argtypes.prefix(candidates.ids(), arg_lead)
     end,
   })
 end
@@ -66,161 +78,165 @@ function M.setup()
   register_argtypes()
   local composer = require("lib.nvim.bindings.usercmd.composer")
 
-  composer.verb("Rules", {
-    desc = "rules.nvim: dry-run one rule family against your own rulesets",
-    routes = {
-      {
-        path = { "check" },
-        args = { { name = "path", type = "DIR", optional = true } },
-        flags = {
-          { name = "family", type = "RULES_FAMILY", desc = "Rule family to sweep, e.g. DEP for DEP-01 (required)" },
-          {
-            name = "format",
-            type = "STRING",
-            values = { "json" },
-            desc = "Print results as JSON (no quickfix, no report buffer)",
-          },
+  local routes = {
+    {
+      path = { "check" },
+      args = { { name = "path", type = "DIR", optional = true } },
+      flags = {
+        { name = "family", type = "RULES_FAMILY", desc = "Rule family to sweep, e.g. DEP for DEP-01 (required)" },
+        {
+          name = "format",
+          type = "STRING",
+          values = { "json" },
+          desc = "Print results as JSON (no quickfix, no report buffer)",
         },
-        desc = "Sweep one rule family (--family=PREFIX) across PATH (default: cwd), --format=json for machine-readable output",
-        run = function(ctx)
-          if not ctx.flags.family then
-            notify.error(":Rules check needs --family=<PREFIX>, e.g. --family=DEP")
-            return
-          end
-          if ctx.flags.format == "json" then
-            local json = require("rules").check_family_json(ctx.flags.family, ctx.args.path)
-            print(json)
-          else
-            require("rules").check_family(ctx.flags.family, ctx.args.path)
-          end
-        end,
       },
-      {
-        path = { "gate" },
-        args = {
-          { name = "name", type = "RULES_GATE" },
-          { name = "path", type = "DIR", optional = true },
-        },
-        flags = {
-          { name = "diff", type = "STRING", desc = "Only findings in files changed since this git ref (plus untracked)" },
-          {
-            name = "format",
-            type = "STRING",
-            values = { "json" },
-            desc = "Print results as JSON (no quickfix, no report buffer)",
-          },
-        },
-        desc = "Run a configured gate (setup({ gates = {...} })), --diff=<git-ref> to scope to that diff",
-        run = function(ctx)
-          if not ctx.args.name then
-            notify.error(":Rules gate needs a name, e.g. :Rules gate release")
-            return
-          end
-          if ctx.flags.format == "json" then
-            local json, _, _, err = require("rules").run_gate_json(ctx.args.name, ctx.args.path, ctx.flags.diff)
-            if err then
-              notify.error(err)
-            else
-              print(json)
-            end
-          else
-            require("rules").run_gate(ctx.args.name, ctx.args.path, ctx.flags.diff)
-          end
-        end,
-      },
-      {
-        path = { "show" },
-        args = { { name = "id", type = "RULES_ID" } },
-        desc = "Jump to one rule's source location by id, e.g. :Rules show DEP-06",
-        run = function(ctx)
-          local rule = require("rules").find_rule(ctx.args.id)
-          if not rule then
-            notify.error(("no loaded rule with id %q"):format(ctx.args.id))
-            return
-          end
-
-          -- ERR-01: `:edit` is a filesystem boundary that genuinely fails
-          -- (the source file moved/deleted since the ruleset was loaded, a
-          -- swapfile, an autocmd vetoing the edit) -- a raw Vim error (E37)
-          -- must not surface in place of this plugin's own notify style.
-          local edit_ok, edit_err = pcall(vim.cmd.edit, vim.fn.fnameescape(rule.source_file))
-          if not edit_ok then
-            notify.error(("could not open %s: %s"):format(rule.source_file, edit_err))
-            return
-          end
-
-          local cursor_ok, cursor_err = pcall(vim.api.nvim_win_set_cursor, 0, { rule.source_line, 0 })
-          if not cursor_ok then
-            notify.warn(("opened %s but could not jump to line %d: %s"):format(rule.source_file, rule.source_line, cursor_err))
-          end
-        end,
-      },
-      {
-        path = { "stats" },
-        flags = {
-          {
-            name = "format",
-            type = "STRING",
-            values = { "json" },
-            desc = "Print the stats as JSON instead of opening the overview",
-          },
-        },
-        desc = "Structural overview of every loaded rule: per-family totals, automated-vs-manual, severity -- no check run",
-        run = function(ctx)
-          local stats = require("rules").stats()
-          if ctx.flags.format == "json" then
-            print(vim.json.encode(stats))
-          else
-            require("rules.report.stats").open(stats)
-          end
-        end,
-      },
-      {
-        path = { "catalog" },
-        args = { { name = "path", type = "DIR", optional = true, desc = "Ruleset folder (default: every folder in rulesets)" } },
-        flags = {
-          { name = "check", bool = true, desc = "Only report documents that are out of date, write nothing" },
-        },
-        desc = "Build the reading documents of a one-file-per-rule ruleset from its layouts; --check for CI",
-        run = function(ctx)
-          local results, errors, code = require("rules").catalog(ctx.args.path, { check = ctx.flags.check == true })
-          local counts = { written = 0, unchanged = 0, stale = 0, error = 0 }
-          for _, result in ipairs(results) do
-            counts[result.status] = counts[result.status] + 1
-            for _, problem in ipairs(result.problems) do
-              notify.error(problem)
-            end
-            if result.status == "stale" then
-              notify.warn(("%s is out of date -- run :Rules catalog"):format(result.output))
-            end
-            for _, id in ipairs(result.unused or {}) do
-              notify.warn(("rule %s is in no layout"):format(id))
-            end
-          end
-          for _, err in ipairs(errors) do
-            notify.warn(err)
-          end
-          local summary = ("catalog: %d written, %d unchanged, %d stale, %d with errors"):format(
-            counts.written,
-            counts.unchanged,
-            counts.stale,
-            counts.error
-          )
-          if code == 0 then
-            notify.info(summary)
-          else
-            notify.warn(summary)
-          end
-        end,
-      },
-      {
-        path = { "messages" },
-        desc = "Open this plugin's notify history (toast + :messages log)",
-        run = function()
-          require("lib.nvim.notify.popup").show_history("rules")
-        end,
-      },
+      desc = "Sweep one rule family (--family=PREFIX) across PATH (default: cwd), --format=json for machine-readable output",
+      run = function(ctx)
+        if not ctx.flags.family then
+          notify.error(":Rules check needs --family=<PREFIX>, e.g. --family=DEP")
+          return
+        end
+        if ctx.flags.format == "json" then
+          local json = require("rules").check_family_json(ctx.flags.family, ctx.args.path)
+          print(json)
+        else
+          require("rules").check_family(ctx.flags.family, ctx.args.path)
+        end
+      end,
     },
+    {
+      path = { "gate" },
+      args = {
+        { name = "name", type = "RULES_GATE" },
+        { name = "path", type = "DIR", optional = true },
+      },
+      flags = {
+        { name = "diff", type = "STRING", desc = "Only findings in files changed since this git ref (plus untracked)" },
+        {
+          name = "format",
+          type = "STRING",
+          values = { "json" },
+          desc = "Print results as JSON (no quickfix, no report buffer)",
+        },
+      },
+      desc = "Run a configured gate (setup({ gates = {...} })), --diff=<git-ref> to scope to that diff",
+      run = function(ctx)
+        if not ctx.args.name then
+          notify.error(":Rules gate needs a name, e.g. :Rules gate release")
+          return
+        end
+        if ctx.flags.format == "json" then
+          local json, _, _, err = require("rules").run_gate_json(ctx.args.name, ctx.args.path, ctx.flags.diff)
+          if err then
+            notify.error(err)
+          else
+            print(json)
+          end
+        else
+          require("rules").run_gate(ctx.args.name, ctx.args.path, ctx.flags.diff)
+        end
+      end,
+    },
+    {
+      path = { "show" },
+      args = { { name = "id", type = "RULES_ID" } },
+      desc = "Jump to one rule's source location by id, e.g. :Rules show DEP-06",
+      run = function(ctx)
+        local rule = require("rules").find_rule(ctx.args.id)
+        if not rule then
+          notify.error(("no loaded rule with id %q"):format(ctx.args.id))
+          return
+        end
+
+        -- ERR-01: `:edit` is a filesystem boundary that genuinely fails
+        -- (the source file moved/deleted since the ruleset was loaded, a
+        -- swapfile, an autocmd vetoing the edit) -- a raw Vim error (E37)
+        -- must not surface in place of this plugin's own notify style.
+        local edit_ok, edit_err = pcall(vim.cmd.edit, vim.fn.fnameescape(rule.source_file))
+        if not edit_ok then
+          notify.error(("could not open %s: %s"):format(rule.source_file, edit_err))
+          return
+        end
+
+        local cursor_ok, cursor_err = pcall(vim.api.nvim_win_set_cursor, 0, { rule.source_line, 0 })
+        if not cursor_ok then
+          notify.warn(("opened %s but could not jump to line %d: %s"):format(rule.source_file, rule.source_line, cursor_err))
+        end
+      end,
+    },
+    {
+      path = { "stats" },
+      flags = {
+        {
+          name = "format",
+          type = "STRING",
+          values = { "json" },
+          desc = "Print the stats as JSON instead of opening the overview",
+        },
+      },
+      desc = "Structural overview of every loaded rule: per-family totals, automated-vs-manual, severity -- no check run",
+      run = function(ctx)
+        local stats = require("rules").stats()
+        if ctx.flags.format == "json" then
+          print(vim.json.encode(stats))
+        else
+          require("rules.report.stats").open(stats)
+        end
+      end,
+    },
+    {
+      path = { "catalog" },
+      args = { { name = "path", type = "DIR", optional = true, desc = "Ruleset folder (default: every folder in rulesets)" } },
+      flags = {
+        { name = "check", bool = true, desc = "Only report documents that are out of date, write nothing" },
+      },
+      desc = "Build the reading documents of a one-file-per-rule ruleset from its layouts; --check for CI",
+      run = function(ctx)
+        local results, errors, code = require("rules").catalog(ctx.args.path, { check = ctx.flags.check == true })
+        local counts = { written = 0, unchanged = 0, stale = 0, error = 0 }
+        for _, result in ipairs(results) do
+          counts[result.status] = counts[result.status] + 1
+          for _, problem in ipairs(result.problems) do
+            notify.error(problem)
+          end
+          if result.status == "stale" then
+            notify.warn(("%s is out of date -- run :Rules catalog"):format(result.output))
+          end
+          for _, id in ipairs(result.unused or {}) do
+            notify.warn(("rule %s is in no layout"):format(id))
+          end
+        end
+        for _, err in ipairs(errors) do
+          notify.warn(err)
+        end
+        local summary = ("catalog: %d written, %d unchanged, %d stale, %d with errors"):format(
+          counts.written,
+          counts.unchanged,
+          counts.stale,
+          counts.error
+        )
+        if code == 0 then
+          notify.info(summary)
+        else
+          notify.warn(summary)
+        end
+      end,
+    },
+    {
+      path = { "messages" },
+      desc = "Open this plugin's notify history (toast + :messages log)",
+      run = function()
+        require("lib.nvim.notify.popup").show_history("rules")
+      end,
+    },
+  }
+  -- new, set, retire, move, list: the thin layer over `rules-ops/1` (`rules.ui.routes`)
+  vim.list_extend(routes, require("rules.ui.routes").routes())
+
+  composer.verb("Rules", {
+    desc = "rules.nvim: check rules against a repo, make, change, retire and move them",
+    routes = routes,
   })
 end
 
