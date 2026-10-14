@@ -29,4 +29,6 @@ return {
     -- directory to test the diff-scoped gate; git is the real tool the plugin integrates.
     spawn = { "git" },
   },
+  -- gated: a failed conformance check makes `scripts/test.sh conformance` exit 1 (docs/CONFORMANCE.md of testing.nvim)
+  conformance = { gate = true },
 }
