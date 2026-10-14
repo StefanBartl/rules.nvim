@@ -5,7 +5,7 @@
 --- error codes) are lib.nvim's. A request is `{ "schema": 1, "params": { ... } }`. `opts` is
 --- `{ rulesets?, gates? }` (default: `setup()`), hidden in every error text.
 ---
---- Methods: `hello`, `snapshot`, `list`, `rule`, `next_id`, `sources`. All read only.
+--- Methods: `hello`, `snapshot`, `list`, `rule`, `next_id`, `sources` (read), `ops` (the write door, `rules.ops`).
 ---
 ---```lua
 --- local text, code = require("rules.api").call("rule", '{"params":{"id":"LUA-12"}}', { rulesets = { dir } })
@@ -60,6 +60,7 @@ local api = api_mod.make({
         return contract.sources(opts)
       end,
     },
+    ops = require("rules.ops").method(),
   },
 })
 

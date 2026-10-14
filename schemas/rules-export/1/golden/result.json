@@ -1,0 +1,1 @@
+{"client_op_id":"c-1","digest":"sha256:a1185d280c930d3f","dry_run":true,"engine":{"git":"golden","nvim":"golden","version":"0.1.0"},"generated_at":"2026-01-01T00:00:00Z","kind":"rules.result","ok":true,"plugin":"rules.nvim","results":[{"changed_ids":[],"id":"DEP-10","n":1,"ok":true,"op":"new","outcome":"would_create"}],"schema":1,"source":{"id":"Checklists"}}

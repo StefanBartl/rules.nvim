@@ -199,16 +199,20 @@ local function validate_agent(agent)
   return { question = agent.question, include = agent.include, max_files = max_files }, nil
 end
 
+--- Whether a line only frames the prose: blank, or a Markdown thematic break (`---`, `***`, `___`).
+---@param line string
+---@return boolean
+local function is_framing(line)
+  local bare = line:gsub("%s", "")
+  return bare == "" or bare:match("^%-%-%-+$") ~= nil or bare:match("^%*%*%*+$") ~= nil or bare:match("^___+$") ~= nil
+end
+
 --- Join prose lines into one string, without the blank lines and the Markdown
 --- thematic breaks (`---`) that merely frame it.
 ---@param lines string[]
 ---@return string
 local function prose(lines)
   local first, last = 1, #lines
-  local function is_framing(line)
-    local bare = line:gsub("%s", "")
-    return bare == "" or bare:match("^%-%-%-+$") ~= nil or bare:match("^%*%*%*+$") ~= nil or bare:match("^___+$") ~= nil
-  end
   while first <= last and is_framing(lines[first]) do
     first = first + 1
   end
@@ -217,6 +221,8 @@ local function prose(lines)
   end
   return table.concat(lines, "\n", first, last)
 end
+
+M.is_framing = is_framing
 
 --- The outline position of a rule: its own title and the section above it.
 ---@param stack {level: integer, text: string}[]  open headings, shallowest first
@@ -524,6 +530,20 @@ function M.split_text(file_path, text)
   return split_rule_file(file_path, lines, parsed)
 end
 
+--- The rule a text of a rule file stands for, as the loader would read it from disk: for a writer that checks what
+--- it is about to write.
+---@param file_path string  only for messages
+---@param text string
+---@return Rules.ParsedRule|nil rule
+---@return string[] errors
+function M.parse_rule_text(file_path, text)
+  local rule_file, errors = M.split_text(file_path, text)
+  if not rule_file then
+    return nil, errors
+  end
+  return M.rule_of_file(file_path, rule_file)
+end
+
 --- Read and split one rule file; for the catalog generator.
 ---@param file_path string
 ---@return Rules.RuleFile|nil rule_file
@@ -550,6 +570,45 @@ function M.implicit_split(rule_file)
     split = split + 1
   end
   return split
+end
+
+--- The lines of a rule file's body that are the rule's text: from under the block (or, with none, under the heading
+--- and its blank lines) up to the next heading outside a fence. `to < from` when there is none. The same bound the
+--- reader uses, so a writer replaces exactly what a reader would call the text.
+---@param rule_file Rules.RuleFile
+---@return integer from  index in `rule_file.lines`
+---@return integer to    index in `rule_file.lines`, inclusive
+function M.text_range(rule_file)
+  local block = rule_file.block
+  local from = block and (block.e + 1) or (M.implicit_split(rule_file) + 1)
+  local last = from - 1
+  -- a block inside a longer fence (a ````markdown example) leaves that fence open: its closing line is not an opening one
+  local fence = block and block.fence or 0
+  for i = from, #rule_file.lines do
+    local line = rule_file.lines[i]
+    if fence > 0 then
+      local ticks = line:match("^(`+)%s*$")
+      if ticks and #ticks >= fence then
+        fence = 0
+      end
+      last = i
+    elseif line:match("^```") then
+      fence = #line:match("^(`+)")
+      last = i
+    elseif (heading_of(line) or 7) <= 6 then
+      break
+    else
+      last = i
+    end
+  end
+  return from, last
+end
+
+--- The text of a rule as a reader sees it: the lines without the framing blank and separator lines at either end.
+---@param lines string[]
+---@return string
+function M.prose(lines)
+  return prose(lines)
 end
 
 --- The rule a rule file stands for: the block (if any) plus what the
@@ -621,32 +680,18 @@ local function rule_from_file(file_path, rule_file)
 
   -- text: the prose under the block (or, with none, under the heading and its
   -- blank lines), up to the next heading outside a fence
-  local from = block and (block.e + 1) or (M.implicit_split(rule_file) + 1)
+  local from, to = M.text_range(rule_file)
   local text_lines = {}
-  -- a block inside a longer fence (a ````markdown example) leaves that fence open: its closing line is not an opening one
-  local fence = block and block.fence or 0
-  for i = from, #rule_file.lines do
-    local line = rule_file.lines[i]
-    if fence > 0 then
-      local ticks = line:match("^(`+)%s*$")
-      if ticks and #ticks >= fence then
-        fence = 0
-      end
-      text_lines[#text_lines + 1] = line
-    elseif line:match("^```") then
-      fence = #line:match("^(`+)")
-      text_lines[#text_lines + 1] = line
-    elseif (heading_of(line) or 7) <= 6 then
-      break
-    else
-      text_lines[#text_lines + 1] = line
-    end
+  for i = from, to do
+    text_lines[#text_lines + 1] = rule_file.lines[i]
   end
   rule.text = prose(text_lines)
   rule.source_file = file_path
   rule.source_line = source_line
   return rule, errors
 end
+
+M.rule_of_file = rule_from_file
 
 --- Extract the fenced ```rule blocks from one Markdown file, or the one rule
 --- of a rule file (frontmatter `id`/`severity`). A catalog the generator wrote

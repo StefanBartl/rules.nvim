@@ -153,6 +153,15 @@ local function display_path(paths, names, file)
   return best or ("<external>/" .. vim.fs.basename(normal))
 end
 
+---The name each ruleset goes by in a document (exported for the writer, which names a ruleset the same way).
+---@param opts Rules.Contract.Opts|nil
+---@return string[] paths
+---@return table<string, string> names
+function M.rulesets(opts)
+  local paths = ruleset_paths(opts)
+  return paths, root_names(paths)
+end
+
 ---What the scan of these rulesets would read, as one text: every `.md` file with its size and modification time.
 ---`nil` when a file changed so recently that a second change in the same clock tick could go unseen (a stale
 ---answer must never be kept: the one place that writes the files, `rules-ops/1`, drops the cache itself).
@@ -241,9 +250,45 @@ end
 ---@field paths string[]
 ---@field rules table[]              summaries, sorted by id
 ---@field full table<string, table>  id -> full entry
+---@field abs table<string, string>   id -> absolute path of its file (never in a document)
+---@field names table<string, string>  ruleset path -> the name it goes by in a document
+---@field retired table[]              { id, family, source, replaced_by?, retired?, reason? }
 ---@field files table[]              { path, rules, etag }
 ---@field load_errors string[]
 ---@field rev string
+
+---The rules that were retired: `<ruleset>/_retired/<FAMILY>/<ID>.md` (`rules-ops/1` `retire`). The loader does not
+---read that folder, so a retired rule is never run; its id stays taken.
+---@param paths string[]
+---@param names table<string, string>
+---@return table[]
+local function retired_of(paths, names)
+  local fswalk = require("rules.engine.fswalk")
+  local out = {}
+  for _, root in ipairs(paths) do
+    local folder = root .. "/_retired"
+    if vim.fn.isdirectory(folder) == 1 then
+      for _, file in ipairs(fswalk.files(folder)) do
+        local id = file:match("([^/]+)%.md$")
+        if id then
+          local entry = { id = id, family = parser.family_of(id), source = display_path({ root }, names, file) }
+          local bytes = read_bytes(file) or ""
+          local head = bytes:match("^%-%-%-\r?\n(.-)\r?\n%-%-%-")
+          for key, value in (head or ""):gmatch("([%w_]+):%s*([^\r\n]*)") do
+            if key == "replaced_by" or key == "retired" or key == "reason" then
+              entry[key] = value
+            end
+          end
+          out[#out + 1] = entry
+        end
+      end
+    end
+  end
+  table.sort(out, function(a, b)
+    return json.bytes_less(a.id, b.id)
+  end)
+  return out
+end
 
 ---@param paths string[]
 ---@return Rules.Contract.View
@@ -251,18 +296,20 @@ local function build_view(paths)
   local names = root_names(paths)
   local parsed, load_errors = loader.load(paths)
 
-  ---@type table<string, { etag: string, count: integer }>
+  ---@type table<string, { etag: string, count: integer, one_file: boolean }>
   local by_file = {}
   for _, rule in ipairs(parsed) do
     local entry = by_file[rule.source_file]
     if not entry then
-      entry = { etag = etag.of(read_bytes(rule.source_file) or ""), count = 0 }
+      local bytes = read_bytes(rule.source_file) or ""
+      local lines = vim.split((bytes:gsub("\r\n", "\n")), "\n", { plain = true })
+      entry = { etag = etag.of(bytes), count = 0, one_file = parser.classify(lines) == "rule" }
       by_file[rule.source_file] = entry
     end
     entry.count = entry.count + 1
   end
 
-  local rules, full = {}, {}
+  local rules, full, abs = {}, {}, {}
   for _, rule in ipairs(parsed) do
     local file = by_file[rule.source_file]
     local check, had_function
@@ -282,7 +329,7 @@ local function build_view(paths)
       has_agent = rule.agent ~= nil,
       editable = not had_function,
       etag = file.etag,
-      etag_scope = file.count == 1 and "rule" or "file",
+      etag_scope = file.one_file and "rule" or "file",
     }
     rules[#rules + 1] = summary
     local entry = vim.deepcopy(summary)
@@ -292,6 +339,7 @@ local function build_view(paths)
       entry.agent = (plain(rule.agent))
     end
     full[rule.id] = entry
+    abs[rule.id] = rule.source_file
   end
   table.sort(rules, function(a, b)
     return json.bytes_less(a.id, b.id)
@@ -328,6 +376,9 @@ local function build_view(paths)
 
   return {
     paths = paths,
+    names = names,
+    abs = abs,
+    retired = retired_of(paths, names),
     rules = rules,
     full = full,
     files = files,
@@ -427,14 +478,15 @@ end
 function M.hello(opts)
   local doc = d.head(d.kind("hello"), M.root_of(opts))
   doc.schemas = json.array({ M.SCHEMA })
-  doc.capabilities = json.array({ "hello", "snapshot", "list", "rule", "next_id", "sources" })
+  doc.capabilities = json.array({ "hello", "snapshot", "list", "rule", "next_id", "sources", "ops" })
   doc.limits = json.object({
     list_items = M.MAX_LIST_ITEMS,
     request_bytes = 256 * 1024,
     doc_bytes = d.MAX_DOC_BYTES,
   })
   doc.enums = json.object({ severity = json.array(vim.deepcopy(M.SEVERITIES)) })
-  doc.read_only = true
+  doc.read_only = false
+  doc.ops = json.array({ "new", "set", "retire", "reinstate", "move" })
   return doc
 end
 
@@ -454,6 +506,7 @@ function M.snapshot(opts)
   doc.rules = json.array(view.rules)
   doc.sources = json.array(view.files)
   doc.gates = json.array(gates_doc(view, opts))
+  doc.retired = json.array(view.retired)
   doc.load_errors = json.array(view.load_errors)
   return d.seal(doc, view.rev), nil
 end
@@ -520,6 +573,37 @@ function M.rule(id, opts)
   return d.seal(doc, view.rev), nil
 end
 
+---How far every family is numbered: the highest number taken (a loaded rule or a retired one), the width of the
+---number and how many ids that are.
+---@param view Rules.Contract.View
+---@return table<string, { highest: integer, width: integer, count: integer }>
+local function numbering(view)
+  local seen = {}
+  for _, list in ipairs({ view.rules, view.retired }) do
+    for _, rule in ipairs(list) do
+      local fam, num = rule.id:match("^(%a+)%-(%d+)$")
+      if fam then
+        local s = seen[fam] or { highest = 0, width = 2, count = 0 }
+        s.highest = math.max(s.highest, tonumber(num) or 0)
+        s.width = math.max(s.width, #num)
+        s.count = s.count + 1
+        seen[fam] = s
+      end
+    end
+  end
+  return seen
+end
+
+---The next free id of a family in a scan: one past the highest id taken, loaded or retired, with the width the
+---family uses (at least two digits). An id is never given twice.
+---@param view Rules.Contract.View
+---@param family string
+---@return string id
+function M.next_free(view, family)
+  local s = numbering(view)[family] or { highest = 0, width = 2 }
+  return ("%s-%0" .. s.width .. "d"):format(family, s.highest + 1)
+end
+
 ---`rules.next_id`: the next free id of a family (or of every family).
 ---@param params { family?: string }
 ---@param opts Rules.Contract.Opts|nil
@@ -534,18 +618,7 @@ function M.next_id(params, opts)
   if not view then
     return nil, err
   end
-  ---@type table<string, { highest: integer, width: integer, count: integer }>
-  local seen = {}
-  for _, rule in ipairs(view.rules) do
-    local fam, num = rule.id:match("^(%a+)%-(%d+)$")
-    if fam then
-      local s = seen[fam] or { highest = 0, width = 2, count = 0 }
-      s.highest = math.max(s.highest, tonumber(num) or 0)
-      s.width = math.max(s.width, #num)
-      s.count = s.count + 1
-      seen[fam] = s
-    end
-  end
+  local seen = numbering(view)
   local function entry(fam)
     local s = seen[fam] or { highest = 0, width = 2, count = 0 }
     return {
@@ -567,7 +640,7 @@ function M.next_id(params, opts)
     end)
   end
   local doc = new_doc(view, "next_id")
-  doc.basis = json.array({ "loaded" })
+  doc.basis = json.array({ "loaded", "retired" })
   doc.items = json.array(out)
   return d.seal(doc, view.rev), nil
 end
