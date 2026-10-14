@@ -199,6 +199,62 @@ describe("rules.engine.rule_edit", function()
     assert.is_truthy(why2:find("comment", 1, true))
   end)
 
+  it("changes the severity of a block with a comment and a function in place, writing nothing else of the block", function()
+    local block = {
+      "-- why this rule is here: severity = 'nice-to-have' is not meant",
+      'severity = "recommended", -- the same as the frontmatter',
+      "check = { type = 'lua_predicate', predicate = function() local severity = 1 return severity end },",
+    }
+    local base = rule_file("DEP-01", "recommended", "f", { "T." }, block)
+    local new = assert(rule_edit.apply(PATH, base, { severity = "critical" }))
+    local want =
+      base:gsub("severity: recommended", "severity: critical", 1):gsub('severity = "recommended"', 'severity = "critical"', 1)
+    assert.are.equal(want, new)
+    assert.are.equal("critical", parser.parse_rule_text(PATH, new).severity)
+    -- a nested severity key is not the block's own
+    local nested = rule_file(
+      "DEP-01",
+      "recommended",
+      "n",
+      { "T." },
+      { 'check = { type = "grep", pattern = "x", severity = "keep" },' }
+    )
+    local kept = assert(rule_edit.apply(PATH, nested, { severity = "critical" }))
+    assert.is_truthy(kept:find('severity = "keep"', 1, true))
+  end)
+
+  it("takes a string that holds two dashes for a string, not for a comment", function()
+    local grep = { type = "grep", pattern = "x" }
+    for _, line in ipairs({
+      'check = { type = "grep", pattern = "--color" },',
+      "check = { type = 'grep', pattern = '--color' },",
+      "check = { type = 'grep', pattern = [==[a--b]==] },",
+    }) do
+      local text = rule_file("DEP-01", "critical", "f", { "T." }, { line })
+      local new, why = rule_edit.apply(PATH, text, { check = grep })
+      assert.is_truthy(new, why)
+      assert.are.same(grep, parser.parse_rule_text(PATH, new).check)
+    end
+    for _, block in ipairs({
+      { 'check = { type = "grep", pattern = "a" }, -- note' },
+      { "--[==[ a long", "note ]==]", 'check = { type = "grep", pattern = "a" },' },
+    }) do
+      local _, why = rule_edit.apply(PATH, rule_file("DEP-01", "critical", "f", { "T." }, block), { check = grep })
+      assert.is_truthy(why and why:find("comment", 1, true), vim.inspect(block))
+    end
+  end)
+
+  it("keeps CR LF when the last line has no line break, and does not take that for mixed endings", function()
+    local crlf = (BASE:gsub("\n", "\r\n")):sub(1, -3)
+    assert.are.equal(".", crlf:sub(-1))
+    local new, why = rule_edit.apply(PATH, crlf, { severity = "critical" })
+    assert.is_truthy(new, why)
+    assert.are.equal(".", new:sub(-1))
+    assert.are.equal((crlf:gsub("severity: recommended", "severity: critical")), new)
+    local _, mixed = rule_edit.apply(PATH, "---\r\nid: DEP-01\nseverity: critical\n---\r\n#### x", { severity = "critical" })
+    assert.is_truthy(mixed:find("mixes", 1, true))
+  end)
+
   it("refuses a text that would not read back as written", function()
     local _, why = rule_edit.apply(PATH, BASE, { text = "Para.\n\n## A heading\n\nMore." })
     assert.is_truthy(why:find("read back", 1, true))
