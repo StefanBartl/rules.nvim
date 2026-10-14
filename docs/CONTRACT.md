@@ -61,6 +61,9 @@ client shows it read only ("open in Neovim") and never writes it back.
 `basis` says whose ids were looked at: the loaded rules and the retired ones
 (`["loaded", "retired"]`). An id is never given twice, so a retired rule keeps
 its number. The width of the number follows the family (at least two digits).
+An id may have any number of digits and `next` stays exact; `highest` is a JSON
+integer and is held at 2^53 - 1 (9007199254740991) where the real number is
+larger.
 
 ### `retired`
 
@@ -81,6 +84,11 @@ A ruleset goes by the last part of its path (`Checklists`); only when two
 rulesets would get the same name, the folder above is added
 (`wkdbook-Lua/Checklists`). A name is never taken from higher up than that, so
 a document does not carry a folder of the machine (a user name).
+Two rulesets that still share a name (two checkouts with the same folder names)
+are told apart by a number in the order of the configuration: the first keeps
+the name, the next ones are `Checklists#2`, `Checklists#3`. A ruleset that is
+listed twice, or spelled another way (a trailing slash, `/./`, another case on
+Windows and macOS), is one ruleset: it is named, counted and scanned once.
 
 ## rules-ops/1 (write)
 
@@ -140,7 +148,9 @@ nvim --headless -u NONE -i NONE -n -l scripts/rules.lua list --format=json --fam
 `--ruleset=<path>` (repeatable, default `$RULES_RULESETS`) and
 `--gate=<name>=<FAM,FAM>` (repeatable, default `$RULES_GATES`). The document goes
 to stdout. Exit code: 0 an answer, 1 an error document, 2 wrong usage or no
-lib.nvim.
+lib.nvim. A `--limit` or `--offset` that is not a whole number (`2.5`, `inf`,
+`nan`) is an `invalid_argument` error document, exit code 1; text that is no
+number at all is wrong usage, exit code 2.
 
 ### Persistent engine
 

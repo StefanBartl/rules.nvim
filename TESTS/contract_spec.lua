@@ -238,6 +238,32 @@ describe("rules.api", function()
     assert.are.equal("invalid_argument", bad)
   end)
 
+  it("next_id takes an id of any length: the next one is exact, `highest` is held at 2^53 - 1", function()
+    local root = tmp_dir() .. "/fixture/Checklists"
+    for _, id in ipairs({ "BIG-99999999999999999", "HUGE-123456789012345678901", "HUGE-007" }) do
+      local family = id:match("^(%a+)")
+      write_raw(
+        ("%s/_rules/%s/%s.md"):format(root, family, id),
+        ("---\nid: %s\nseverity: nice-to-have\nfamily: %s\n---\n\n#### `%s` — big\n\nText.\n"):format(id, family, id)
+      )
+    end
+    local doc, code = call("next_id", nil, { rulesets = { root } })
+    assert.is_nil(code, vim.inspect(doc))
+    assert.are.equal("rules.next_id", doc.kind)
+    local by_family = {}
+    for _, item in ipairs(doc.items) do
+      by_family[item.family] = item
+    end
+    assert.are.equal("BIG-100000000000000000", by_family.BIG.next)
+    assert.are.equal(9007199254740991, by_family.BIG.highest)
+    assert.are.equal("HUGE-123456789012345678902", by_family.HUGE.next)
+    assert.are.equal(2, by_family.HUGE.count)
+    local one, one_code = call("next_id", { family = "BIG" }, { rulesets = { root } })
+    assert.is_nil(one_code)
+    assert.are.equal("BIG-100000000000000000", one.items[1].next)
+    assert.are.equal("BIG-100000000000000000", contract.next_free(assert(contract.view({ rulesets = { root } })), "BIG"))
+  end)
+
   it("sources lists the files with an etag each", function()
     local _, opts = fixture()
     local doc = call("sources", nil, opts)
@@ -270,6 +296,49 @@ describe("rules.api", function()
     end
     assert.is_nil(api.call("snapshot", nil, opts):find("fixture/", 1, true))
     assert.are.equal("Checklists", vim.fs.basename(root))
+  end)
+
+  it("tells two rulesets with the same folder and the same folder above apart by a number", function()
+    local a, b = tmp_dir() .. "/fixture/Checklists", tmp_dir() .. "/fixture/Checklists"
+    write_raw(a .. "/x.md", DOCUMENT)
+    write_raw(b .. "/y.md", DOCUMENT)
+    local _, names = contract.rulesets({ rulesets = { a, b } })
+    assert.are.equal("fixture/Checklists", names[vim.fs.normalize(a)])
+    assert.are.equal("fixture/Checklists#2", names[vim.fs.normalize(b)])
+
+    local doc = call("snapshot", nil, { rulesets = { a, b } })
+    local message = doc.load_errors[1]
+    assert.is_truthy(message:find("fixture/Checklists/x.md", 1, true), message)
+    assert.is_truthy(message:find("fixture/Checklists#2/y.md", 1, true), message)
+    assert.is_nil(message:find(vim.fs.normalize(a), 1, true))
+  end)
+
+  it("counts a ruleset listed twice, or spelled another way, once", function()
+    local root, opts = fixture()
+    opts.rulesets = { root, root .. "/", root .. "/./" }
+    local paths, names = contract.rulesets(opts)
+    assert.are.same({ vim.fs.normalize(root) }, paths)
+    assert.are.equal("Checklists", names[paths[1]])
+
+    local doc = call("snapshot", nil, opts)
+    assert.are.same({}, doc.load_errors)
+    assert.are.equal(3, doc.counts.files)
+    local sources = call("sources", nil, opts)
+    for _, item in ipairs(sources.items) do
+      assert.is_truthy(item.path:find("^Checklists/"), item.path)
+    end
+  end)
+
+  it("counts a ruleset spelled in another case once where the file system does not tell the cases apart", function()
+    if vim.fn.has("win32") == 0 and vim.fn.has("mac") == 0 then
+      pending("the file system tells the cases apart")
+    end
+    local root, opts = fixture()
+    opts.rulesets = { root, root:upper() }
+    local paths, names = contract.rulesets(opts)
+    assert.are.equal(1, #paths)
+    assert.are.equal("Checklists", names[paths[1]])
+    assert.are.same({}, call("snapshot", nil, opts).load_errors)
   end)
 
   it("keeps the scan while no file changed and takes the new one when a file did", function()
@@ -397,6 +466,21 @@ describe("rules.host", function()
   it("skips a line that is no request", function()
     assert.is_nil(require("rules.host").handle("garbage"))
   end)
+
+  it("reads the rulesets from $RULES_RULESETS and the gates from $RULES_GATES", function()
+    local root = fixture()
+    local saved_sets, saved_gates = vim.env.RULES_RULESETS, vim.env.RULES_GATES
+    vim.env.RULES_RULESETS = root
+    vim.env.RULES_GATES = "release=DEP,NOPE"
+    local ok, reply = pcall(require("rules.host").handle, "3\tsnapshot\t")
+    vim.env.RULES_RULESETS, vim.env.RULES_GATES = saved_sets, saved_gates
+    assert.is_true(ok, reply)
+    local doc = vim.json.decode(reply:match("^3\t(.*)$"))
+    assert.are.equal("rules.snapshot", doc.kind)
+    assert.are.equal(4, doc.counts.rules)
+    assert.are.equal("release", doc.gates[1].name)
+    assert.are.same({ "NOPE" }, doc.gates[1].unknown)
+  end)
 end)
 
 describe("scripts/rules.lua", function()
@@ -415,7 +499,7 @@ describe("scripts/rules.lua", function()
 
   it("answers 0 for a document, 1 for an error document and 2 for wrong usage", function()
     if not vim.env.LIB_NVIM_DIR or vim.env.LIB_NVIM_DIR == "" then
-      return
+      pending("LIB_NVIM_DIR is not set: the script cannot find lib.nvim")
     end
     local root = fixture()
     local ok = run({ "call", "rule", '--params={"id":"DEP-01"}', "--ruleset=" .. root })
@@ -433,6 +517,19 @@ describe("scripts/rules.lua", function()
     assert.are.equal(2, run({ "frobnicate" }).code)
     assert.are.equal(2, run({ "list" }).code)
     assert.are.equal(2, run({ "call", "hello", "--colour=red" }).code)
+    assert.are.equal(2, run({ "list", "--format=json", "--limit=ten", "--ruleset=" .. root }).code)
+
+    -- a number no JSON carries, or no whole number: an error document, not a crash
+    for _, flag in ipairs({ "--limit=inf", "--limit=nan", "--limit=-inf", "--offset=inf", "--limit=2.5" }) do
+      local bad = run({ "list", "--format=json", flag, "--ruleset=" .. root })
+      assert.are.equal(1, bad.code, flag .. " " .. bad.stderr)
+      local doc = vim.json.decode(bad.stdout)
+      assert.are.equal("rules.error", doc.kind, flag)
+      assert.are.equal("invalid_argument", doc.code, flag)
+    end
+    local page = run({ "list", "--format=json", "--limit=1", "--offset=1", "--ruleset=" .. root })
+    assert.are.equal(0, page.code)
+    assert.are.equal(1, #vim.json.decode(page.stdout).items)
 
     -- the write door: the fields of the request are its own, not under `params`
     local dry = run({
