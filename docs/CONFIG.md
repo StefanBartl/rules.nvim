@@ -141,8 +141,18 @@ local folders = vault.rulesets()        -- { ".../rulesets/lua", ".../rulesets/n
 local state = vault.git_state(root)     -- { repo, clean, changes, inside?, error? } | nil without git
 ```
 
-`opts.project` (default: the working directory) is the root whose `.rules.json` may name the vault. The later
-`:RulesVault` command takes its `roots` from here.
+`opts.project` (default: the working directory) is the root whose `.rules.json` may name the vault. The
+`:RulesVault` command ([BINDINGS.md](BINDINGS.md#finding-rules-in-the-vault)) takes its `roots` from here:
+`vault.rulesets()` are its rulesets, `vault.root()` and its message say what it reports when there is no vault.
+`vault.is_none(message)` tells "nothing names a vault" (a normal state) from a vault that is named but unusable.
+
+### Making a vault
+
+`:RulesVault create <dir> [<name>] [--git] [--yes]` makes the folder, `README.md`, a `.rules.json` with
+`{"rulesets": ["rulesets/<name>"], "gates": {}}`, `.gitattributes`, `.gitignore`, `.github/workflows/ci.yml` and the first
+ruleset, and only what is missing: a file that is there is never touched. It lists first what happens, and the one step it
+cannot do for you: setting `vault = "<dir>"` in `setup()` or `$RULES_VAULT`, which is how the vault is found (see
+"Finding it"). It never adds a remote or reaches GitHub; `git init` happens only with `--git`.
 
 ### `:checkhealth rules`
 

@@ -15,12 +15,118 @@
 | `:Rules retire` | `<id>` | `--by=<id>`, `reason=`, `--yes`, `--dry` | Moves a rule's file to `_retired/` and out of every layout; the id stays taken. Asks first |
 | `:Rules move` | `<id>` | `--to=<file>#<section>`, `--after=<id>`, `--before=<id>`, `--first`, `--dry` | Moves the rule's `{{rule ID}}` line within its layout or into another; the rule's own file is not touched |
 | `:Rules list` | — | `--family=<PREFIX>`, `--severity=<level>`, `--format=json` | Puts the rules in the quickfix list, each at its source line; `--format=json` prints the `rules.list` document of the [machine contract](CONTRACT.md) |
+| `:RulesVault` | — | — | Shows the vault in use (where it was named, its rulesets, whether it is a clean git repository). See [Finding rules in the vault](#finding-rules-in-the-vault) |
+| `:RulesVault open` | `[<ruleset>\|<ID>\|<FAMILY>] [<part>]` | — | Opens the rule file of an id, the folder of a family in the explorer, or a part of a ruleset (`rules` by default, `layouts`, `catalogs`, `all`) |
+| `:RulesVault clipboard` | `[<ruleset>\|<ID>\|<FAMILY>] [<part>]` | `--rel`, `--link` | Copies the path to the `+` register; `--rel` relative to the folder of the current file; `--link` as a Markdown link, `[DEP-06](path)` |
+| `:RulesVault link` | `[<ruleset>\|<ID>\|<FAMILY>] [<part>]` | — | Inserts a Markdown link at the cursor, relative to the current file (the clipboard when the buffer cannot take text) |
+| `:RulesVault find` | `[<ruleset>\|<ID>\|<FAMILY>] [<part>]` | — | Picks a file by name (pickers.nvim) in the ruleset, the family or the part; for an id: in its ruleset, for the id |
+| `:RulesVault grep` | `[<ruleset>\|<ID>\|<FAMILY>] [<part>]` | — | Searches the content of the files, the same roots as `find` |
+| `:RulesVault tree` | `[<ruleset>\|<ID>\|<FAMILY>]` | — | Shows a ruleset as a tree: family, then rules, with counts per family and a `[retired]` marker |
+| `:RulesVault cdx` | `[<ruleset>\|<ID>\|<FAMILY>] [<part>]` | `--rel` | Copies a prompt for an agent session to the `+` register (the same thin path as `:TasksVault cdx`) |
+| `:RulesVault create` | `[<dir>] [<name>]` | `--git`, `--yes`, `--force` | Makes a rules vault: lists what happens and the step that is left to you, asks, then makes the missing files. Never overwrites a file, never adds a remote |
 
 No default keymaps are bound (the form binds a few keys in its own buffer, see
 below). `--family=`, a gate's `<name>`, the `<id>` of `show`, `set`, `retire`
 and `move`, `--by=`, `--after=`, `--before=`, the severities, `--ruleset=` and
 the places of `--to=` (the layouts, then the headings of one layout) all
-tab-complete against whatever is actually loaded/configured right now.
+tab-complete against whatever is actually loaded/configured right now. The
+first word of a `:RulesVault` verb completes to the rulesets of the vault, the
+parts, and the ids and families `:Rules` completes.
+
+## Finding rules in the vault
+
+`:RulesVault <verb> [<ruleset>|<ID>|<FAMILY>] [<part>]` is the counterpart of
+`:TasksVault`: it navigates to where the rules are. It reads and points; it
+writes nothing but the scaffold of `create`. A rule is made by `:Rules new`
+and changed by `:Rules set`, so there is no `new` and no `paste` here. The
+vault is found as [CONFIG.md](CONFIG.md#the-rules-vault) says
+(`setup({ vault })`, `$RULES_VAULT`, the project file); the rulesets are the
+ones the vault offers, `rules.vault.rulesets()`.
+
+```vim
+:RulesVault open DEP-06                 " the rule file (a retired rule too: _retired/)
+:RulesVault open DEP                    " the folder of the family
+:RulesVault open lua layouts            " a part of a ruleset
+:RulesVault clipboard DEP-06 --link     " [DEP-06](/path/to/DEP-06.md)
+:RulesVault link DEP-06                 " the same at the cursor, relative to this file
+:RulesVault grep DEP-06                 " who names the rule: searched in its ruleset
+:RulesVault tree native
+:RulesVault create ~/rules-vault lua --git
+```
+
+- **What a word is.** The first word is read in this order, one reading each: a
+  ruleset of the vault (its folder name), a part (`rules`, `layouts`,
+  `catalogs`, `all`, taken for the ruleset of the buffer), a rule id, a family.
+  A word that is a part and also the name of a ruleset means the ruleset. A
+  word that is none is an error that lists the rulesets and suggests the
+  spelling it has (`dep-06`: did you mean `DEP-06`?). Ids and families are
+  exact. The name of a ruleset ignores case only where the file system does
+  (Windows, macOS). A rule id or a family takes no part.
+- **Without a word** the ruleset is the one the current buffer lies in
+  (compared by real path), the only one of the vault, or a pick.
+- **Parts.** `rules` is `_rules/` (the ruleset folder itself for a ruleset that
+  keeps its rules in documents), `layouts` is `_layouts/`, `catalogs` are the
+  generated reading documents (the `output` of the layouts: files, so `find`
+  and `grep` refuse them), `all` is the ruleset folder.
+- **`open`** puts a rule file in a buffer at its heading, a folder in the
+  explorer (`:Filetree open`, else the editor's own), a generated document in a
+  buffer. When there are several (a family with a folder in two rulesets, two
+  generated documents) you pick one.
+- **`clipboard` and `link`** use forward slashes on every system. A link target
+  with a blank or a parenthesis is wrapped in `<...>`.
+- **`tree`** prints the ruleset family by family with the counts of rules and
+  retired rules, in the report window `:Rules stats` uses. A retired rule is
+  marked `[retired]` and names the rule that replaced it. A family or an id
+  shows that family in every ruleset that has it.
+- **`cdx`** copies a prompt that names the path and says rules are changed
+  through the engine (`:Rules new/set/retire/move`). Neovim has no generic way
+  to start an agent session, so it is the clipboard, like `:TasksVault cdx`.
+- **No vault.** Every verb but `create` says so once
+  (`no vault is configured: ... -- :RulesVault create <dir> makes one`) and
+  does nothing else. A vault that is named but is not a folder is an error that
+  says where it was named (`$RULES_VAULT: the vault is not a folder`).
+
+### `create`
+
+`:RulesVault create [<dir>] [<name>] [--git] [--yes] [--force]` makes the
+folder of a vault and, in it, only what is missing; **a file that is there is
+never overwritten** (it is listed as kept). With no `<dir>` it asks for one. The
+name of the first ruleset is `default` unless given (letters, digits, `.`, `_`,
+`-`; no Windows device name).
+
+| Made | |
+| --- | --- |
+| `README.md` | what the vault is, its layout, how it is worked with |
+| `.rules.json` | `{"rulesets": ["rulesets/<name>"], "gates": {}}`, paths relative to the file |
+| `.gitattributes` | `* text=auto eol=lf` |
+| `.gitignore` | editors, `.deps/` |
+| `.github/workflows/ci.yml` | from `templates/rules-vault-ci.yml` of this plugin: `catalog --check` per ruleset, every ruleset loads without errors, the round trip |
+| `rulesets/<name>/_rules/.gitkeep`, `_layouts/.gitkeep` | the first ruleset (no placeholder in a folder that has files) |
+
+It **says first what happens and what is left to you** and asks (`No` is the
+button the dialog starts on; `--yes` skips the question; a session without a
+screen needs `--yes`). The list ends with a step that is marked and is yours:
+
+```
+  >>> 4. REQUIRED, and done by you afterwards <<<
+       Write the path into the setup of rules.nvim:
+           vault = "/home/me/rules-vault",
+       (or set $RULES_VAULT). Without this step rules.nvim will NOT find
+       the vault. Nothing is read from it until then.
+```
+
+The same step is said again when it is done, and the line is put in the `+`
+register. The vault is not used for the session: this step makes rules.nvim
+find it.
+
+- `--git` runs `git init` in the folder, and only then. A folder that is a
+  repository already, or lies inside another one, gets none. There is **never a
+  remote**, a commit, a push or a call to GitHub: that is yours (the privacy of
+  the repository included).
+- A vault is **in use** already (`setup()`, `$RULES_VAULT`)? `create` stops and
+  says so; `--force` makes another one. The folder of the vault in use is
+  filled in without it. A vault that is named but whose folder is missing is not
+  in use: `create` at that path is the way to make it.
 
 ## Making, changing, retiring and moving rules
 
