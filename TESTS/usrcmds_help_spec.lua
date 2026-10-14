@@ -38,7 +38,7 @@ describe(":Rules option float", function()
 
   it("keeps the type texts of the positional arguments to one short line", function()
     local argtypes = require("lib.nvim.bindings.usercmd.composer.argtypes")
-    for _, name in ipairs({ "RULES_GATE", "RULES_ID" }) do
+    for _, name in ipairs({ "RULES_GATE", "RULES_ID", "RULES_FAMILY", "RULES_PLACE", "RULES_RULESET" }) do
       local text = argtypes.get(name).desc or ""
       assert.is_true(text ~= "", name .. " shows a text")
       assert.is_nil(text:find("\n", 1, true), name .. " is one line")
@@ -63,5 +63,49 @@ describe(":Rules option float", function()
       end
     end
     assert.is_true(seen > 0, "the routes' flags were actually walked")
+  end)
+
+  it("keeps every key= pair to one short line without a trailing full stop", function()
+    local handle = composer.registry().Rules
+    local seen = 0
+    for _, route in ipairs(handle:spec().routes or {}) do
+      for _, kv in ipairs(route.kv or {}) do
+        seen = seen + 1
+        local text = kv.desc or ""
+        local what = ("%s= of %s"):format(kv.key, table.concat(route.path, " "))
+        assert.is_true(text ~= "", what .. " shows a text")
+        assert.is_nil(text:find("\n", 1, true), what .. " is one line")
+        assert.is_true(#text <= 80, what .. " stays short")
+        assert.is_nil(text:find("%.$"), what .. " has no trailing full stop")
+      end
+    end
+    assert.is_true(seen > 0, "the key= pairs were actually walked")
+  end)
+
+  it("has the write verbs, each with a description and the flags the docs name", function()
+    local handle = composer.registry().Rules
+    local by_path = {}
+    for _, route in ipairs(handle:spec().routes or {}) do
+      by_path[table.concat(route.path, " ")] = route
+    end
+    local wanted = {
+      new = { "to", "after", "before", "first", "dry" },
+      set = { "dry" },
+      retire = { "by", "yes", "dry" },
+      move = { "to", "after", "before", "first", "dry" },
+      list = { "family", "severity", "format" },
+    }
+    for verb, flags in pairs(wanted) do
+      local route = by_path[verb]
+      assert.is_not_nil(route, verb .. " is a route")
+      assert.is_true((route.desc or "") ~= "", verb .. " has a description")
+      local names = {}
+      for _, flag in ipairs(route.flags or {}) do
+        names[flag.name] = true
+      end
+      for _, name in ipairs(flags) do
+        assert.is_true(names[name] == true, ("%s takes --%s"):format(verb, name))
+      end
+    end
   end)
 end)

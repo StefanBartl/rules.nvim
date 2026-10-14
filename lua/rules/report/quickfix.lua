@@ -25,4 +25,20 @@ function M.set(results)
   vim.fn.setqflist({}, " ", { title = "rules.nvim", items = items })
 end
 
+--- Replace the quickfix list with a list of rules (`:Rules list`), each at its source line.
+---@param rules { id: string, severity: string, title: string, file: string, line: integer }[]
+---@param title string
+---@return nil
+function M.set_rules(rules, title)
+  local items = {}
+  for _, rule in ipairs(rules) do
+    items[#items + 1] = {
+      filename = rule.file,
+      lnum = rule.line,
+      text = ("%s [%s] %s"):format(rule.id, rule.severity, rule.title),
+    }
+  end
+  vim.fn.setqflist({}, " ", { title = title, items = items })
+end
+
 return M
