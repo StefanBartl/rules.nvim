@@ -51,6 +51,7 @@ provide — the same way you'd point ESLint at your own `.eslintrc`.
 
 - [Ruleset format](docs/RULESET-FORMAT.md) — how a rule and its `check` are written.
 - [Bindings](docs/BINDINGS.md) — the `:Rules` command and its subcommands, including the form of `:Rules new`.
+- [Settings files and the rules-vault](docs/CONFIG.md) — `.rules.json` in a project and in a vault, which place wins, `vault` / `$RULES_VAULT`, `@vault/<name>`.
 - [Agent-run manual rules](docs/AGENT.md) — planned, not built: how the rules with no `check` could be worked by an agent, as proposals a person reviews.
 - [Machine contract](docs/CONTRACT.md) — `rules-export/1` (the ruleset as JSON documents for apps, agents and CI) and `rules-ops/1` (create, change, retire and move a rule through the engine).
 
@@ -141,6 +142,12 @@ Then:
 Add `--format=json` for machine-readable output (see
 [docs/BINDINGS.md](docs/BINDINGS.md) for the headless/CI recipe with a real
 exit code).
+
+A project can carry its own defaults in a `.rules.json` at its root (`rulesets`, `gates`, `agent`), and your
+rulesets can live in a vault of their own (`setup({ vault = "~/rules-vault" })` or `$RULES_VAULT`; every folder under
+`rulesets/` is then loaded, and a project names one with `"@vault/lua"`). `setup()` wins over the project file, which
+wins over the vault's file. A file that cannot be read is an error, never "no settings". See
+[docs/CONFIG.md](docs/CONFIG.md).
 
 Verify your setup any time with:
 

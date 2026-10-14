@@ -7,6 +7,8 @@ CONTENTS                                                       *rules-contents*
     Setup .............. |rules-setup|
     Commands ........... |rules-commands|
     The form ........... |rules-form|
+    Settings files ..... |rules-config|
+    Vault .............. |rules-vault|
     Gates .............. |rules-gates|
     Waivers ............ |rules-waivers|
     Ruleset format ...... |rules-ruleset-format|
@@ -38,6 +40,51 @@ checks may run. A rule block body is always evaluated in an empty environment,
 but a predicate is arbitrary Lua that runs later; set `lua_predicates = false`
 to run a ruleset you did not write, and each predicate then reports `error`
 ("predicate not trusted") instead of running. See docs/RULESET-FORMAT.md.
+
+==============================================================================
+SETTINGS FILES                                                     *rules-config*
+
+Besides setup(), `rulesets`, `gates` and an `agent` block can come from a
+`.rules.json` in the root being checked (the `path` of :Rules check/gate, else
+the working directory) and from the `.rules.json` of a vault. Highest first:
+a headless call (--ruleset, --gate, $RULES_RULESETS, $RULES_GATES), setup(),
+the project file, the vault file, the defaults. `rulesets` is taken whole from
+the highest place that names it; `gates` is merged by gate name; `agent` field
+by field. `lua_predicates` is a setup() option only.
+>json
+    {
+      "rulesets": ["docs/rules", "@vault/lua"],
+      "gates": { "release": ["REL"] },
+      "agent": { "batch_size": 8, "scopes": { "LUA": { "include": ["lua/**"] } } },
+      "vault": "../rules-vault"
+    }
+<
+Paths are relative to the file that holds them. A file that is there but
+cannot be used (not JSON, not an object, a value of the wrong shape, over
+1 MiB) is an error naming the file and the key, never "no settings"; :Rules
+check and :Rules gate stop with it. An unknown key warns, with the nearest
+known key as a hint. An absolute path in a project file warns (a path of this
+machine in a repository). A missing file is not an error. See docs/CONFIG.md.
+
+==============================================================================
+VAULT                                                              *rules-vault*
+
+The rules-vault is a folder (a repository of its own) with your rulesets under
+`rulesets/<name>/`. It is found from `setup({ vault = "~/rules-vault" })`,
+then `$RULES_VAULT`, then `vault` in the project's `.rules.json`; a path is
+never guessed, and no vault is not an error. With a vault, every folder under
+`rulesets/` is loaded (the vault's own `.rules.json` may narrow or extend
+that), and `rulesets` entries of setup() or a project file may name one with
+`@vault/<name>` instead of a path. The name in a document's `source` stays the
+folder name (`lua`, `native`).
+>lua
+    local vault = require("rules.vault")
+    vault.root()      -- path, or nil and a message
+    vault.source()    -- "call" | "setup" | "env" | "project" | nil
+    vault.rulesets()  -- the folders the vault offers
+<
+:checkhealth rules shows the vault, where it came from, its rulesets, and
+whether it is a clean git repository (read-only, no network).
 
 ==============================================================================
 COMMANDS                                                        *rules-commands*

@@ -154,8 +154,11 @@ nvim --headless -u NONE -i NONE -n -l scripts/rules.lua call rule --params='{"id
 nvim --headless -u NONE -i NONE -n -l scripts/rules.lua list --format=json --family=DEP --ruleset=...
 ```
 
-`--ruleset=<path>` (repeatable, default `$RULES_RULESETS`) and
-`--gate=<name>=<FAM,FAM>` (repeatable, default `$RULES_GATES`). The document goes
+`--ruleset=<path>` (repeatable, default `$RULES_RULESETS`; `@vault/<name>` is a ruleset of the vault) and
+`--gate=<name>=<FAM,FAM>` (repeatable, default `$RULES_GATES`). Without them the
+rulesets and gates come from the places in [CONFIG.md](CONFIG.md): `--vault=<dir>`
+(else `$RULES_VAULT`) with every folder under its `rulesets/`, and the `.rules.json` of
+`--project=<dir>` (else `$RULES_PROJECT`; no project, no project file). The document goes
 to stdout. Exit code: 0 an answer, 1 an error document, 2 wrong usage or no
 lib.nvim. A `--limit` or `--offset` that is not a whole number (`2.5`, `inf`,
 `nan`) is an `invalid_argument` error document, exit code 1; text that is no
@@ -167,7 +170,8 @@ number at all is wrong usage, exit code 2.
 stdin and stdout (`ready\t1`, then `<id>\t<method>\t<params>` lines; see
 `lib.nvim/lua/lib/nvim/contract/host/README.md`). The rulesets and gates come
 from `$RULES_RULESETS` (paths separated by `;`) and `$RULES_GATES`
-(`name=FAM,FAM;name=FAM`). The process ends when its stdin ends.
+(`name=FAM,FAM;name=FAM`), else from `$RULES_VAULT`, `$RULES_PROJECT` and the
+settings files ([CONFIG.md](CONFIG.md)). The process ends when its stdin ends.
 
 The engine keeps its scan of the rulesets while no `.md` file of them changes
 (size and modification time; a file changed within the last two seconds is
@@ -179,7 +183,15 @@ never trusted), so a question costs milliseconds, not a parse of the ruleset.
 local text, code = require("rules.api").call("rule", '{"params":{"id":"DEP-06"}}', { rulesets = { dir } })
 ```
 
-`opts` is `{ rulesets?, gates? }`; without it the answer comes from `setup()`.
+`opts` is `{ rulesets?, gates?, vault?, project? }`; what it leaves out comes from
+`setup()`, the project file and the vault ([CONFIG.md](CONFIG.md)).
+
+A vault with two rulesets yields the same documents as passing both folders
+explicitly; `source` stays the ruleset's folder name (`lua`, `native`), never a
+path of this machine. A settings file that cannot be used (not JSON, a value of
+the wrong shape) or a vault that is no folder is an `invalid_argument` document
+whose message names the kind of file (`project .rules.json`, `vault .rules.json`,
+`$RULES_VAULT`) and the key, with no path.
 
 ## Tests
 
@@ -188,3 +200,7 @@ paths, determinism, no machine path, the host and the golden files. To rewrite
 the golden files after a deliberate change, create
 `schemas/rules-export/1/golden/.update`, run the specs once, delete the marker
 and review the diff.
+
+`TESTS/settings_spec.lua` and `TESTS/vault_spec.lua`: the settings files, the rank, the vault, and that a
+vault with two rulesets gives the documents of the same two folders passed one by one (also through the command
+line and the host).
