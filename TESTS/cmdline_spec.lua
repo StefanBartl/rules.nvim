@@ -41,6 +41,123 @@ describe("rules.cmdline.split_assignments", function()
   end)
 end)
 
+describe("rules.cmdline.words", function()
+  it("cuts the argument string where Neovim cuts fargs, and keeps the text as typed", function()
+    local words = cmdline.words("  set DEP-01  text=a\\ b\\\\ c\tx ")
+    assert.are.same({
+      { text = "set", sep = "  " },
+      { text = "DEP-01", sep = " " },
+      { text = "text=a\\ b\\\\", sep = "  " },
+      { text = "c", sep = " " },
+      { text = "x", sep = "\t" },
+    }, words)
+    assert.are.same({}, cmdline.words("   "))
+  end)
+
+  it("agrees with the fargs of a real user command on every line", function()
+    local got
+    vim.api.nvim_create_user_command("RulesWordsProbe", function(opts)
+      got = opts
+    end, { nargs = "*" })
+    local lines = {
+      "a b",
+      "a  b",
+      "a\\ b c",
+      "a\\\\ b",
+      "a\\\\\\ b",
+      "C:\\Users\\x\\ end",
+      'text={"pattern":"a  b"} --dry',
+      "x\\",
+      "\\",
+      "a\tb",
+      "  lead and trail  ",
+      "--to=f#S\\ T",
+    }
+    for _, line in ipairs(lines) do
+      vim.cmd("RulesWordsProbe " .. line)
+      local texts = {}
+      for i, word in ipairs(cmdline.words(got.args)) do
+        texts[i] = cmdline.unescape(word.text)
+      end
+      assert.are.same(got.fargs, texts, line)
+    end
+    vim.api.nvim_del_user_command("RulesWordsProbe")
+  end)
+
+  it("puts words together with the blanks between them as typed", function()
+    local words = cmdline.words("one  two\t three")
+    assert.are.equal("one  two\t three", cmdline.join(words))
+    assert.are.equal("a b", cmdline.join({ "a", "b" }))
+    assert.are.equal("", cmdline.join({}))
+  end)
+end)
+
+describe("rules.cmdline.bind", function()
+  ---@param line string
+  ---@param known string[]
+  ---@param strict? boolean
+  ---@return table|nil bound
+  ---@return string|nil err
+  local function bind(line, known, strict)
+    return cmdline.bind(cmdline.words(line), known, strict)
+  end
+
+  it("takes the first word that is no known key= as the positional one, wherever it stands", function()
+    local bound = bind("DEP Add the check severity=critical", cmdline.NEW_KEYS)
+    assert.are.equal("DEP", bound.positional)
+    assert.are.equal("Add the check", cmdline.join(bound.lead))
+    assert.are.same({ severity = "critical" }, bound.values)
+
+    bound = bind("text=Hello DEP Wrong title severity=critical", cmdline.NEW_KEYS)
+    assert.are.equal("DEP", bound.positional)
+    assert.are.equal("Wrong title", cmdline.join(bound.lead))
+    assert.are.same({ text = "Hello", severity = "critical" }, bound.values)
+  end)
+
+  it("lets a key= word before the positional word take that one word only", function()
+    local bound = bind("severity=critical text=two words DEP", cmdline.NEW_KEYS)
+    assert.are.equal("words", bound.positional)
+    assert.are.same({ severity = "critical", text = "two" }, bound.values)
+    assert.are.same(
+      { "DEP" },
+      vim.tbl_map(function(w)
+        return w.text
+      end, bound.lead)
+    )
+  end)
+
+  it("has no positional word when there are only key= words", function()
+    local bound = bind("severity=critical", cmdline.NEW_KEYS)
+    assert.is_nil(bound.positional)
+    assert.are.same({}, bound.lead)
+    assert.are.same({ severity = "critical" }, bound.values)
+    assert.is_nil(bind("", cmdline.NEW_KEYS).positional)
+  end)
+
+  it("reads an unknown key= word as the positional one", function()
+    local bound = bind("colour=red severity=critical", cmdline.NEW_KEYS)
+    assert.are.equal("colour=red", bound.positional)
+  end)
+
+  it("keeps the blanks of a value over several words as typed", function()
+    local bound = bind("DEP T  x text=a  b\\ c", cmdline.NEW_KEYS)
+    assert.are.equal("T  x", cmdline.join(bound.lead))
+    assert.are.same({ text = "a  b\\ c" }, bound.values)
+  end)
+
+  it("is strict after the positional word, and refuses a key given twice, before or after it", function()
+    local bound, err = bind("DEP-01 loose severity=critical", cmdline.SET_KEYS, true)
+    assert.is_nil(bound)
+    assert.is_truthy(err:find("expected key=value, got 'loose'", 1, true))
+    bound, err = bind("title=a DEP-01 title=b", cmdline.SET_KEYS, true)
+    assert.is_nil(bound)
+    assert.is_truthy(err:find("'title' given twice", 1, true))
+    bound, err = bind("DEP-01 colour=red", cmdline.SET_KEYS, true)
+    assert.is_nil(bound)
+    assert.is_truthy(err:find("unknown field 'colour'", 1, true))
+  end)
+end)
+
 describe("rules.cmdline.patch", function()
   it("keeps the texts as typed", function()
     local patch = cmdline.patch({ severity = "critical", title = "x", text = "" })

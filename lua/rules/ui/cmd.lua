@@ -29,22 +29,62 @@ local function write()
   return require("rules.write")
 end
 
----The words of a command line that are neither a flag nor an argument the grammar bound: what `key=value` assignments
----and the title are read from. The grammar's own split (`composer.flags`) is used, so a flag is taken apart exactly
----as the composer did.
+---The words of the command line after the subcommand, as typed: the words of the argument string (`opts.args`, not
+---`fargs`: Neovim halves every backslash pair of `fargs`, drops the backslash before a blank and makes a run of blanks
+---one, and a value would not come out as typed). `fargs` is the check that both cut the line the same way; when they
+---do not (a handler called with a context that has no argument string) the words of `fargs` are used.
+---@param ctx table  composer context
+---@return Rules.Word[]
+local function typed_words(ctx)
+  local raw = ctx.raw or {}
+  local fargs = raw.fargs or {}
+  if type(raw.args) == "string" then
+    local words = cmdline.words(raw.args)
+    local same = #words == #fargs
+    for i = 1, same and #words or 0 do
+      same = same and cmdline.unescape(words[i].text) == fargs[i]
+    end
+    if same then
+      return vim.list_slice(words, #ctx.path + 1, #words)
+    end
+  end
+  local out = {}
+  for i = #ctx.path + 1, #fargs do
+    out[#out + 1] = { text = fargs[i], sep = " " }
+  end
+  return out
+end
+
+---The words of a command line that are no flag: what the positional argument (the family, the id), the
+---`key=value` assignments and the title are read from. The flags are taken apart by the grammar's own split
+---(`composer.flags`), exactly as the composer did: a word is a flag when the split of the line up to it says so. A bare
+---`--` ends the flags (it is no word itself): `text=run with -- --dry now` has the text `run with --dry now`.
 ---@param ctx table  composer context
 ---@param specs table[]  the flags of the route
----@param bound integer  how many positional arguments the grammar bound (the family, the id)
----@return string[]|nil words
+---@return Rules.Word[]|nil words
 ---@return string|nil err
-function M.words(ctx, specs, bound)
-  local fargs = ctx.raw and ctx.raw.fargs or {}
-  local tokens = vim.list_slice(fargs, #ctx.path + 1, #fargs)
-  local positional, _, err = require("lib.nvim.bindings.usercmd.composer.flags").split({ flags = specs }, tokens)
-  if not positional then
+function M.words(ctx, specs)
+  local split = require("lib.nvim.bindings.usercmd.composer.flags").split
+  local route = { flags = specs }
+  local words = typed_words(ctx)
+  local plain = {}
+  for i, word in ipairs(words) do
+    plain[i] = cmdline.unescape(word.text)
+  end
+  local _, _, err = split(route, plain)
+  if err then
     return nil, err
   end
-  return vim.list_slice(positional, bound + 1, #positional), nil
+  local out, count = {}, 0
+  for i = 1, #words do
+    local positional = split(route, vim.list_slice(plain, 1, i))
+    -- a prefix that ends in a flag that still waits for its value is no answer: the word is no positional
+    if positional and #positional > count then
+      out[#out + 1] = words[i]
+      count = #positional
+    end
+  end
+  return out, nil
 end
 
 ---Run operations through the door and tell the answer.
@@ -185,22 +225,23 @@ M.form_open = nil
 function M.new(ctx)
   local routes = require("rules.ui.routes")
   local family = ctx.args.family
-  local words, werr = M.words(ctx, routes.FLAGS.new, family and 1 or 0)
+  local words, werr = M.words(ctx, routes.FLAGS.new)
   if not words then
     notify.error(tostring(werr))
     return
   end
-  local lead, values, serr = cmdline.split_assignments(words, cmdline.NEW_KEYS, false)
-  if not lead or not values then
+  local bound, serr = cmdline.bind(words, cmdline.NEW_KEYS, false)
+  if not bound then
     notify.error(tostring(serr))
     return
   end
+  local values = bound.values
   local place, perr = cmdline.place(ctx.flags)
   if not place then
     notify.error(tostring(perr))
     return
   end
-  local title = table.concat(lead, " ")
+  local title = cmdline.join(bound.lead)
   if family and title ~= "" and values.severity and values.severity ~= "" then
     ---@type table
     local op = vim.tbl_extend("force", { op = "new", family = family, title = title, severity = values.severity }, place)
@@ -240,17 +281,17 @@ end
 ---@param ctx table
 function M.set(ctx)
   local routes = require("rules.ui.routes")
-  local words, werr = M.words(ctx, routes.FLAGS.set, 1)
+  local words, werr = M.words(ctx, routes.FLAGS.set)
   if not words then
     notify.error(tostring(werr))
     return
   end
-  local _, values, serr = cmdline.split_assignments(words, cmdline.SET_KEYS, true)
-  if not values then
+  local bound, serr = cmdline.bind(words, cmdline.SET_KEYS, true)
+  if not bound then
     notify.error(tostring(serr))
     return
   end
-  local patch, perr = cmdline.patch(values)
+  local patch, perr = cmdline.patch(bound.values)
   if not patch then
     notify.error(tostring(perr))
     return
@@ -264,16 +305,17 @@ end
 ---@param ctx table
 function M.retire(ctx)
   local routes = require("rules.ui.routes")
-  local words, werr = M.words(ctx, routes.FLAGS.retire, 1)
+  local words, werr = M.words(ctx, routes.FLAGS.retire)
   if not words then
     notify.error(tostring(werr))
     return
   end
-  local _, values, serr = cmdline.split_assignments(words, { "reason" }, true)
-  if not values then
+  local bound, serr = cmdline.bind(words, { "reason" }, true)
+  if not bound then
     notify.error(tostring(serr))
     return
   end
+  local values = bound.values
   local id = ctx.args.id
   ---@type table
   local op = { op = "retire", id = id, replaced_by = ctx.flags.by }
@@ -319,17 +361,19 @@ end
 ---@param ctx table
 function M.move(ctx)
   local routes = require("rules.ui.routes")
-  local words, werr = M.words(ctx, routes.FLAGS.move, 1)
+  local words, werr = M.words(ctx, routes.FLAGS.move)
   if not words then
     notify.error(tostring(werr))
     return
   end
-  if #words > 0 then
+  local bound = cmdline.bind(words, {}, false)
+  local left = bound and bound.lead or {}
+  if #left > 0 then
     local hint = ""
     if ctx.flags.to then
       hint = " (a blank in a section is written with a backslash before it)"
     end
-    notify.error(("unexpected argument: %s%s"):format(table.concat(words, " "), hint))
+    notify.error(("unexpected argument: %s%s"):format(cmdline.join(left), hint))
     return
   end
   local place, perr = cmdline.place(ctx.flags)

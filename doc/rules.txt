@@ -104,6 +104,12 @@ COMMANDS                                                        *rules-commands*
     itself: it hands one operation of `rules-ops/1` to the engine and tells
     the answer. --dry checks everything and writes nothing.
 
+    A `key=` word may stand before the family (it takes one word); the
+    family is the first word that is no known `key=`. A value is taken
+    from the line as typed (runs of blanks and backslashes stay). A word
+    with two dashes is a flag, also inside a value; a bare `--` ends the
+    flags, so `text=run with -- --dry now` is the text `run with --dry now`.
+
     {place} is one of
     --to={file}#{section}   layout (its `output` path) and heading text; write
                             a blank in the heading as `\ `; {file} alone is

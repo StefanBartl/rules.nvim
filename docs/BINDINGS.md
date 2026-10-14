@@ -49,6 +49,27 @@ writes a ruleset in the one-file-per-rule form ([RULESET-FORMAT.md](RULESET-FORM
   severity=critical`). The words after the family of `new` and before the first
   `key=` are the title. `check=` and `agent=` take a JSON object, or nothing to
   remove the key (`null` in the patch); `text=` with nothing is an empty text.
+- **`key=` words may stand anywhere.** The family of `new` and the id of `set`,
+  `retire` and `move` are the first word that is no known `key=`; a `key=` word
+  before it takes that one word as its value
+  (`:Rules new severity=critical DEP Add the check`,
+  `:Rules new text=Hello DEP Wrong title severity=critical`). Only the words
+  after the family or id make the title or go on with a value, so put a value
+  of several words after it. A word that is a known `key=` always starts the
+  next value, it cannot be part of one.
+- **A value comes out as typed.** The line is read from the argument string, not
+  from Neovim's `<f-args>`: a run of blanks, a backslash before a blank
+  (`text=C:\Users\x\ end`) and a pair of backslashes are in the value exactly
+  as typed (Neovim's `<f-args>` would make the blanks one, drop the backslash
+  before a blank and halve the pairs). What stays Neovim's: a flag's own value
+  (`--to=regeln/DEP.md#Core\ Rules`: `\ ` is a blank, `\\` a backslash), and a
+  line cannot hold a newline.
+- **A word with two dashes is a flag, also in a value.** `text=run with --dry
+  now` is a dry run, and an unknown `--word` is refused (`unknown flag`). A
+  bare `--` ends the flags: everything after it is text, `--dry` included
+  (`:Rules set DEP-01 text=run with -- --dry now` sets `run with --dry now`).
+  The flags go before the `--`; the `--` itself is not part of the text, a
+  second `--` is.
 - **A place** is one of `--to=<file>#<section>` (`<file>` is the `output` path
   of a layout, `<section>` the text of a heading; `--first` puts the rule at the
   start of the section instead of its end), `--to=<file>` alone (the top of the

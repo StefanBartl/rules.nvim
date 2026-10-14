@@ -255,6 +255,140 @@ describe(":Rules new, set, retire, move, list", function()
     end)
   end)
 
+  -- Everything here goes through the real command (`vim.cmd`): Neovim cuts the line, the composer takes the flags and
+  -- the declared `key=` words out, the handler reads what is left.
+  describe("the command line", function()
+    ---@param id string
+    ---@return table
+    local function rule_of(id)
+      return assert(contract.view(nil).full[id])
+    end
+
+    describe("key= words stand anywhere", function()
+      it("binds the family and the title right when a key= word stands before the family", function()
+        run("Rules new text=Hello DEP Wrong title severity=critical")
+        local rule = rule_of("DEP-03")
+        assert.is_truthy(rule.title:find("Wrong title", 1, true))
+        assert.is_nil(rule.title:find("DEP Wrong", 1, true))
+        assert.are.equal("Hello", rule.text)
+        assert.are.equal("critical", rule.severity)
+        assert.are.equal("DEP", rule.family)
+      end)
+
+      it("takes severity= before the family into the rule, and opens no form for it", function()
+        local opened = false
+        cmd.form_open = function()
+          opened = true
+        end
+        run("Rules new severity=critical DEP Add check")
+        assert.is_false(opened)
+        local rule = rule_of("DEP-03")
+        assert.are.equal("critical", rule.severity)
+        assert.is_truthy(rule.title:find("Add check", 1, true))
+        assert.is_nil(rule.title:find("DEP Add", 1, true))
+      end)
+
+      it("fills the form with the family, the title and the key= words wherever they stood", function()
+        local seen
+        cmd.form_open = function(opts)
+          seen = opts
+        end
+        run("Rules new severity=critical DEP")
+        assert.are.equal("DEP", seen.family)
+        assert.are.equal("critical", seen.severity)
+        assert.is_nil(seen.title)
+        run("Rules new text=Hello DEP Fresh title")
+        assert.are.equal("DEP", seen.family)
+        assert.are.equal("Fresh title", seen.title)
+        assert.are.equal("Hello", seen.text)
+        assert.is_nil(seen.severity)
+        run("Rules new severity=critical")
+        assert.is_nil(seen.family)
+        assert.is_nil(seen.title)
+        assert.are.equal("critical", seen.severity)
+      end)
+
+      it("binds the id of set and retire right when a key= word stands before it", function()
+        run("Rules set severity=critical DEP-01 title=New title")
+        local rule = rule_of("DEP-01")
+        assert.are.equal("critical", rule.severity)
+        assert.is_truthy(rule.title:find("New title", 1, true))
+        assert.is_true(told("changed DEP-01"))
+        run("Rules retire reason=cleaned DEP-01 --yes")
+        local retired = assert(read_raw(root .. "/_retired/DEP/DEP-01.md"))
+        assert.is_truthy(retired:find("reason: cleaned", 1, true))
+      end)
+
+      it("still reads the value of a key= word after the id over several words", function()
+        run("Rules set DEP-01 title=A title over words severity=nice-to-have text=and some text")
+        local rule = rule_of("DEP-01")
+        assert.is_truthy(rule.title:find("A title over words", 1, true))
+        assert.are.equal("and some text", rule.text)
+        assert.are.equal("nice-to-have", rule.severity)
+      end)
+    end)
+
+    describe("values come out as typed", function()
+      it("keeps a run of blanks in a JSON value", function()
+        run('Rules set DEP-02 check={"type":"grep","pattern":"a  b"}')
+        assert.are.equal("a  b", rule_of("DEP-02").check.pattern)
+      end)
+
+      it("keeps a run of blanks between the words of a text", function()
+        run("Rules set DEP-01 text=one  two   three")
+        assert.are.equal("one  two   three", rule_of("DEP-01").text)
+      end)
+
+      it("keeps every backslash of a value, also before a blank and in pairs", function()
+        run("Rules set DEP-01 text=C:\\Users\\x\\ end")
+        assert.are.equal("C:\\Users\\x\\ end", rule_of("DEP-01").text)
+        run("Rules set DEP-01 text=a\\\\b and \\\\ c")
+        assert.are.equal("a\\\\b and \\\\ c", rule_of("DEP-01").text)
+      end)
+
+      it("keeps the backslash in a check as well", function()
+        run('Rules set DEP-02 check={"type":"grep","pattern":"a\\\\.b"}')
+        assert.are.equal("a\\.b", rule_of("DEP-02").check.pattern)
+      end)
+
+      it("keeps a run of blanks in the title of a new rule", function()
+        run("Rules new DEP Two  blanks severity=critical")
+        assert.is_truthy(rule_of("DEP-03").title:find("Two  blanks", 1, true))
+      end)
+    end)
+
+    describe("a word that starts with two dashes", function()
+      it("is a flag, as it always was", function()
+        local before = read_raw(rule_path("DEP-01"))
+        run("Rules set DEP-01 text=run with --dry")
+        assert.are.equal(before, read_raw(rule_path("DEP-01")))
+        assert.is_true(told("would change DEP-01"))
+      end)
+
+      it("is a word of the value after a bare --, which ends the flags", function()
+        run("Rules set DEP-01 text=run with -- --dry now")
+        assert.are.equal("run with --dry now", rule_of("DEP-01").text)
+        assert.is_true(told("changed DEP-01"))
+        assert.is_false(told("would change"))
+      end)
+
+      it("keeps the flags that stand before the --", function()
+        local before = read_raw(rule_path("DEP-01"))
+        run("Rules set DEP-01 text=run -- --with --dry --dry")
+        assert.is_true(told("changed DEP-01"))
+        run("Rules set DEP-01 --dry text=run -- --with")
+        assert.is_true(told("would change DEP-01"))
+        assert.are_not.equal(before, read_raw(rule_path("DEP-01")))
+        assert.are.equal("run --with --dry --dry", rule_of("DEP-01").text)
+      end)
+
+      it("takes a word with two dashes into a new title after the --", function()
+        run("Rules new DEP Use -- --fast severity=critical")
+        assert.is_truthy(rule_of("DEP-03").title:find("Use --fast", 1, true))
+      end)
+    end)
+  end)
+
   describe("the form", function()
     ---@return integer buf
     local function open_form(command)
