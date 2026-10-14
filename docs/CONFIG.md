@@ -154,6 +154,36 @@ ruleset, and only what is missing: a file that is there is never touched. It lis
 cannot do for you: setting `vault = "<dir>"` in `setup()` or `$RULES_VAULT`, which is how the vault is found (see
 "Finding it"). It never adds a remote or reaches GitHub; `git init` happens only with `--git`.
 
+### The CI of a vault
+
+`.github/workflows/ci.yml` of a new vault is `templates/rules-vault-ci.yml` of this plugin. It only reads (no push, no
+commit) and runs on Ubuntu and Windows, with `rules.nvim` and `lib.nvim` checked out below `.deps/`. Four steps, each of
+which turns the run red:
+
+| Step | Command | Red when |
+| --- | --- | --- |
+| line endings | `grep -q 'eol=lf' .gitattributes` | the vault has no `.gitattributes` with `eol=lf` (the byte-for-byte checks need one line ending; a Windows checkout would otherwise be CRLF) |
+| reading documents | `scripts/ruleset.lua catalog --check rulesets/<name>`, each ruleset | a generated document is not what the layouts and rule files make |
+| loading | `scripts/ruleset.lua check --vault=.` | **all rulesets together** have a load error: a **duplicate rule id** (also one id in two rulesets, which no single ruleset shows), an invalid `severity`, a rule file that does not read |
+| round trip | `scripts/roundtrip.lua rulesets/*/` | writing a rule file does not give its bytes back |
+
+`ruleset.lua check [--vault=D] [--project=D] [<folder>]` loads through the snapshot document of `rules-export/1` and
+exits 1 on any `load_errors`, 2 on wrong usage or when there is nothing to check. No `jq`, no other tool than Neovim and
+bash. The workflow runs the same commands you can run in the vault folder, with the path of your `rules.nvim` in place
+of `.deps/rules.nvim`.
+
+A **private `rules.nvim`** (a fork) cannot be checked out with the token of the vault repository: give the `actions/checkout`
+step of `rules.nvim` a `token:` of your own (a personal access token with read access to that repository).
+
+To try the template against your real rulesets (copied, never changed), name their two folders and run the spec that
+runs the template's own steps; it arranges the copies as a vault (`rulesets/lua`, `rulesets/native`), expects all green,
+then repeats the run with one id made a second time and expects red:
+
+```bash
+RULES_REAL_LUA=~/WKDBooks/Development/wkdbook-Lua/Checklists RULES_REAL_NATIVE=~/WKDBooks/Development/wkdbook-native/Checklists \
+  scripts/test.sh --file vault_ci
+```
+
 ### `:checkhealth rules`
 
 Shows whether a project file and a vault file were loaded (and from where), every problem and warning, the vault, where
@@ -170,6 +200,7 @@ works without Neovim being configured:
 RULES_VAULT=~/rules-vault nvim --headless -u NONE -i NONE -n -l scripts/rules.lua call snapshot
 nvim --headless -u NONE -i NONE -n -l scripts/rules.lua list --format=json --vault=~/rules-vault --project=. --family=DEP
 nvim --headless -u NONE -i NONE -n -l scripts/ruleset.lua catalog --check @vault/lua   # or no folder: every ruleset
+nvim --headless -u NONE -i NONE -n -l scripts/ruleset.lua check --vault=~/rules-vault   # all rulesets load, no duplicate id
 ```
 
 | | |

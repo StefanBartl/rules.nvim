@@ -406,7 +406,9 @@ relative path below the ruleset; `./x`, `x/` and `x\y` mean `x`, `x` and `x/y`.
 An absolute name, a drive, a `.` or `..` part, or a character a Windows file name
 cannot hold is refused before anything is written. The script knows exactly
 `--write`, `--rules-dir` and `--layouts-dir` for `migrate`, and `--check` for
-`catalog`; an unknown flag, a typo (`--chek`), a value on a flag that takes none
+`catalog` (`scripts/ruleset.lua check`, which loads all rulesets together and
+exits 1 on any load error such as a duplicate id, takes only `--vault` and
+`--project`); an unknown flag, a typo (`--chek`), a value on a flag that takes none
 (`--write=true`, `catalog --check=1`) or no value on one that needs it is wrong
 usage: exit code 2, and nothing is done (a misspelt `--check` must not write the
 documents it was meant to check). A path that is not a folder is a problem (exit

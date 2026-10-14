@@ -100,7 +100,7 @@ name of the first ruleset is `default` unless given (letters, digits, `.`, `_`,
 | `.rules.json` | `{"rulesets": ["rulesets/<name>"], "gates": {}}`, paths relative to the file |
 | `.gitattributes` | `* text=auto eol=lf` |
 | `.gitignore` | editors, `.deps/` |
-| `.github/workflows/ci.yml` | from `templates/rules-vault-ci.yml` of this plugin: `catalog --check` per ruleset, every ruleset loads without errors, the round trip |
+| `.github/workflows/ci.yml` | from `templates/rules-vault-ci.yml` of this plugin: on Ubuntu and Windows: `.gitattributes` has `eol=lf`, `catalog --check` per ruleset, all rulesets load together without errors (`scripts/ruleset.lua check`: a duplicate id, an invalid severity), the round trip; see [CONFIG.md](CONFIG.md#the-ci-of-a-vault) |
 | `rulesets/<name>/_rules/.gitkeep`, `_layouts/.gitkeep` | the first ruleset (no placeholder in a folder that has files) |
 
 It **says first what happens and what is left to you** and asks (`No` is the
