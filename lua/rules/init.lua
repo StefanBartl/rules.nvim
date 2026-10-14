@@ -184,9 +184,12 @@ end
 --- layouts (`docs/RULESET-FORMAT.md`), or with `check` only say which are out of date (CI).
 --- Without `path` every directory in `setup({ rulesets })` is built. Headless/CI use: no
 --- notification, no quit -- `(results, errors, exit_code)`, the exit code is `1` when a document is
---- stale (check), a layout cannot be filled, or the ruleset has load errors.
+--- stale (check), a layout cannot be filled or has an output it must not write (a layout, a rule file,
+--- another layout's output, a place outside the ruleset, a file nobody generated), or the ruleset has
+--- load errors. `adopt` lets a layout replace an existing output that is not a generated document (a
+--- hand-written one); nothing else.
 ---@param path string|nil  a ruleset directory
----@param opts? { check?: boolean }
+---@param opts? Rules.CatalogOpts
 ---@return Rules.CatalogResult[] results
 ---@return string[] errors
 ---@return 0|1 exit_code

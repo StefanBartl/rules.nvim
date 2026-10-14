@@ -47,9 +47,10 @@ same as any Lua table literal.
 | `check` | no | see below — omit it entirely for a rule with no automated check |
 | `agent` | no | a hint for an agent working a rule that has no `check` — see below |
 
-A rule's **family** is its ID's leading letters (`"DEP"` for `"DEP-01"`) —
-there is no separate family field. `:Rules check --family=<PREFIX>` matches
-on this.
+A rule's **family** is its ID up to the first `-` when only letters come before
+it (`"DEP"` for `"DEP-01"`); an ID with anything else there (`DEP2-01`, `DEP01`)
+is a family of its own. A block has no separate family field.
+`:Rules check --family=<PREFIX>` matches on this.
 
 ## What the parser adds
 
@@ -195,16 +196,33 @@ for unchecked or mixed structures.
 
 The **frontmatter** (flat `key: value` lines) holds `id` and `severity`, the
 two things every rule has; they have one home. `family` is optional and, when
-given, must be the id's leading letters. Any other key is an error (a typo such
-as `severtiy` is not silently ignored). A file with an `id` or a `severity`
-in a frontmatter is a rule file; a file whose frontmatter has neither is an
-ordinary document.
+given, must be the rule's family as defined [above](#the-block-itself) (`DEP` for
+`DEP-06`, but `DEP2-01` for `DEP2-01`): it is what `:Rules check --family=`
+matches, so a frontmatter that says otherwise would promise a rule that the run
+never reaches, and is an error. Any other key is an error (a typo such as
+`severtiy` is not silently ignored), and so is a key written twice, a line that is
+no `key: value` and a NUL byte anywhere in the file. A file with an `id` or a
+`severity` in a frontmatter is a rule file; a file whose frontmatter has neither is
+an ordinary document. The opening `---` may carry trailing blanks, like the closing
+one. A frontmatter that starts with `id:` or `severity:` and is never closed, or is
+closed by a mistyped line (`----`, `--`), is an error as well, not a document that
+happens to start with a thematic break: a rule file with a fault is told, never
+skipped. Every one of these errors names the line it sits on.
+
+The **id** is also the file name (`<FAMILY>/<ID>.md`, which the migration builds
+from it), so in a rule file it is limited to letters, digits, `-`, `_` and `.`, at
+most 100 bytes, with no `..` and no `.` at its start or end. An id such as `A/B`,
+`A:1` or `..` is an error, not a path. Every id of the shipped rulesets (`DEP-06`,
+`LUA-01`) is well within it.
 
 **Under the frontmatter**, one blank line and then the rule as it reads: the
 heading that names it, the prose, a `---` that frames it. `title` and `text` are
 read from there exactly as for a document (`text` ends at the next heading;
 `section` is not set: which section a rule sits in is the layout's business).
-A heading or `#` line inside a fence is not a heading.
+With a block, the heading that names the rule is the nearest one above it; without
+one, the first. A heading or `#` line inside a fence is not a heading, and a block
+inside a longer fence (a ` ````markdown ` example) leaves that fence open for the
+text below it, as in a document.
 
 A ` ```rule ` **block** is only there when the rule says more than `id` and
 `severity`: a `check`, an `agent`, anything else a block may hold. Write it
@@ -224,8 +242,8 @@ If the block does repeat `id` or `severity`, they must agree with the
 frontmatter: a rule file that says `DEP-06` above and `DEP-07` below is an error
 for that file, there is no silent choice. The block is evaluated in the same
 empty environment as in a document, `agent` is validated the same way, and the
-same limits apply to the id (at most 100 bytes, no control character, and here
-also no `"` or `\`), so a rule means the same in either form. An *empty* block
+id has the same bound (at most 100 bytes, within the narrower set of characters
+above), so a rule means the same in either form. An *empty* block
 (` ```rule ` and ` ``` ` with nothing between) is valid: it marks where the
 block sits in the generated document when the rule file is written by hand with
 prose above it.
@@ -260,11 +278,22 @@ Introduction that belongs to this section.
 {{rule LUA-02}}
 ````
 
-`output` is the path of the document, relative to the ruleset folder, with `/`;
-it must stay inside it, name a `.md` file and not be a layout itself. The body
-is the document as it reads, and two kinds of **whole-line** tokens are
+`output` is the path of the document, relative to the ruleset folder, with `/`.
+It must name a `.md` file inside that folder, and it must be a name that is
+valid on every system: none of `\ : * ? " < > |`, no empty part (`a//b`), no part
+that ends in a space or a dot. It must stay inside the folder for real: a
+symlink or junction on the way that leads out of it is refused (a link that
+stays inside is fine), and nothing is created behind it. And it must not be a
+file the generator would destroy: a layout (itself or another), a rule file, a
+document with rules, or the `output` of another layout (the first layout, in
+path order, gets it; each other one is an error). A layout that breaks one of
+these gets the status `error`, nothing is written for it, and the exit code is 1.
+
+The body is the document as it reads, and two kinds of **whole-line** tokens are
 replaced; everything else (headings, introductions, separators, notes) is
-copied as written:
+copied as written. Whitespace after a token is ignored (editors leave it there);
+whitespace before it makes the line text. A `{{toc ...}}` line is at most 256
+bytes.
 
 | Token | Becomes |
 | --- | --- |
@@ -284,7 +313,7 @@ different ways, so the token has parameters (`{{toc max=2 base=0 unicode=1}}`):
 | `max` | 4 | deepest level listed (2 to 6) |
 | `base` | 2 | indentation, in spaces, of level 2 |
 | `step` | 2 | further indentation per level |
-| `unicode` | 0 | 1: the anchor keeps letters of every alphabet and turns every space into a hyphen (the renderers' way); 0: ASCII only, runs of spaces and hyphens become one hyphen |
+| `unicode` | 0 | 1: the anchor keeps the letters and digits of every alphabet, also those without case (`日本語`, `हिन्दी`, `١٢٣`), and turns every space into a hyphen (the renderers' way); punctuation, symbols and emoji go. 0: ASCII only, runs of spaces and hyphens become one hyphen |
 | `underscore` | 1 | 0: an anchor drops `_` (only with `unicode = 0`) |
 
 **The generated document** starts with one line,
@@ -292,6 +321,15 @@ different ways, so the token has parameters (`{{toc max=2 base=0 unicode=1}}`):
 skips a file that starts with it, so a document and the rule files it was made
 from never load as duplicates; a layout is skipped too. Edit the layout or the
 rule files and generate again.
+
+Only a generated document is ever replaced. If the `output` exists, is not empty
+and does not start with that line (a README, notes somebody wrote), the layout
+is an error (`exists and is not a generated document`), with `--check` as well,
+and the file stays as it is. Delete or move it to let the layout take its place.
+To replace it on purpose, call `require("rules").catalog(path, { adopt = true })`;
+that is the only thing `adopt` changes (a layout, a rule file or a document with
+rules is never replaced). The migration does not need it: it writes the
+generated document over the old one itself.
 
 ```vim
 :Rules catalog                 " every folder of setup({ rulesets })
@@ -330,14 +368,56 @@ nvim --headless -u NONE -i NONE -n -l scripts/ruleset.lua migrate --write <folde
 
 It never converts a document it cannot give back **byte for byte**. For each
 document it builds the rule files and the layout, renders them in memory and
-compares with the original text; any difference (a CRLF file, a block that does
-not start with the `id` and `severity` lines, a block with no heading above it,
-no blank line around the block, an id twice) makes it refuse that document and
-write nothing at all. The hand-kept table of contents is replaced by `{{toc}}`
+compares with the original text; any difference makes it refuse that document
+(with the line of the first difference) and write nothing at all. A document is
+refused for:
+
+* a CRLF file, or one that does not end with a newline;
+* a block that does not start with the `id` and `severity` lines, a block with no
+  heading above it, no blank line around the block, an id twice;
+* an id the rule file reader does not take (it becomes the file name: letters,
+  digits, `-`, `_` and `.` only, so an id cannot lead out of its folder);
+* a byte order mark or a frontmatter at the top: the `GENERATED` header has to
+  be line 1 and would push it down, so it would stop being one (two `---` lines
+  around prose are a thematic break and are fine);
+* a ` ```rule ` line inside another fenced block, such as an example in a
+  ` ````markdown ` fence: the loader reads it as a rule, the migration could not
+  place it, and it would be lost. A fence of four or more backticks that holds no
+  such line is one fence, as for the loader.
+
+A refused document is listed as `refused` and its problems are printed; nothing
+of it is converted. The hand-kept table of contents is replaced by `{{toc}}`
 with the parameters that give exactly those lines; if none do, the generated
-table differs, and the number of lines that change is printed. After writing, it
-generates the documents from the new files and checks that they are what it
-wrote. Run it on a clean git tree: the old documents are replaced by the
+table differs, and the number of lines that change is printed (a real line diff:
+a line that is new counts once, not once for every line after it).
+
+**Options.** `--rules-dir=D` and `--layouts-dir=D` name the folders for the rule
+files and the layouts (default `_rules` and `_layouts`). A name is written as a
+relative path below the ruleset; `./x`, `x/` and `x\y` mean `x`, `x` and `x/y`.
+An absolute name, a drive, a `.` or `..` part, or a character a Windows file name
+cannot hold is refused before anything is written. The script knows exactly
+`--write`, `--rules-dir` and `--layouts-dir` for `migrate`, and `--check` for
+`catalog`; an unknown flag, a typo (`--chek`), a value on a flag that takes none
+(`--write=true`, `catalog --check=1`) or no value on one that needs it is wrong
+usage: exit code 2, and nothing is done (a misspelt `--check` must not write the
+documents it was meant to check). A path that is not a folder is a problem (exit
+code 1), not an empty migration.
+
+**Writing.** With `--write` it first checks that every document can be replaced
+and that no target is there already, is the same file as another one (`A-1` and
+`a-1` are one on Windows and macOS) or lies outside the ruleset (a symlink or
+junction on the way is followed to see where the write would land). Then it
+writes the rule files and the layouts, and the documents last: until a document
+is replaced, its rules would load twice. After writing, it generates the
+documents from the new files and checks that each document it replaced is what
+the generator makes; a document that no layout the check reaches produces (a
+layout in a folder the walk skips, such as `.deps`) counts as not checked. If a
+write fails, or that check fails for a document it replaced, **everything the
+run wrote is taken back**: the new files and the folders made for them are
+removed, the replaced documents are put back, and the report says so. Fix the
+cause and run it again. Trouble elsewhere in the ruleset (another layout with
+an error, a rule file that does not load) is reported but is not the migration's
+to undo. Run it on a clean git tree: the old documents are replaced by the
 generated ones, and `git diff` shows the change.
 
 What stays: the text of every document apart from the blocks (introductions, the

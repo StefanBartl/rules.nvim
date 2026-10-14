@@ -1,12 +1,27 @@
 ---@module 'rules.engine.parser'
----@brief Extract fenced ```rule blocks from a Markdown file into rule tables.
+---@brief Extract rules from Markdown: a rule file (frontmatter, optional ```rule block) or a document of ```rule blocks.
 ---@description
---- The parser looks for exactly one marker: a fenced code block tagged
---- ` ```rule `. Everything else in the file — headings, prose, other fenced
---- blocks, old table-based rule text — is invisible to it on purpose. That is
---- what keeps a format migration incremental: a file half in the legacy table
---- format and half in the new fenced-block format parses correctly, picking up
---- only the entries that have actually been converted.
+--- A Markdown file is one of four things, told apart by `M.classify`: a
+--- catalog the generator wrote and a layout (both skipped), a **rule file**, or
+--- a **document** (the legacy shape).
+---
+--- A rule file starts with a `---` frontmatter holding `id` and `severity` and,
+--- optionally, `family`; any other key is an error. It yields exactly one rule.
+--- Its ` ```rule ` block is optional: it says only what the frontmatter cannot
+--- (a `check`, an `agent`) and may repeat `id`/`severity` only when they agree.
+--- `title` is the heading that names the rule and `text` the prose under the
+--- block (under the heading, when there is no block). `section` is never set:
+--- which section a rule sits in is the business of the layout. A rule file with
+--- a fault is told, never skipped silently: an unclosed frontmatter, a key it
+--- does not know, a bad id are errors.
+---
+--- A document has no such frontmatter. There the parser looks for exactly one
+--- marker: a fenced code block tagged ` ```rule `. Everything else in the file
+--- — headings, prose, other fenced blocks, old table-based rule text — is
+--- invisible to it on purpose. That is what keeps a format migration
+--- incremental: a file half in the legacy table format and half in the new
+--- fenced-block format parses correctly, picking up only the entries that have
+--- actually been converted.
 ---
 --- A block's content is a Lua table-constructor *body* (fields, not the
 --- surrounding braces). Fields need the usual Lua field separator (a comma
@@ -20,10 +35,11 @@
 --- itself. `text` is the prose under it, up to the next heading or rule block.
 --- `title` is the heading the rule sits under when that heading names the rule
 --- (`#### `DEP-01` — ...`, which is how every real ruleset is written), and
---- `section` is the heading above that -- what a catalog groups by. Headings
---- inside other fenced blocks (a shell comment in a ```bash example) are not
---- headings. These three belong to the parser: a block that sets a field of
---- the same name has it overwritten, like `source_file`.
+--- `section` is the heading above that -- what a catalog groups by (nil for a
+--- rule file). Headings inside other fenced blocks (a shell comment in a
+--- ```bash example) are not headings. These three belong to the parser: a
+--- block that sets a field of the same name has it overwritten, like
+--- `source_file`.
 
 local safe_error = require("lib.lua.error")
 local frontmatter = require("lib.nvim.markdown.frontmatter")
@@ -73,11 +89,64 @@ local MAX_QUESTION_BYTES = 4000
 local MAX_INCLUDE_ENTRIES = 50
 local MAX_GLOB_BYTES = 200
 
+--- What a rule file's `id` must be (`is_file_name`), for the message.
+local ID_FILE_NAME_MESSAGE = "rule `id` must be at most %d bytes of letters, digits, `-`, `_` and `.` "
+  .. "(not `..`, not at either end): it is the file name"
+
 --- A string with no content once whitespace is gone.
 ---@param s any
 ---@return boolean
 local function is_blank(s)
   return type(s) ~= "string" or s:match("^%s*$") ~= nil
+end
+
+--- Index of the last byte of `s` that is not whitespace (0 when there is none).
+--- Walks back from the end, so it is linear. The obvious `(.-)%s*$` retries the
+--- rest of a whitespace run from every byte inside it: 40 000 spaces in the
+--- middle of a heading cost seconds (lib.nvim's frontmatter names this SEC-32).
+---@param s string
+---@return integer
+local function last_non_space(s)
+  local i = #s
+  while i > 0 and s:find("^%s", i) do
+    i = i - 1
+  end
+  return i
+end
+
+--- The level and the text of a Markdown heading line, or nil when the line is
+--- none. The same reading as `^(#+)%s+(.-)%s*$`, without that pattern's
+--- quadratic retry inside a long whitespace run.
+---@param line string
+---@return integer|nil level  the number of `#`, which may exceed 6: the caller decides
+---@return string|nil text  without the `#` and the whitespace around the text
+local function heading_of(line)
+  local hashes, rest = line:match("^(#+)%s+(.*)$")
+  if not hashes then
+    return nil, nil
+  end
+  return #hashes, rest:sub(1, last_non_space(rest))
+end
+
+--- A value out of a rule file for use in a message: cut to the id bound and
+--- with control characters made visible, so a hostile file cannot forge log
+--- lines or terminal escapes through an error text.
+---@param value string
+---@return string
+local function shown(value)
+  local cut = value:sub(1, MAX_ID_BYTES):gsub("%c", "?")
+  return #value > MAX_ID_BYTES and cut .. "..." or cut
+end
+
+--- Whether an id is safe to be a file name: a rule file is `<FAMILY>/<ID>.md`
+--- (the migration builds that path from the id), so an id must not be able to
+--- leave its folder or name something else. Letters, digits, `-`, `_` and `.`
+--- only; no `..`, and no `.` at either end (a leading one hides the file,
+--- Windows drops a trailing one).
+---@param id string
+---@return boolean
+local function is_file_name(id)
+  return not id:find("[^A-Za-z0-9._-]") and not id:find("..", 1, true) and id:sub(1, 1) ~= "." and id:sub(-1) ~= "."
 end
 
 --- Check a block's optional `agent` field. A bad one is dropped, not fatal: the
@@ -167,21 +236,79 @@ end
 
 ---@alias Rules.FileKind "generated"|"layout"|"rule"|"legacy"
 
+--- A frontmatter delimiter: `---` and trailing blanks, for the opening line as
+--- for the closing one (the frontmatter module's own test).
+---@param line string
+---@return boolean
+local function is_delimiter(line)
+  return line:match("^%-%-%-[ \t]*$") ~= nil
+end
+
+--- The key of a frontmatter line `key: value`, nil when the line is none (the
+--- frontmatter module's reading).
+---@param line string
+---@return string|nil
+local function key_of(line)
+  local key, rest = line:match("^([%w_][%w_%.%-]*)[ \t]*:(.*)$")
+  if key and (rest == "" or rest:match("^[ \t]")) then
+    return key
+  end
+  return nil
+end
+
+--- A `---` that is never closed is a thematic break at the top of a document,
+--- unless it starts like a rule file's frontmatter: `id:` or `severity:` among
+--- the first lines (key lines, blanks and comments only) is a rule file whose
+--- closing `---` was forgotten or mistyped (`----`, `--`), and that is a fault
+--- to tell, not a document to skip.
+---@param lines string[]
+---@return integer|nil last  index of the line with the `id`/`severity` key, nil when this is no rule file
+local function unclosed_rule_head(lines)
+  for i = 2, #lines do
+    local line = lines[i]
+    local key = key_of(line)
+    if key == "id" or key == "severity" then
+      return i
+    elseif not key and not is_blank(line) and not line:match("^%s*#") then
+      return nil
+    end
+  end
+  return nil
+end
+
 --- What a Markdown file is, from its first lines: a reading document the
 --- catalog generator wrote (skipped), a layout (skipped), a rule file, or the
 --- legacy shape (rule blocks inside a document).
 ---@param lines string[]
 ---@return Rules.FileKind kind
----@return Lib.Markdown.Frontmatter.Parsed|nil parsed  set for "layout" and "rule"
+---@return Lib.Markdown.Frontmatter.Parsed|nil parsed  set for "layout" and "rule"; for an unclosed rule file `unterminated`
 function M.classify(lines)
   local first = (lines[1] or ""):gsub("^\239\187\191", "")
   if first:sub(1, #M.GENERATED_PREFIX) == M.GENERATED_PREFIX then
     return "generated", nil
   end
-  if first ~= "---" then
+  if not is_delimiter(first) then
     return "legacy", nil
   end
-  local parsed = frontmatter.parse(table.concat(lines, "\n"))
+
+  -- Parse only up to the closing `---`: what follows is none of the frontmatter's business, and a large document that
+  -- merely starts with a thematic break must not be read twice.
+  local close
+  for i = 2, #lines do
+    if is_delimiter(lines[i]) then
+      close = i
+      break
+    end
+  end
+  if not close then
+    local head = unclosed_rule_head(lines)
+    local unclosed = head and frontmatter.parse(table.concat(lines, "\n", 1, head))
+    if unclosed then
+      return "rule", unclosed
+    end
+    return "legacy", nil
+  end
+  local parsed = frontmatter.parse(table.concat(lines, "\n", 1, close))
   if not parsed or not parsed.has_block or parsed.prose then
     return "legacy", nil
   end
@@ -204,19 +331,27 @@ end
 ---@field family string|nil  the frontmatter's `family`, when it has one
 ---@field lines string[]  the body: everything after the frontmatter and the one blank line that follows it
 ---@field offset integer  file line number of `lines[1]`, minus one
----@field heading integer|nil  index in `lines` of the first heading outside a fence
----@field block {s: integer, e: integer}|nil  indexes in `lines` of the opening and closing fence of the ```rule block
+---@field heading integer|nil  index in `lines` of the heading that names the rule, outside a fence: the nearest above the
+---   ```rule block, or the first one when there is no block
+---@field block {s: integer, e: integer, fence: integer}|nil  indexes in `lines` of the opening and closing fence of the
+---   ```rule block, and the length of the fence it sits in (0 for none)
 
---- The family of an id: its leading letters.
+--- The family of a rule id, as `rules.engine.runner.family_of` defines it and
+--- `:Rules check --family=` and the gates match it: the leading letters when a
+--- `-` follows them (`DEP` for `DEP-06`), else the whole id (`DEP2-01` and
+--- `DEP01` are families of their own). A frontmatter `family` must say exactly
+--- this. The runner pulls in the checks, so the definition is repeated here;
+--- a spec holds the two together.
 ---@param id string
----@return string|nil
-local function family_of(id)
-  return id:match("^(%a+)")
+---@return string
+function M.family_of(id)
+  return id:match("^(%a+)%-") or id
 end
 
 --- Split one rule file into the parts the loader and the catalog generator
 --- both need. Checks the frontmatter (the keys, the id, the severity, the
---- family) and that there is at most one rule block.
+--- family) and that there is at most one rule block. Every fault names the
+--- file line it sits on.
 ---@param file_path string
 ---@param lines string[]
 ---@param parsed Lib.Markdown.Frontmatter.Parsed
@@ -228,29 +363,80 @@ local function split_rule_file(file_path, lines, parsed)
     errors[#errors + 1] = ("%s:%d: %s"):format(file_path, line, message)
   end
 
-  for _, key in ipairs(parsed.order) do
-    if not RULE_FILE_KEYS[key] then
-      fail(1, ("unknown frontmatter key `%s` (want id, severity, family)"):format(key))
+  -- `readfile` hands a NUL byte over as a newline inside the line: the lines of the file and those of the frontmatter
+  -- parser would no longer be the same lines, and the body would start in the wrong place
+  for i, line in ipairs(lines) do
+    if line:find("\n", 1, true) then
+      fail(i, "the file contains a NUL byte")
+      return nil, errors
     end
   end
-  for key, reason in pairs(parsed.opaque) do
-    fail(1, ("frontmatter key `%s` is not understood (%s)"):format(key, reason))
+  if parsed.unterminated then
+    fail(1, "frontmatter is not closed by a second `---` line")
+    return nil, errors
+  end
+
+  local key_line = {}
+  for _, entry in ipairs(parsed.entries) do
+    if entry.key then
+      key_line[entry.key] = entry.line
+    end
+  end
+  --- the file line of a key (its last one), 1 when the key is missing
+  local function line_of(key)
+    return key_line[key] or 1
+  end
+
+  for _, key in ipairs(parsed.order) do
+    if not RULE_FILE_KEYS[key] then
+      fail(line_of(key), ("unknown frontmatter key `%s` (want id, severity, family)"):format(key))
+    end
+  end
+  -- a duplicate or a line that is no `key: value` would be dropped silently by the frontmatter reader (the last
+  -- duplicate wins): there is no silent choice in a rule file
+  local seen = {}
+  for _, entry in ipairs(parsed.entries) do
+    if entry.key and entry.opaque then
+      fail(entry.line, ("frontmatter key `%s` is not understood (%s)"):format(entry.key, entry.opaque))
+    elseif entry.key then
+      if seen[entry.key] then
+        fail(entry.line, ("frontmatter key `%s` appears more than once"):format(entry.key))
+      end
+      seen[entry.key] = true
+    end
+  end
+  for _, warning in ipairs(parsed.warnings) do
+    local stray = warning:match("^line (%d+): not a `key: value` line")
+    if stray then
+      fail(tonumber(stray), "frontmatter line is not a `key: value` line")
+    end
   end
 
   local id, severity, family = parsed.meta.id, parsed.meta.severity, parsed.meta.family
+  -- a bad id stops here: it is not repeated in the messages below (it may be megabytes of control characters)
   if type(id) ~= "string" or id == "" then
-    fail(1, "rule file has no string `id` in its frontmatter")
-  elseif #id > MAX_ID_BYTES or id:find('[%c"\\]') then
-    fail(1, ("rule `id` must be at most %d bytes with no control characters, quote or backslash"):format(MAX_ID_BYTES))
+    fail(line_of("id"), "rule file has no string `id` in its frontmatter")
+    return nil, errors
+  elseif #id > MAX_ID_BYTES or not is_file_name(id) then
+    fail(line_of("id"), ID_FILE_NAME_MESSAGE:format(MAX_ID_BYTES))
+    return nil, errors
   end
   if type(severity) ~= "string" then
-    fail(1, ("rule %s has no string `severity` in its frontmatter"):format(tostring(id)))
+    fail(line_of("severity"), ("rule %s has no string `severity` in its frontmatter"):format(id))
   elseif not VALID_SEVERITIES[severity] then
-    fail(1, ("rule %s has invalid `severity` %q (want critical/recommended/nice-to-have)"):format(tostring(id), severity))
+    fail(
+      line_of("severity"),
+      ('rule %s has invalid `severity` "%s" (want critical/recommended/nice-to-have)'):format(id, shown(severity))
+    )
   end
   if family ~= nil then
-    if type(family) ~= "string" or type(id) ~= "string" or family ~= family_of(id) then
-      fail(1, ("rule %s: `family` %s does not match the id's leading letters"):format(tostring(id), tostring(family)))
+    if type(family) ~= "string" then
+      fail(line_of("family"), ("rule %s: `family` must be a string"):format(id))
+    elseif family ~= M.family_of(id) then
+      fail(
+        line_of("family"),
+        ("rule %s: `family` %s does not match the id's family %s"):format(id, shown(family), M.family_of(id))
+      )
     end
   end
   if #errors > 0 then
@@ -275,9 +461,10 @@ local function split_rule_file(file_path, lines, parsed)
     offset = body_from - 1,
   }
 
-  -- the first heading above the rule block (outside a fence), and the (one) rule block; like the legacy scanner,
-  -- the block is found by its opening line whatever fence is open
+  -- the headings above the rule block (outside a fence), and the (one) rule block; like the legacy scanner, the block
+  -- is found by its opening line whatever fence is open, and the fence it sits in is kept for the prose scan below it
   local fence = 0
+  local first_heading, last_heading
   for i, line in ipairs(body) do
     if line:match("^```rule%s*$") then
       local close
@@ -288,7 +475,7 @@ local function split_rule_file(file_path, lines, parsed)
         end
       end
       if close then
-        rule_file.block = { s = i, e = close }
+        rule_file.block = { s = i, e = close, fence = fence }
         for j = close + 1, #body do
           if body[j]:match("^```rule%s*$") then
             fail(rule_file.offset + j, ("rule file for %s has more than one ```rule block"):format(id))
@@ -306,10 +493,13 @@ local function split_rule_file(file_path, lines, parsed)
       end
     elseif line:match("^```") then
       fence = #line:match("^(`+)")
-    elseif not rule_file.heading and line:match("^#+%s+%S") then
-      rule_file.heading = i
+    elseif line:match("^#+%s+%S") then
+      first_heading = first_heading or i
+      last_heading = i
     end
   end
+  -- with a block the rule sits under the nearest heading above it (as in a document); without one, under the first
+  rule_file.heading = rule_file.block and last_heading or first_heading
   if #errors > 0 then
     return nil, errors
   end
@@ -422,7 +612,7 @@ local function rule_from_file(file_path, rule_file)
   -- title: the heading that names the rule; section belongs to the layout
   rule.title = nil
   if rule_file.heading then
-    local heading = rule_file.lines[rule_file.heading]:match("^#+%s+(.-)%s*$")
+    local _, heading = heading_of(rule_file.lines[rule_file.heading])
     if heading and heading:find(rule.id, 1, true) then
       rule.title = heading
     end
@@ -433,7 +623,8 @@ local function rule_from_file(file_path, rule_file)
   -- blank lines), up to the next heading outside a fence
   local from = block and (block.e + 1) or (M.implicit_split(rule_file) + 1)
   local text_lines = {}
-  local fence = 0
+  -- a block inside a longer fence (a ````markdown example) leaves that fence open: its closing line is not an opening one
+  local fence = block and block.fence or 0
   for i = from, #rule_file.lines do
     local line = rule_file.lines[i]
     if fence > 0 then
@@ -445,7 +636,7 @@ local function rule_from_file(file_path, rule_file)
     elseif line:match("^```") then
       fence = #line:match("^(`+)")
       text_lines[#text_lines + 1] = line
-    elseif line:match("^(#+)%s+(.-)%s*$") and #line:match("^(#+)") <= 6 then
+    elseif (heading_of(line) or 7) <= 6 then
       break
     else
       text_lines[#text_lines + 1] = line
@@ -540,13 +731,13 @@ function M.extract_rules(file_path)
         fence = #line:match("^(`+)")
         text_lines[#text_lines + 1] = line
       else
-        local hashes, title = line:match("^(#+)%s+(.-)%s*$")
-        if hashes and #hashes <= 6 then
+        local level, title = heading_of(line)
+        if level and level <= 6 then
           finish_text()
-          while #stack > 0 and stack[#stack].level >= #hashes do
+          while #stack > 0 and stack[#stack].level >= level do
             stack[#stack] = nil
           end
-          stack[#stack + 1] = { level = #hashes, text = title }
+          stack[#stack + 1] = { level = level, text = title }
         else
           text_lines[#text_lines + 1] = line
         end

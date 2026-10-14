@@ -8,10 +8,12 @@
 -- migrate   turns the documents with ```rule blocks into one file per rule plus layouts. Without --write it
 --           only converts in memory and says what it would do and whether the result reads back byte for
 --           byte (apart from the table of contents, which is counted). With --write it writes the files and
---           proves on disk that the documents the generator makes are the ones written. Run it on a clean
---           git tree: the old documents are replaced by the generated ones.
+--           proves on disk that the documents the generator makes are the ones written; if a write or that
+--           proof fails, everything the run wrote is taken back. Run it on a clean git tree: the old
+--           documents are replaced by the generated ones.
 --
--- Exit code: 0 done / up to date, 1 a document is stale or a problem was found, 2 wrong usage or no lib.nvim.
+-- Exit code: 0 done / up to date, 1 a document is stale or a problem was found, 2 wrong usage (an unknown flag,
+-- a flag with a value it does not take, a missing value) or no lib.nvim.
 -- lib.nvim is found through $LIB_NVIM_DIR, $LIB_NVIM_PATH, $REPOS_DIR/lib.nvim, .deps/lib.nvim, a sibling
 -- checkout, then lazy.nvim's data folder.
 
@@ -58,17 +60,36 @@ local function usage()
   os.exit(2)
 end
 
+--- The flags each command knows: "bool" takes no value, "value" needs one. Anything else is wrong usage: a typo such as
+--- `--chek` must not run the command without the flag (that would write the documents `--check` is there to check).
+local FLAGS = {
+  catalog = { check = "bool" },
+  migrate = { write = "bool", ["rules-dir"] = "value", ["layouts-dir"] = "value" },
+}
+
 local command = arg[1]
+local known = FLAGS[command]
+if not known then
+  usage()
+end
 local flags, positional = {}, {}
 for i = 2, #arg do
-  local key, value = arg[i]:match("^%-%-([%w%-]+)=?(.*)$")
-  if key then
-    flags[key] = value ~= "" and value or true
+  local a = arg[i]
+  if a:sub(1, 2) == "--" then
+    local key, value = a:match("^%-%-([^=]+)=(.*)$")
+    if not key then
+      key = a:match("^%-%-([^=]+)$")
+    end
+    local kind = key and known[key]
+    if not kind or (kind == "bool" and value ~= nil) or (kind == "value" and (value == nil or value == "")) then
+      usage()
+    end
+    flags[key] = value or true
   else
-    positional[#positional + 1] = arg[i]
+    positional[#positional + 1] = a
   end
 end
-if (command ~= "catalog" and command ~= "migrate") or #positional ~= 1 then
+if #positional ~= 1 then
   usage()
 end
 local root = positional[1]
@@ -109,14 +130,18 @@ local report = migrate.run(root, {
 local rules = 0
 for _, c in ipairs(report.conversions) do
   rules = rules + #c.rule_files
-  io.stdout:write(
-    ("%-40s rules=%3d  table of contents: %s%s\n"):format(
-      c.output,
-      #c.rule_files,
-      c.toc,
-      c.toc == "differs" and (" (%d lines change)"):format(c.toc_lines_changed) or ""
+  if #c.problems > 0 then
+    io.stdout:write(("%-40s refused (see the problems below)\n"):format(c.output))
+  else
+    io.stdout:write(
+      ("%-40s rules=%3d  table of contents: %s%s\n"):format(
+        c.output,
+        #c.rule_files,
+        c.toc,
+        c.toc == "differs" and (" (%d lines change)"):format(c.toc_lines_changed) or ""
+      )
     )
-  )
+  end
 end
 io.stdout:write(
   ("%d document(s), %d rule(s)%s\n"):format(
@@ -127,5 +152,8 @@ io.stdout:write(
 )
 for _, problem in ipairs(report.problems) do
   io.stdout:write("problem: " .. problem .. "\n")
+end
+if report.rolled_back then
+  io.stdout:write("everything this run wrote was taken back; fix the cause and run it again\n")
 end
 os.exit(#report.problems > 0 and 1 or 0)
