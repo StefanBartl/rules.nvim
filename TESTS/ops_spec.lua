@@ -612,6 +612,128 @@ describe("rules-ops/1 retire, reinstate, move", function()
   end)
 end)
 
+describe("rules-ops/1 the inverse of retire and move, several layouts", function()
+  -- DEP-02 stands in three layouts: after DEP-01 (DEP), above every heading with nothing above it (TOP) and after
+  -- DEP-01 again (MORE, where DEP-01 is held by DEP as well)
+  local LAYOUT_TOP = table.concat({
+    "---",
+    "kind: layout",
+    "output: regeln/TOP.md",
+    "---",
+    "{{rule DEP-02}}",
+    "{{rule DEP-03}}",
+    "",
+    "# Heading",
+    "",
+  }, "\n")
+  local LAYOUT_MORE = table.concat({
+    "---",
+    "kind: layout",
+    "output: regeln/MORE.md",
+    "---",
+    "# More",
+    "",
+    "{{rule DEP-01}}",
+    "{{rule DEP-02}}",
+    "",
+  }, "\n")
+
+  it("puts a retired rule back into every layout that held it, byte for byte, also from above every heading", function()
+    local root, opts = fixture()
+    write_raw(root .. "/_layouts/regeln/TOP.md", LAYOUT_TOP)
+    write_raw(root .. "/_layouts/regeln/MORE.md", LAYOUT_MORE)
+    local layouts = {
+      root .. "/_layouts/regeln/DEP.md",
+      root .. "/_layouts/regeln/TOP.md",
+      root .. "/_layouts/regeln/MORE.md",
+    }
+    local before = { [root .. "/_rules/DEP/DEP-02.md"] = read_raw(root .. "/_rules/DEP/DEP-02.md") }
+    for _, file in ipairs(layouts) do
+      before[file] = read_raw(file)
+    end
+
+    local entry = one(opts, { op = "retire", id = "DEP-02" })
+    assert.is_true(entry.ok, vim.inspect(entry))
+    for _, file in ipairs(layouts) do
+      assert.is_false(layout_edit.has(read_raw(file), "DEP-02"), file)
+    end
+
+    -- the inverse as a client gets it: through JSON
+    local inverse = vim.json.decode(require("lib.nvim.json.canonical").encode(entry.inverse))
+    local outputs = vim.tbl_keys(inverse.places)
+    table.sort(outputs)
+    assert.are.same({ "regeln/DEP.md", "regeln/MORE.md", "regeln/TOP.md" }, outputs)
+    assert.is_true(inverse.places["regeln/TOP.md"].top)
+
+    local back = one(opts, inverse)
+    assert.is_true(back.ok, vim.inspect(back))
+    assert.are.equal("reinstated", back.outcome)
+    assert.are.same({ "regeln/DEP.md", "regeln/MORE.md", "regeln/TOP.md" }, back.placed.layouts)
+    for file, bytes in pairs(before) do
+      assert.are.equal(bytes, read_raw(file), file)
+    end
+    assert.is_nil(read_raw(root .. "/_retired/DEP/DEP-02.md"))
+  end)
+
+  it("gives the inverse of a move a place for a rule that stands above every heading", function()
+    local root, opts = fixture()
+    local layout = root .. "/_layouts/regeln/ERR.md"
+    local top = "---\nkind: layout\noutput: regeln/ERR.md\n---\n{{rule ERR-01}}\n# Errors\n"
+    write_raw(layout, top)
+    local entry = one(opts, { op = "move", id = "ERR-01", after = "DEP-01" })
+    assert.is_true(entry.ok, vim.inspect(entry))
+    assert.is_false(layout_edit.has(read_raw(layout), "ERR-01"))
+    assert.is_truthy(entry.inverse, "a rule above every heading has an inverse")
+    local back = one(opts, entry.inverse)
+    assert.is_true(back.ok, vim.inspect(back))
+    assert.are.equal(top, read_raw(layout))
+    assert.are.equal(LAYOUT_DEP, read_raw(root .. "/_layouts/regeln/DEP.md"))
+  end)
+
+  it("refuses places that are not a clear list of places, and writes nothing", function()
+    local root, opts = fixture()
+    assert.is_true(one(opts, { op = "retire", id = "DEP-02" }).ok)
+    local retired = read_raw(root .. "/_retired/DEP/DEP-02.md")
+    local layout = read_raw(root .. "/_layouts/regeln/DEP.md")
+    for _, op in ipairs({
+      { op = "reinstate", id = "DEP-02", after = "DEP-01", places = { ["regeln/DEP.md"] = { after = "DEP-01" } } },
+      { op = "reinstate", id = "DEP-02", places = { ["regeln/DEP.md"] = { frobnicate = true } } },
+      { op = "reinstate", id = "DEP-02", places = { ["regeln/DEP.md"] = { after = "DEP-01", top = true } } },
+      { op = "reinstate", id = "DEP-02", places = { ["regeln/DEP.md"] = {} } },
+      { op = "reinstate", id = "DEP-02", places = { ["regeln/NOPE.md"] = { top = true } } },
+    }) do
+      for _, extra in ipairs({ {}, { dry_run = true } }) do
+        local entry = one(opts, op, extra)
+        assert.is_false(entry.ok, vim.inspect(op))
+        assert.are.equal("invalid_argument", entry.error.code, vim.inspect(entry))
+      end
+      assert.are.equal(retired, read_raw(root .. "/_retired/DEP/DEP-02.md"))
+      assert.are.equal(layout, read_raw(root .. "/_layouts/regeln/DEP.md"))
+      assert.is_nil(read_raw(root .. "/_rules/DEP/DEP-02.md"))
+    end
+  end)
+end)
+
+describe("rules-ops/1 the documents after a request", function()
+  it("tells each entry the catalog of its own ruleset", function()
+    local root, opts = fixture()
+    local second = tmp_dir() .. "/other/Second"
+    write_raw(second .. "/_rules/FOO/FOO-01.md", rule_file("FOO-01", "recommended", "foo", { "Foo text." }))
+    write_raw(second .. "/_layouts/regeln/FOO.md", "---\nkind: layout\noutput: regeln/FOO.md\n---\n# Foo\n\n{{rule FOO-01}}\n")
+    opts.rulesets = { root, second }
+    local doc = run(opts, {
+      { op = "set", id = "DEP-01", patch = { severity = "critical" } },
+      { op = "set", id = "FOO-01", patch = { severity = "critical" } },
+    })
+    assert.is_true(doc.ok, vim.inspect(doc))
+    -- the first ruleset makes two documents (DEP and ERR), the second one
+    assert.are.same({ written = 2, errors = 0 }, doc.results[1].catalog)
+    assert.are.same({ written = 1, errors = 0 }, doc.results[2].catalog)
+    assert.is_truthy(read_raw(root .. "/regeln/DEP.md"))
+    assert.is_truthy(read_raw(second .. "/regeln/FOO.md"))
+  end)
+end)
+
 describe("rules-ops/1 the whole request", function()
   it("refuses a malformed request as a whole, before anything runs", function()
     local root, opts = fixture()
@@ -720,5 +842,23 @@ describe("rules-ops/1 a step back", function()
     assert.are.equal("rollback_incomplete", entry.error.code)
     assert.is_truthy(entry.error.message:find("DEP.md", 1, true))
     assert.are.equal(1, #entry.error.details.not_restored)
+  end)
+
+  it("makes the documents again when the step back failed, the layouts are half changed then", function()
+    local root, opts = fixture()
+    write_raw(root .. "/_layouts/regeln/EXTRA.md", "---\nkind: layout\noutput: regeln/EXTRA.md\n---\n{{rule DEP-02}}\n")
+    local ops = ops_with_failing_write(function(path, nth)
+      if path:find("EXTRA.md", 1, true) then
+        return true
+      end
+      return path:find("regeln/DEP.md", 1, true) ~= nil and nth >= 2
+    end)
+    local doc = assert(ops.run({ ops = { { op = "retire", id = "DEP-02" } } }, opts))
+    assert.are.equal("rollback_incomplete", doc.results[1].error.code)
+    -- the layout of DEP lost the token and stays so: its document says what the layout says
+    assert.is_false(layout_edit.has(read_raw(root .. "/_layouts/regeln/DEP.md"), "DEP-02"))
+    local made = read_raw(root .. "/regeln/DEP.md")
+    assert.is_truthy(made, "the document of the half changed layout was made again")
+    assert.is_nil(made:find("DEP-02", 1, true))
   end)
 end)

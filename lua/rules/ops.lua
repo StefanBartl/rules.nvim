@@ -15,8 +15,9 @@
 ---    `conflict` with `expected` and `actual`. `null` in `check`/`agent` removes it. `inverse`: `set` back.
 ---  - `retire` { id, replaced_by?, reason?, if_match? } moves the file to `<ruleset>/_retired/<FAMILY>/<ID>.md`
 ---    (the loader does not read that folder, the id stays taken) and takes its place in the layouts out.
----    `inverse`: `reinstate`.
----  - `reinstate` { id, place? } brings a retired rule back, to where it came from. `inverse`: `retire`.
+---    `inverse`: `reinstate` with `places` (every layout that held the rule).
+---  - `reinstate` { id, place? | places? } brings a retired rule back, to where it came from. `places` is
+---    `{ [layout output] = place }`. `inverse`: `retire`.
 ---  - `move` { id, after? | before? | (layout, section, first?) } moves the `{{rule ID}}` line of a rule, within a
 ---    layout or to another one; the rule's file is not touched. `inverse`: `move` back.
 ---
@@ -58,7 +59,8 @@ M.FAMILY_MAX = 12
 ---@field names table<string, string>
 ---@field opts Rules.Contract.Opts
 ---@field dry boolean
----@field touched table<string, true>   rulesets whose documents have to be made again
+---@field touched table<string, true>   rulesets whose documents have to be made again (marked before a write starts)
+---@field owner table<table, string>     result entry -> the ruleset it changed
 
 local door
 
@@ -256,6 +258,17 @@ local function locked(ctx, root, fn)
   return entry
 end
 
+---The documents of a ruleset have to be made again: called BEFORE the first write of an operation (a step back that
+---fails leaves files half changed), with the entry that will tell the result so `finish` gives it its own ruleset's
+---catalog.
+---@param ctx Rules.OpsCtx
+---@param root string
+---@param entry table
+local function touch(ctx, root, entry)
+  ctx.touched[root] = true
+  ctx.owner[entry] = root
+end
+
 ---A scan that sees what an operation before it wrote.
 ---@param ctx Rules.OpsCtx
 ---@return Rules.Contract.View|nil view
@@ -299,12 +312,21 @@ local function check_one_line(text, what)
   return nil
 end
 
+local PLACE_FIELDS = {
+  after = "string",
+  before = "string",
+  section = "string",
+  layout = "string",
+  first = "boolean",
+  top = "boolean",
+}
+
 ---The place of a placement request: where in which layout.
 ---@param op table
----@return table|nil where   { after?, before?, section?, first?, layout? }
+---@return table|nil where   { after?, before?, section?, first?, layout?, top? }
 ---@return string|nil why
 local function placement(op)
-  local n = (op.after and 1 or 0) + (op.before and 1 or 0) + (op.section and 1 or 0)
+  local n = (op.after and 1 or 0) + (op.before and 1 or 0) + (op.section and 1 or 0) + (op.top and 1 or 0)
   if n == 0 then
     if op.layout ~= nil or op.first ~= nil then
       return nil, "layout and first need a section"
@@ -312,15 +334,58 @@ local function placement(op)
     return nil, nil
   end
   if n > 1 then
-    return nil, "give one place: after, before or section"
+    return nil, "give one place: after, before, section or top"
   end
-  if op.section and not op.layout then
-    return nil, "section needs the layout (its output path) that holds it"
+  if (op.section or op.top) and not op.layout then
+    return nil, "section and top need the layout (its output path) that holds them"
   end
-  if (op.after or op.before) and (op.first ~= nil) then
+  if (op.after or op.before or op.top) and (op.first ~= nil) then
     return nil, "first goes with a section"
   end
-  return { after = op.after, before = op.before, section = op.section, first = op.first, layout = op.layout }, nil
+  return {
+    after = op.after,
+    before = op.before,
+    section = op.section,
+    first = op.first,
+    layout = op.layout,
+    top = op.top,
+  },
+    nil
+end
+
+---The places of a reinstate: one given as fields, or `places` = `{ [layout output] = { after | before | section,
+---first? | top } }` (what `retire` answers: every layout that held the rule).
+---@param op table
+---@return table[]|nil wheres   in the order of the layouts' outputs
+---@return string|nil why
+local function placements(op)
+  if op.places == nil then
+    local where, why = placement(op)
+    return where and { where } or {}, why
+  end
+  if op.after or op.before or op.section or op.layout ~= nil or op.first ~= nil or op.top ~= nil then
+    return nil, "places goes alone, without after, before, section, layout, first or top"
+  end
+  local outputs = vim.tbl_keys(op.places)
+  table.sort(outputs)
+  local out = {}
+  for _, output in ipairs(outputs) do
+    local one = op.places[output]
+    if type(one) ~= "table" then
+      return nil, "every entry of places must be an object"
+    end
+    for key, value in pairs(one) do
+      if not (PLACE_FIELDS[key] and key ~= "layout" and type(value) == PLACE_FIELDS[key] and (key ~= "top" or value == true)) then
+        return nil, "an entry of places has after, before, section, first or top, not " .. tostring(key):sub(1, 40)
+      end
+    end
+    local where, why = placement(vim.tbl_extend("force", one, { layout = output }))
+    if not where then
+      return nil, why or "an entry of places needs a place"
+    end
+    out[#out + 1] = where
+  end
+  return out, nil
 end
 
 ---Put the token of `id` in the layouts at `where`. Changes `tx`, returns the output of the layout.
@@ -337,7 +402,8 @@ local function place_in_layout(ctx, tx, root, id, where)
   if where.after or where.before then
     local anchor = where.after or where.before
     for _, layout in ipairs(all) do
-      if layout_edit.has(layout.text, anchor) then
+      -- a rule held in several layouts is the anchor of each: the layout that is named is the one
+      if (where.layout == nil or layout.output == where.layout) and layout_edit.has(layout.text, anchor) then
         target = layout
         break
       end
@@ -369,8 +435,33 @@ local function place_in_layout(ctx, tx, root, id, where)
   return target.output, nil
 end
 
+---Put the token of the rule of `op` at every place of `wheres`. The answer is `{ layout }` for one place given as
+---fields, `{ layouts }` for `places`, `nil` for none; a refusal is the second value.
+---@param ctx Rules.OpsCtx
+---@param tx Rules.Tx
+---@param root string
+---@param op table
+---@param wheres table[]
+---@return table|nil placed
+---@return string|nil why
+local function place_all(ctx, tx, root, op, wheres)
+  local outs = {}
+  for _, where in ipairs(wheres) do
+    local out, why = place_in_layout(ctx, tx, root, op.id, where)
+    if not out then
+      return nil, tostring(why)
+    end
+    outs[#outs + 1] = out
+  end
+  if #outs == 0 then
+    return nil, nil
+  end
+  return json.object(op.places ~= nil and { layouts = json.array(outs) } or { layout = outs[1] }), nil
+end
+
 ---Where the token of `id` stands now, as a `place` that brings it back: `{ layout, after }`, `{ layout, before }` or
----`{ layout, section, first }`; `nil` when it cannot be described.
+---`{ layout, section, first }` or `{ layout, top }` (above every heading, nothing above it); `nil` when the layout
+---does not hold it.
 ---@param layout Rules.Layout
 ---@param id string
 ---@return table|nil
@@ -384,7 +475,7 @@ local function old_place(layout, id)
   elseif at.section then
     return { layout = layout.output, section = at.section, first = true }
   end
-  return nil
+  return { layout = layout.output, top = true }
 end
 
 ---The rule file of an id and what is known of it.
@@ -511,6 +602,7 @@ local function do_new(op, ctx)
     end
     local path = ("%s/_rules/%s/%s.md"):format(root, op.family, id)
     local tx = new_tx()
+    touch(ctx, root, entry)
     local ok, err = create_exclusive(path, text)
     if not ok then
       return fail(ctx, err == "exists" and errors.fail("conflict", ("the file of %s exists already"):format(id)) or err)
@@ -527,7 +619,6 @@ local function do_new(op, ctx)
       end
       entry.placed = json.object({ layout = out })
     end
-    ctx.touched[root] = true
     contract.clear_cache()
     entry.outcome = "created"
     entry.changed_ids = { id }
@@ -654,11 +745,11 @@ local function do_set(op, ctx)
       entry.diff = json.object({ before = before_bytes, after = new_text })
       return entry
     end
+    touch(ctx, root, entry)
     local ok, err = write_atomic(path, new_text)
     if not ok then
       return fail(ctx, errors.fail("io", tostring(err)))
     end
-    ctx.touched[root] = true
     contract.clear_cache()
     entry.outcome = "changed"
     entry.etag_after = etag.of(new_text)
@@ -772,14 +863,18 @@ local function do_retire(op, ctx)
       return entry
     end
     local tx = new_tx()
+    touch(ctx, root, entry)
     local ok, err = create_exclusive(target, retired_text)
     if not ok then
       return fail(ctx, err == "exists" and errors.fail("conflict", ("%s is retired already"):format(op.id)) or err)
     end
     tx.created[#tx.created + 1] = target
-    local place
+    -- where the rule stood in every layout that held it: `reinstate` puts it back into each of them
+    local places = {}
     for _, layout in ipairs(held) do
-      place = place or old_place(layout, op.id)
+      local one = old_place(layout, op.id) or {}
+      one.layout = nil
+      places[layout.output] = json.object(one)
       local new_text, why = layout_edit.remove(layout.text, op.id)
       if not new_text then
         return stopped(ctx, tx, tostring(why))
@@ -795,17 +890,13 @@ local function do_retire(op, ctx)
       tx.deleted[path] = nil
       return stopped(ctx, tx, "the file of the rule could not be removed: " .. tostring(rerr))
     end
-    ctx.touched[root] = true
     contract.clear_cache()
     entry.outcome = "retired"
     entry.changed_ids = { op.id }
     entry.inverse = json.object({
       op = "reinstate",
       id = op.id,
-      layout = place and place.layout or nil,
-      after = place and place.after or nil,
-      section = place and place.section or nil,
-      first = place and place.first or nil,
+      places = next(places) and json.object(places) or nil,
     })
     return entry
   end)
@@ -818,8 +909,8 @@ local function do_reinstate(op, ctx)
   if op.id == nil then
     return refuse("invalid_argument", "reinstate needs id")
   end
-  local where, wwhy = placement(op)
-  if wwhy then
+  local wheres, wwhy = placements(op)
+  if wwhy or not wheres then
     return refuse("invalid_argument", wwhy)
   end
   local view0, bad0 = fresh(ctx)
@@ -900,39 +991,35 @@ local function do_reinstate(op, ctx)
         return fail(ctx, errors.fail("conflict", "a file is where the rule would go back to"))
       end
       entry.outcome = "would_reinstate"
-      if where then
-        local out, pwhy = place_in_layout(ctx, new_tx(), root, op.id, where)
-        if not out then
-          return refuse("invalid_argument", tostring(pwhy))
-        end
-        entry.placed = json.object({ layout = out })
+      local placed, pwhy = place_all(ctx, new_tx(), root, op, wheres)
+      if pwhy then
+        return refuse("invalid_argument", pwhy)
       end
+      entry.placed = placed
       return entry
     end
     local tx = new_tx()
+    touch(ctx, root, entry)
     local ok, err = create_exclusive(target, text)
     if not ok then
       return fail(ctx, err == "exists" and errors.fail("conflict", "a file is where the rule would go back to") or err)
     end
     tx.created[#tx.created + 1] = target
-    if where then
-      local out, pwhy = place_in_layout(ctx, tx, root, op.id, where)
-      if not out then
-        local stop = stopped(ctx, tx, tostring(pwhy))
-        if stop.error.code == "io" then
-          stop.error.code = "invalid_argument"
-        end
-        return stop
+    local placed, pwhy = place_all(ctx, tx, root, op, wheres)
+    if pwhy then
+      local stop = stopped(ctx, tx, pwhy)
+      if stop.error.code == "io" then
+        stop.error.code = "invalid_argument"
       end
-      entry.placed = json.object({ layout = out })
+      return stop
     end
+    entry.placed = placed
     tx.deleted[source] = bytes
     local removed, rerr = os.remove(source)
     if not removed then
       tx.deleted[source] = nil
       return stopped(ctx, tx, "the retired file could not be removed: " .. tostring(rerr))
     end
-    ctx.touched[root] = true
     contract.clear_cache()
     entry.outcome = "reinstated"
     entry.changed_ids = { op.id }
@@ -997,7 +1084,7 @@ local function do_move(op, ctx)
       local anchor = where.after or where.before
       for _, layout in ipairs(all) do
         local text = (home and layout.path == home.path) and source_text or layout.text
-        if layout_edit.has(text, anchor) then
+        if (where.layout == nil or layout.output == where.layout) and layout_edit.has(text, anchor) then
           target = layout
           break
         end
@@ -1029,6 +1116,7 @@ local function do_move(op, ctx)
       entry.outcome = "would_move"
       return entry
     end
+    touch(ctx, root, entry)
     if home and target.path ~= home.path then
       local ok, err = write_in(tx, home.path, source_text)
       if not ok then
@@ -1039,7 +1127,6 @@ local function do_move(op, ctx)
     if not ok then
       return stopped(ctx, tx, tostring(err))
     end
-    ctx.touched[root] = true
     contract.clear_cache()
     entry.outcome = "moved"
     entry.changed_ids = { op.id }
@@ -1052,6 +1139,7 @@ local function do_move(op, ctx)
         after = old.after,
         section = old.section,
         first = old.first,
+        top = old.top,
       })
     end
     return entry
@@ -1059,14 +1147,6 @@ local function do_move(op, ctx)
 end
 
 -- ── the door ────────────────────────────────────────────────────────────────────
-
-local PLACE_FIELDS = {
-  after = "string",
-  before = "string",
-  section = "string",
-  layout = "string",
-  first = "boolean",
-}
 
 ---@param ... table
 ---@return table
@@ -1105,7 +1185,7 @@ door = ops_lib.make({
       run = do_retire,
     },
     reinstate = {
-      fields = fields(PLACE_FIELDS, { id = "string" }),
+      fields = fields(PLACE_FIELDS, { id = "string", places = "object" }),
       run = do_reinstate,
     },
     move = {
@@ -1125,6 +1205,7 @@ door = ops_lib.make({
       opts = { rulesets = opts and opts.rulesets, gates = opts and opts.gates },
       dry = params.dry_run == true,
       touched = {},
+      owner = {},
       today = (opts and opts.today) or os.date("%Y-%m-%d"),
     }
   end,
@@ -1135,6 +1216,7 @@ door = ops_lib.make({
     local roots = vim.tbl_keys(ctx.touched)
     table.sort(roots)
     local by_root = {}
+    -- every ruleset that had a write attempted, also one whose step back failed (the files are half changed)
     for _, root in ipairs(roots) do
       local built, problems = catalog.build(root)
       local summary = { written = 0, errors = #problems }
@@ -1149,12 +1231,9 @@ door = ops_lib.make({
     end
     contract.clear_cache()
     for _, entry in ipairs(results) do
-      if entry.ok and entry.changed_ids and #entry.changed_ids > 0 then
-        local any = next(by_root)
-        if any then
-          local summary = by_root[any]
-          entry.catalog = json.object({ written = summary.written, errors = summary.errors })
-        end
+      local summary = by_root[ctx.owner[entry]]
+      if summary and entry.ok and entry.changed_ids and #entry.changed_ids > 0 then
+        entry.catalog = json.object({ written = summary.written, errors = summary.errors })
       end
     end
   end,

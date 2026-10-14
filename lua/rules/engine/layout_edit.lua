@@ -7,7 +7,8 @@
 ---
 --- A place is `{ after = ID }`, `{ before = ID }` (a rule that already stands in the layout) or
 --- `{ section = "heading text", first? = true }` (the end of that section, or its start): a section is a heading
---- up to the next heading of the same or a higher level.
+--- up to the next heading of the same or a higher level. `{ top = true }` is the start of the layout: before the
+--- first rule that stands above every heading, else right under the frontmatter.
 ---
 --- Not its job: finding the layouts of a ruleset (`rules.ops`), writing files, regenerating the documents.
 
@@ -176,10 +177,34 @@ local function section_slot(lines, name, first)
   return slot
 end
 
+---The line before which a token goes at the top of the layout: before the first token that stands above every heading,
+---else right under the frontmatter.
+---@param lines string[]
+---@return integer
+local function top_slot(lines)
+  local start = 1
+  if (lines[1] or ""):gsub("%s+$", "") == "---" then
+    for i = 2, #lines do
+      if (lines[i]:gsub("%s+$", "")) == "---" then
+        start = i + 1
+        break
+      end
+    end
+  end
+  for i = start, #lines do
+    if heading(lines[i]) then
+      break
+    elseif token_id(lines[i]) then
+      return i
+    end
+  end
+  return start
+end
+
 ---Put the token of `id` at a place.
 ---@param text string
 ---@param id string
----@param where { after?: string, before?: string, section?: string, first?: boolean }
+---@param where { after?: string, before?: string, section?: string, first?: boolean, top?: boolean }
 ---@return string|nil new_text
 ---@return string|nil err
 function M.place(text, id, where)
@@ -200,8 +225,10 @@ function M.place(text, id, where)
     if not slot then
       return nil, ("the layout has no section %q"):format(where.section)
     end
+  elseif where.top then
+    slot = top_slot(lines)
   else
-    return nil, "a place needs after, before or section"
+    return nil, "a place needs after, before, section or top"
   end
   table.insert(lines, slot, "{{rule " .. id .. "}}")
   return join(lines, eol, final), nil
