@@ -216,7 +216,7 @@
                   "family": { "type": "string" },
                   "highest": { "type": "integer" },
                   "count": { "type": "integer" },
-                  "next": { "type": "string" }
+                  "next": { "type": "string", "maxLength": 100, "description": "absent where the next id would be longer than an id may be (100 bytes)" }
                 }
               }
             }

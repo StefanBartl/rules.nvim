@@ -61,9 +61,10 @@ client shows it read only ("open in Neovim") and never writes it back.
 `basis` says whose ids were looked at: the loaded rules and the retired ones
 (`["loaded", "retired"]`). An id is never given twice, so a retired rule keeps
 its number. The width of the number follows the family (at least two digits).
-An id may have any number of digits and `next` stays exact; `highest` is a JSON
-integer and is held at 2^53 - 1 (9007199254740991) where the real number is
-larger.
+An id may have any number of digits (up to the 100 bytes an id may have) and
+`next` stays exact; `highest` is a JSON integer and is held at 2^53 - 1
+(9007199254740991) where the real number is larger. Where the next id would be
+longer than 100 bytes, the family has no id left and the item has no `next`.
 
 ### `retired`
 

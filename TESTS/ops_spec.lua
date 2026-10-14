@@ -610,6 +610,27 @@ describe("rules-ops/1 retire, reinstate, move", function()
       assert.are.equal(layout, read_raw(root .. "/_layouts/regeln/DEP.md"))
     end
   end)
+
+  it("refuses a reinstate whose file is taken again the same way on a dry run and a real run, and writes nothing", function()
+    local root, opts = fixture()
+    assert.is_true(one(opts, { op = "retire", id = "DEP-02" }).ok)
+    local retired_file = root .. "/_retired/DEP/DEP-02.md"
+    local retired = read_raw(retired_file)
+    local layout = read_raw(root .. "/_layouts/regeln/DEP.md")
+    -- a file made by hand where the rule would go back to (it is no rule: the id is not loaded again)
+    local taken = root .. "/_rules/DEP/DEP-02.md"
+    write_raw(taken, "made by hand\n")
+    local op = { op = "reinstate", id = "DEP-02", after = "DEP-01" }
+    local dry = one(opts, op, { dry_run = true })
+    local real = one(opts, op)
+    assert.is_false(dry.ok, vim.inspect(dry))
+    assert.is_false(real.ok, vim.inspect(real))
+    assert.are.equal("conflict", dry.error.code, vim.inspect(dry))
+    assert.are.equal("conflict", real.error.code, vim.inspect(real))
+    assert.are.equal("made by hand\n", read_raw(taken))
+    assert.are.equal(retired, read_raw(retired_file))
+    assert.are.equal(layout, read_raw(root .. "/_layouts/regeln/DEP.md"))
+  end)
 end)
 
 describe("rules-ops/1 the inverse of retire and move, several layouts", function()
@@ -688,6 +709,99 @@ describe("rules-ops/1 the inverse of retire and move, several layouts", function
     assert.is_true(back.ok, vim.inspect(back))
     assert.are.equal(top, read_raw(layout))
     assert.are.equal(LAYOUT_DEP, read_raw(root .. "/_layouts/regeln/DEP.md"))
+  end)
+
+  -- DEP-02 and DEP-01 stand in DEP and again in MORE (which comes later), DEP-03 only in MORE and above them
+  local LAYOUT_BOTH = table.concat({
+    "---",
+    "kind: layout",
+    "output: regeln/MORE.md",
+    "---",
+    "# More",
+    "",
+    "{{rule DEP-03}}",
+    "{{rule DEP-01}}",
+    "{{rule DEP-02}}",
+    "",
+  }, "\n")
+
+  it("moves a rule inside the layout that is named when it stands in several, and the inverse does too", function()
+    local root, opts = fixture()
+    local more = root .. "/_layouts/regeln/MORE.md"
+    write_raw(more, LAYOUT_BOTH)
+    for _, op in ipairs({
+      { op = "move", id = "DEP-02", before = "DEP-03", layout = "regeln/MORE.md" },
+      { op = "move", id = "DEP-02", after = "DEP-03", layout = "regeln/MORE.md" },
+    }) do
+      local dry = one(opts, op, { dry_run = true })
+      assert.is_true(dry.ok, vim.inspect(dry))
+      assert.are.equal("would_move", dry.outcome, vim.inspect(dry))
+      assert.are.equal(LAYOUT_BOTH, read_raw(more))
+      -- the real run wrote: DEP is as it was, MORE has the rule at its new place
+      local entry = one(opts, op)
+      assert.is_true(entry.ok, vim.inspect(entry))
+      assert.are.equal("moved", entry.outcome, vim.inspect(entry))
+      assert.are.equal(LAYOUT_DEP, read_raw(root .. "/_layouts/regeln/DEP.md"))
+      local text = read_raw(more)
+      assert.are_not.equal(LAYOUT_BOTH, text)
+      assert.are.equal(1, select(2, text:gsub("{{rule DEP%-02}}", "")))
+      assert.are.equal("regeln/MORE.md", entry.inverse.layout)
+      local back = one(opts, entry.inverse)
+      assert.is_true(back.ok, vim.inspect(back))
+      assert.are.equal(LAYOUT_BOTH, read_raw(more))
+      assert.are.equal(LAYOUT_DEP, read_raw(root .. "/_layouts/regeln/DEP.md"))
+    end
+  end)
+
+  it("looks for the rule to put a moved rule next to in the layout that is named", function()
+    local root, opts = fixture()
+    local more = root .. "/_layouts/regeln/MORE.md"
+    write_raw(more, LAYOUT_BOTH)
+    -- DEP-01 stands in DEP, which comes first, and in MORE: the named layout is the one that takes ERR-01
+    local entry = one(opts, { op = "move", id = "ERR-01", after = "DEP-01", layout = "regeln/MORE.md" })
+    assert.is_true(entry.ok, vim.inspect(entry))
+    assert.are.equal("regeln/MORE.md", entry.placed.layout)
+    assert.is_true(layout_edit.has(read_raw(more), "ERR-01"))
+    assert.are.equal(LAYOUT_DEP, read_raw(root .. "/_layouts/regeln/DEP.md"))
+    assert.is_false(layout_edit.has(read_raw(root .. "/_layouts/regeln/ERR.md"), "ERR-01"))
+  end)
+
+  it("reports unchanged for a rule at its own place in a layout whose rules are set apart by blank lines", function()
+    local root, opts = fixture()
+    local layout = root .. "/_layouts/regeln/DEP.md"
+    local spaced = table.concat({
+      "---",
+      "kind: layout",
+      "output: regeln/DEP.md",
+      "---",
+      "# H",
+      "",
+      "{{rule DEP-01}}",
+      "",
+      "{{rule DEP-02}}",
+      "",
+      "{{rule DEP-03}}",
+      "",
+    }, "\n")
+    write_raw(layout, spaced)
+    local doc_before = read_raw(root .. "/regeln/DEP.md")
+    for _, op in ipairs({
+      { op = "move", id = "DEP-02", after = "DEP-01" },
+      { op = "move", id = "DEP-02", before = "DEP-03" },
+      { op = "move", id = "DEP-01", section = "H", layout = "regeln/DEP.md", first = true },
+    }) do
+      for _, extra in ipairs({ {}, { dry_run = true } }) do
+        local entry = one(opts, op, extra)
+        assert.is_true(entry.ok, vim.inspect(entry))
+        assert.are.equal("unchanged", entry.outcome, vim.inspect(op))
+        assert.is_nil(entry.inverse)
+        assert.are.equal(spaced, read_raw(layout))
+        assert.are.equal(doc_before, read_raw(root .. "/regeln/DEP.md"))
+      end
+    end
+    -- a real change in such a layout is still a move
+    local dry = one(opts, { op = "move", id = "DEP-01", after = "DEP-02" }, { dry_run = true })
+    assert.are.equal("would_move", dry.outcome)
   end)
 
   it("refuses places that are not a clear list of places, and writes nothing", function()
@@ -860,5 +974,58 @@ describe("rules-ops/1 a step back", function()
     local made = read_raw(root .. "/regeln/DEP.md")
     assert.is_truthy(made, "the document of the half changed layout was made again")
     assert.is_nil(made:find("DEP-02", 1, true))
+  end)
+
+  it("answers io, not invalid_argument, when the layout of a reinstate cannot be written, and puts the files back", function()
+    local root, opts = fixture()
+    assert.is_true(one(opts, { op = "retire", id = "DEP-02" }).ok)
+    local retired_file = root .. "/_retired/DEP/DEP-02.md"
+    local retired = read_raw(retired_file)
+    local layout = read_raw(root .. "/_layouts/regeln/DEP.md")
+    local ops = ops_with_failing_write(function(path)
+      return path:find("_layouts/regeln/DEP.md", 1, true) ~= nil
+    end)
+    local doc = assert(ops.run({ ops = { { op = "reinstate", id = "DEP-02", after = "DEP-01" } } }, opts))
+    local entry = doc.results[1]
+    assert.is_false(entry.ok, vim.inspect(entry))
+    assert.are.equal("io", entry.error.code, vim.inspect(entry))
+    assert.are.equal(retired, read_raw(retired_file))
+    assert.is_nil(read_raw(root .. "/_rules/DEP/DEP-02.md"))
+    assert.are.equal(layout, read_raw(root .. "/_layouts/regeln/DEP.md"))
+  end)
+
+  it("answers io, not invalid_argument, when the layout of a new rule cannot be written, and makes no file", function()
+    local root, opts = fixture()
+    local layout = read_raw(root .. "/_layouts/regeln/DEP.md")
+    local ops = ops_with_failing_write(function(path)
+      return path:find("_layouts/regeln/DEP.md", 1, true) ~= nil
+    end)
+    local doc =
+      assert(ops.run({ ops = { { op = "new", family = "DEP", title = "four", severity = "critical", after = "DEP-01" } } }, opts))
+    local entry = doc.results[1]
+    assert.is_false(entry.ok, vim.inspect(entry))
+    assert.are.equal("io", entry.error.code, vim.inspect(entry))
+    assert.is_nil(read_raw(root .. "/_rules/DEP/DEP-04.md"))
+    assert.are.equal(layout, read_raw(root .. "/_layouts/regeln/DEP.md"))
+  end)
+end)
+
+describe("rules-ops/1 new in a family with no id left", function()
+  it("refuses with a clear message instead of an id that would not read back", function()
+    local root, opts = fixture()
+    local id = "BIG-" .. ("9"):rep(96)
+    write_raw(("%s/_rules/BIG/%s.md"):format(root, id), rule_file(id, "recommended", "big", { "Text." }))
+    for _, extra in ipairs({ {}, { dry_run = true } }) do
+      local entry = one(opts, { op = "new", family = "BIG", title = "one more", severity = "critical" }, extra)
+      assert.is_false(entry.ok, vim.inspect(entry))
+      assert.are.equal("invalid_argument", entry.error.code)
+      assert.is_truthy(entry.error.message:find("no id left", 1, true), entry.error.message)
+    end
+    assert.are.same(
+      { id },
+      vim.tbl_filter(function(x)
+        return x:match("^BIG") ~= nil
+      end, ids_of(opts))
+    )
   end)
 end)
