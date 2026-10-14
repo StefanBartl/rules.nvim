@@ -1,0 +1,1 @@
+{"code":"not_found","engine":{"git":"golden","nvim":"golden","version":"0.1.0"},"generated_at":"2026-01-01T00:00:00Z","kind":"rules.error","message":"no rule with the id NOPE-1","plugin":"rules.nvim","retryable":false,"schema":1,"source":{"id":"Checklists"}}
