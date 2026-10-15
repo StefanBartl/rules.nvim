@@ -58,7 +58,10 @@ end
 ---The words of a command line that are no flag: what the positional argument (the family, the id), the
 ---`key=value` assignments and the title are read from. The flags are taken apart by the grammar's own split
 ---(`composer.flags`), exactly as the composer did: a word is a flag when the split of the line up to it says so. A bare
----`--` ends the flags (it is no word itself): `text=run with -- --dry now` has the text `run with --dry now`.
+---`--` ends the flags (it is no word itself) where it stands for that: right after the first word (the family, the
+---id) or in front of a word that starts with a dash. Anywhere else it is a word of the text and stays one, and the
+---flags go on: `text=run with -- --dry now` has the text `run with --dry now` (the `--` shields `--dry`), but
+---`text=Use this -- not that --dry` has the text `Use this -- not that` and is a dry run.
 ---@param ctx table  composer context
 ---@param specs table[]  the flags of the route
 ---@return Rules.Word[]|nil words
@@ -70,11 +73,22 @@ function M.words(ctx, specs)
   local plain = {}
   for i, word in ipairs(words) do
     plain[i] = cmdline.unescape(word.text)
+    -- a bare `--` after more than the first word, and not in front of a word with a dash, is a word of a text: it is
+    -- handed to the split as a word that is none of its sentinels (the word itself is kept, below)
+    if plain[i] == "--" then
+      local before = split(route, vim.list_slice(plain, 1, i - 1))
+      local next_word = words[i + 1] and cmdline.unescape(words[i + 1].text)
+      if before and #before > 1 and not (next_word and next_word:sub(1, 1) == "-") then
+        plain[i] = "x--"
+      end
+    end
   end
-  local _, _, err = split(route, plain)
+  local _, flags, err = split(route, plain)
   if err then
     return nil, err
   end
+  -- the flags of this line, as the split above reads them: the composer's own read every bare `--` as the end of the flags
+  ctx.flags = flags
   local out, count = {}, 0
   for i = 1, #words do
     local positional = split(route, vim.list_slice(plain, 1, i))
