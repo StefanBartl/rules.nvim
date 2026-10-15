@@ -158,7 +158,7 @@ local function red(steps)
   return out
 end
 
-local LINE_ENDINGS = "The files have one line ending (.gitattributes, eol=lf)"
+local LINE_ENDINGS = "The checked-out rule files have LF line endings (no CR)"
 local DOCUMENTS = "The reading documents are up to date (catalog --check, every ruleset)"
 local LOADS = "Every ruleset loads without errors (duplicate id, invalid severity)"
 local ROUND_TRIP = "Writing keeps the rule files byte for byte (round trip)"
@@ -248,6 +248,29 @@ describe("the CI template of a rules-vault @spawn", function()
       assert.are.same({}, red(steps), vim.inspect(steps))
       assert.is_truthy(by_name[LOADS].out:find("0 rule(s)", 1, true))
     end)
+
+    it("is green for the vault `:RulesVault create` really makes, in all four steps", function()
+      local scaffold = require("rules.vault_scaffold")
+      local root = tmp_dir() .. "/vault"
+      local plan = assert(scaffold.plan({ root = root, name = "default" }))
+      assert(scaffold.create(plan))
+      assert.is_truthy(read(root .. "/rulesets/default/_rules/.gitkeep"))
+      local steps, by_name = run_template(root)
+      assert.are.same({}, red(steps), vim.inspect(steps))
+      assert.are.equal(4, #steps)
+      assert.is_truthy(by_name[LOADS].out:find("0 rule(s) in 0 file(s), 0 family(ies), 1 ruleset(s)", 1, true))
+      assert.is_truthy(by_name[ROUND_TRIP].out:find("rule files: 0, refused: 0, failed: 0", 1, true))
+    end)
+
+    it("is green for a rule made in that vault, and red once the rule is retired and made again", function()
+      local scaffold = require("rules.vault_scaffold")
+      local root = tmp_dir() .. "/vault"
+      assert(scaffold.create(assert(scaffold.plan({ root = root, name = "default" }))))
+      write(root .. "/rulesets/default/_rules/AAA/AAA-01.md", rule_text("AAA-01"))
+      assert.are.same({}, red((run_template(root))))
+      write(root .. "/rulesets/default/_retired/AAA/AAA-01.md", rule_text("AAA-01"))
+      assert.is_truthy(vim.tbl_contains(red((run_template(root))), LOADS))
+    end)
   end)
 
   describe("turns red", function()
@@ -269,6 +292,53 @@ describe("the CI template of a rules-vault @spawn", function()
       assert.is_truthy(by_name[LOADS].out:find("duplicate rule id DEP-02", 1, true))
     end)
 
+    it("for a live rule next to a retired rule with its id, in one ruleset (two machines, no conflict in git)", function()
+      -- machine A made AAA-05 and retired it; machine B did not pull and made AAA-05 again: git merges both
+      local root = make_vault()
+      write(root .. "/rulesets/lua/_rules/AAA/AAA-05.md", rule_text("AAA-05"))
+      write(root .. "/rulesets/lua/_retired/AAA/AAA-05.md", rule_text("AAA-05"))
+      local steps, by_name = run_template(root)
+      assert.is_truthy(vim.tbl_contains(red(steps), LOADS), vim.inspect(steps))
+      assert.is_truthy(by_name[LOADS].out:find("duplicate rule id AAA-05: ", 1, true), by_name[LOADS].out)
+      assert.is_truthy(by_name[LOADS].out:find("lua/_retired/AAA/AAA-05.md (retired)", 1, true), by_name[LOADS].out)
+      assert.is_truthy(by_name[LOADS].out:find("FAILED: 1 load error(s)", 1, true))
+    end)
+
+    it("for a live rule next to a retired one in another ruleset: only the load step sees it", function()
+      local root = make_vault()
+      write(root .. "/rulesets/native/_retired/DEP/DEP-02.md", rule_text("DEP-02"))
+      local steps, by_name = run_template(root)
+      assert.are.same({ LOADS }, red(steps), vim.inspect(steps))
+      assert.is_truthy(by_name[LOADS].out:find("duplicate rule id DEP-02", 1, true))
+    end)
+
+    it("for a file under _rules/ that yields no rule: empty, no frontmatter, merge-conflict markers", function()
+      for label, text in pairs({
+        empty = "",
+        ["no frontmatter"] = "#### `DEP-03`\n\nText.\n",
+        ["conflict markers"] = "<<<<<<< HEAD\n" .. rule_text("DEP-03") .. "=======\n" .. rule_text("DEP-03") .. ">>>>>>> b\n",
+      }) do
+        local root = make_vault()
+        write(root .. "/rulesets/lua/_rules/DEP/DEP-03.md", text)
+        local steps, by_name = run_template(root)
+        assert.is_truthy(vim.tbl_contains(red(steps), LOADS), label .. ": " .. vim.inspect(steps))
+        assert.is_truthy(by_name[LOADS].out:find("DEP-03.md", 1, true), label)
+        -- the reading documents and the round trip refuse it as well: none of the three is green on a rotten file
+        assert.is_truthy(vim.tbl_contains(red(steps), DOCUMENTS), label .. ": " .. vim.inspect(steps))
+        assert.is_truthy(vim.tbl_contains(red(steps), ROUND_TRIP), label .. ": " .. vim.inspect(steps))
+      end
+    end)
+
+    it("is no fault for a README.md or a .gitkeep in _rules/, nor for a note in a folder of its own", function()
+      local root = make_vault()
+      write(root .. "/rulesets/lua/_rules/README.md", "# the rules\n")
+      write(root .. "/rulesets/lua/_rules/DEP/.gitkeep", "")
+      write(root .. "/rulesets/lua/notes/todo.md", "# todo\n")
+      write(root .. "/rulesets/lua/_retired/.gitkeep", "")
+      local steps = run_template(root)
+      assert.are.same({}, red(steps), vim.inspect(steps))
+    end)
+
     it("for a severity that is none", function()
       local root = make_vault()
       write(root .. "/rulesets/lua/_rules/DEP/DEP-02.md", rule_text("DEP-02", "urgent"))
@@ -286,12 +356,22 @@ describe("the CI template of a rules-vault @spawn", function()
       assert.is_truthy(by_name[DOCUMENTS].out:find("stale", 1, true))
     end)
 
-    it("for a vault without the line ending the byte checks need", function()
+    it("for a CRLF file in the work tree, whatever the .gitattributes says", function()
       local root = make_vault()
-      write(root .. "/.gitattributes", "* text=auto\n")
-      assert.is_truthy(vim.tbl_contains(red((run_template(root))), LINE_ENDINGS))
-      os.remove(root .. "/.gitattributes")
-      assert.is_truthy(vim.tbl_contains(red((run_template(root))), LINE_ENDINGS))
+      local path = root .. "/rulesets/lua/_rules/DEP/DEP-01.md"
+      write(path, (assert(read(path)):gsub("\n", "\r\n")))
+      local steps, by_name = run_template(root)
+      assert.is_truthy(vim.tbl_contains(red(steps), LINE_ENDINGS), vim.inspect(steps))
+      assert.is_truthy(by_name[LINE_ENDINGS].out:find("DEP-01.md", 1, true), by_name[LINE_ENDINGS].out)
+      assert.is_truthy(by_name[LINE_ENDINGS].out:find("CRLF", 1, true))
+    end)
+
+    it("for a layout or a reading document with CRLF, not only for a rule file", function()
+      for _, rel in ipairs({ "/rulesets/lua/_layouts/DEP.md", "/rulesets/lua/DEP.md" }) do
+        local root = make_vault()
+        write(root .. rel, (assert(read(root .. rel)):gsub("\n", "\r\n")))
+        assert.is_truthy(vim.tbl_contains(red((run_template(root))), LINE_ENDINGS), rel)
+      end
     end)
 
     it("for a folder `rulesets/` that is not there", function()
@@ -299,6 +379,64 @@ describe("the CI template of a rules-vault @spawn", function()
       write(root .. "/.gitattributes", "* text=auto eol=lf\n")
       local steps = run_template(root)
       assert.is_truthy(#red(steps) >= 2, vim.inspect(steps))
+      assert.is_truthy(vim.tbl_contains(red(steps), LINE_ENDINGS), "an unreadable folder is not a clean checkout")
+    end)
+
+    -- the real thing: a repository checked out by a git that turns LF into CRLF (a Windows runner's default), with the
+    -- `.gitattributes` the vault has. What the step looks at is the checkout, so what the attributes say only counts
+    -- when it takes effect
+    describe("in a real checkout (core.autocrlf=true, as on a Windows runner)", function()
+      if vim.fn.exepath("git") == "" then
+        it("needs git", function()
+          pending("no git to make a checkout with")
+        end)
+        return
+      end
+
+      ---@param cwd string
+      ---@param ... string
+      local function git(cwd, ...)
+        local cmd = { "git", "-c", "user.name=spec", "-c", "user.email=spec@example.com", "-c", "commit.gpgsign=false", ... }
+        local done = vim.system(cmd, { cwd = cwd, text = true }):wait(60000)
+        assert(done.code == 0, table.concat(cmd, " ") .. ": " .. (done.stderr or ""))
+      end
+
+      ---A vault committed with `gitattributes` (nil: none), and a checkout of it that git converts to CRLF if it may.
+      ---@param gitattributes string|nil
+      ---@return string checkout
+      local function checkout(gitattributes)
+        local source = make_vault()
+        os.remove(source .. "/.gitattributes")
+        if gitattributes then
+          write(source .. "/.gitattributes", gitattributes)
+        end
+        git(source, "init", "-q")
+        git(source, "-c", "core.autocrlf=false", "add", "-A")
+        git(source, "-c", "core.autocrlf=false", "commit", "-q", "-m", "vault")
+        local target = tmp_dir() .. "/vault"
+        git(vim.fs.dirname(target), "-c", "core.autocrlf=true", "clone", "-q", "--no-hardlinks", source, target)
+        return target
+      end
+
+      it("is green when the .gitattributes keeps LF (`* text=auto eol=lf`)", function()
+        local steps = run_template(checkout("* text=auto eol=lf\n"))
+        assert.are.same({}, red(steps), vim.inspect(steps))
+      end)
+
+      it("is red when the only eol=lf is a comment: the checkout is CRLF", function()
+        local steps = run_template(checkout("# * text=auto eol=lf\n"))
+        assert.is_truthy(vim.tbl_contains(red(steps), LINE_ENDINGS), vim.inspect(steps))
+      end)
+
+      it("is red when eol=lf is there for other files only (`*.png eol=lf`)", function()
+        local steps = run_template(checkout("*.png eol=lf\n"))
+        assert.is_truthy(vim.tbl_contains(red(steps), LINE_ENDINGS), vim.inspect(steps))
+      end)
+
+      it("is red without a .gitattributes", function()
+        local steps = run_template(checkout(nil))
+        assert.is_truthy(vim.tbl_contains(red(steps), LINE_ENDINGS), vim.inspect(steps))
+      end)
     end)
   end)
 

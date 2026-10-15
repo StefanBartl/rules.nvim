@@ -116,7 +116,7 @@ the ruleset `lua`. In every other case `\ ` is a blank in the name (`my\ vault`)
 | `.rules.json` | `{"rulesets": ["rulesets/<name>"], "gates": {}}`, paths relative to the file. Made only when the new ruleset is the only one; in a vault with rulesets none is made (they are all found without it), and a file that is there stays and is reported when it does not list the new ruleset |
 | `.gitattributes` | `* text=auto eol=lf` |
 | `.gitignore` | editors, `.deps/` |
-| `.github/workflows/ci.yml` | from `templates/rules-vault-ci.yml` of this plugin: on Ubuntu and Windows: `.gitattributes` has `eol=lf`, `catalog --check` per ruleset, all rulesets load together without errors (`scripts/ruleset.lua check`: a duplicate id, an invalid severity), the round trip; see [CONFIG.md](CONFIG.md#the-ci-of-a-vault) |
+| `.github/workflows/ci.yml` | from `templates/rules-vault-ci.yml` of this plugin: on Ubuntu and Windows: no CR in the checked-out `.md` files below `rulesets/`, `catalog --check` for every folder below `rulesets/`, the rulesets the vault offers load together without errors (`scripts/ruleset.lua check`: a duplicate id, also between a live and a retired rule, an invalid severity, a file under `_rules/` that is no rule), the round trip for every folder; see [CONFIG.md](CONFIG.md#the-ci-of-a-vault) |
 | `rulesets/<name>/_rules/.gitkeep`, `_layouts/.gitkeep` | the first ruleset (no placeholder in a folder that has files) |
 
 It **says first what happens and what is left to you** and asks (`No` is the

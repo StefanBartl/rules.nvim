@@ -194,20 +194,37 @@ which turns the run red:
 
 | Step | Command | Red when |
 | --- | --- | --- |
-| line endings | `grep -q 'eol=lf' .gitattributes` | the vault has no `.gitattributes` with `eol=lf` (the byte-for-byte checks need one line ending; a Windows checkout would otherwise be CRLF) |
-| reading documents | `scripts/ruleset.lua catalog --check rulesets/<name>`, each ruleset | a generated document is not what the layouts and rule files make |
-| loading | `scripts/ruleset.lua check --vault=.` | **all rulesets together** have a load error: a **duplicate rule id** (also one id in two rulesets, which no single ruleset shows), an invalid `severity`, a rule file that does not read |
-| round trip | `scripts/roundtrip.lua rulesets/*/` | writing a rule file does not give its bytes back |
+| line endings | `find rulesets -name '*.md'` read through `tr`, counting CR | a `.md` file below `rulesets/` of the **checkout** has a CR. It looks at the files, not at the text of `.gitattributes` (a comment, or an `eol=lf` for other files, would pass a text search and leave CRLF here). `:RulesVault create` makes `* text=auto eol=lf`, which keeps a Windows checkout LF |
+| reading documents | `scripts/ruleset.lua catalog --check rulesets/<name>`, **every folder** below `rulesets/` | a generated document is not what the layouts and rule files make, or that ruleset **on its own** does not load without errors (every load error listed under *loading*, except a clash with another ruleset) |
+| loading | `scripts/ruleset.lua check --vault=.` | the rulesets the **vault offers**, all together, have a load error (see the list below) |
+| round trip | `scripts/roundtrip.lua rulesets/*/`, **every folder** below `rulesets/` | writing a rule file does not give its bytes back, or a folder does not load without errors (each one alone) |
+
+The **load errors** that turn *loading* red (and, for one ruleset alone, *reading documents* and *round trip*):
+
+- a **duplicate rule id**: two rule files with one id, also in two rulesets (which no ruleset shows alone, so only *loading*
+  sees it), and **a live rule and a retired one** (`_retired/<FAMILY>/<ID>.md`) with one id, in one ruleset or in two:
+  `duplicate rule id AAA-05: <ruleset>/_rules/AAA/AAA-05.md:7 and <ruleset>/_retired/AAA/AAA-05.md (retired)`. A retired
+  rule is never loaded, but its id is taken, for the check and for the next id of `new` alike (`next_id` counts the file
+  name and the `id` of the frontmatter of every retired file);
+- an invalid `severity`, a key a rule file does not know, a rule file that does not read;
+- **a file under `_rules/` that yields no rule**: empty, without a frontmatter, a frontmatter without `id`, or with
+  merge-conflict markers (`<<<<<<<`, `=======` or `>>>>>>>` at the start of a line, outside a code fence), which is also
+  told for a file that still yields a rule. Only `*.md` files there are rule files; `.gitkeep` and any other type, a
+  `README.md` (any case), a layout and a generated document are no fault. Outside `_rules/` a Markdown file without a
+  rule is an ordinary document (notes, a README) and a document with ` ```rule ` blocks loads as it always did;
+- a **retired file that does not read** (no frontmatter, empty, conflict markers, named for one id and saying another).
 
 `ruleset.lua check [--vault=D] [--project=D] [--trust=D] [<folder>]` loads through the snapshot document of `rules-export/1`
 and exits 1 on any `load_errors` or on a configured ruleset that is not a folder (the entry and where it was named are in
 the message, `ruleset rulesets/gone (the .rules.json of the vault) is not a folder`), 2 on wrong usage or when there is
 nothing to check. With `--vault=D` and no folder it checks **every ruleset the vault offers** (its own list, else every
 folder under `rulesets/`) whatever a project file or `setup()` names, and warns about the folders under `rulesets/` that
-the vault file leaves out (the CI steps `catalog --check` and the round trip glob `rulesets/*/`, so those are checked
-there). `catalog` and `:Rules catalog` without a folder treat a configured ruleset that is gone, or is a file, the same
-way: an error, not a quiet skip. No `jq`, no other tool than Neovim and bash. The workflow runs the same commands you can run in the vault folder, with the path of your `rules.nvim` in place
-of `.deps/rules.nvim`.
+the vault file leaves out: those are **not** part of *loading*; the globs of *reading documents* and *round trip*
+cover each of them on its own (so a clash between an unlisted ruleset and another one is not seen). `catalog` and `:Rules
+catalog` without a folder treat a configured ruleset that is gone, or is a file, the same way: an error, not a quiet
+skip. No `jq`, no other tool than Neovim and bash. The workflow runs the same commands you can run in the vault folder,
+with the path of your `rules.nvim` in place of `.deps/rules.nvim`. A freshly made vault (`:RulesVault create`: an empty
+ruleset with `.gitkeep` files) is green in all four steps, which a spec holds.
 
 A **private `rules.nvim`** (a fork) cannot be checked out with the token of the vault repository: give the `actions/checkout`
 step of `rules.nvim` a `token:` of your own (a personal access token with read access to that repository).
@@ -238,8 +255,10 @@ in the vault folder). Three things back it up, none of them replaces it:
 - **A duplicate id fails the check.** It is a load error (`duplicate rule id DEP-07: ...`, both files named), so the CI of
   the vault (above) and `scripts/ruleset.lua check` exit 1 on it, and the editor shows it as a warning when it loads.
   When both machines made the id in the same ruleset, git itself stops the merge with an add/add conflict on the file
-  `DEP-07.md`; the check is what catches the cases git lets through (the same id in two rulesets, or under two file names).
-  Renumber or retire one of the two, then merge.
+  `DEP-07.md`; the check is what catches the cases git lets through: the same id in two rulesets, under two file names,
+  or **one machine retired the rule and the other made the id again** (a live `_rules/AAA/AAA-05.md` next to a
+  `_retired/AAA/AAA-05.md`: git merges that without a conflict; the check names both files). Renumber or retire one of the
+  two, then merge.
 
 ### `:checkhealth rules`
 
