@@ -227,6 +227,58 @@ function M.layouts(lead)
   end, M.layout_outputs())
 end
 
+---The project folder a command line names with `--project=` (the last one), as typed.
+---@param cmd_line string|nil
+---@return string|nil
+local function project_word(cmd_line)
+  local cmdline = require("rules.cmdline")
+  local given
+  for _, word in ipairs(cmdline.words(cmd_line or "")) do
+    local value = cmdline.unescape(word.text):match("^%-%-project=(.*)$")
+    if value ~= nil then
+      given = value
+    end
+  end
+  return given
+end
+
+---The ids that have a waiver in the project: the ones `:Rules renew` and `:Rules unwaive` work on. The project is the one
+---the command line names (`--project=`), else the one the command would take (`rules.ui.project`). Read from the file on
+---every call (it is small and may have been written a moment ago); a project the door would refuse and a file that cannot
+---be used are no candidates, never an error.
+---@param cmd_line? string  the command line as typed so far
+---@return string[]
+function M.waived_ids(cmd_line)
+  local ok, out = pcall(function()
+    local project = require("rules.ui.project")
+    local dir = project.dir(project.request(project_word(cmd_line)))
+    if not dir then
+      return {}
+    end
+    local entries = require("rules.engine.waivers").load_entries(dir)
+    local ids = vim.tbl_keys(entries)
+    table.sort(ids)
+    return ids
+  end)
+  return ok and out or {}
+end
+
+---The folders `--project=` offers: the sub-folders of the lead (a blank written `\ ` the way the command line wants it).
+---@param lead string
+---@return string[]
+function M.project_dirs(lead)
+  local plain = require("rules.cmdline").unescape(lead)
+  -- a backtick is a command substitution to the wildcard expansion of the editor: a folder called like one must not run
+  if plain:find("`", 1, true) then
+    return {}
+  end
+  local ok, list = pcall(vim.fn.getcompletion, plain, "dir")
+  if not ok then
+    return {}
+  end
+  return vim.tbl_map(escape, list)
+end
+
 ---Forget what was kept (the specs, after they wrote a layout).
 function M.reset()
   places_cache = nil

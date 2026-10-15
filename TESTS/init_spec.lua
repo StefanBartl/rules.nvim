@@ -172,6 +172,9 @@ describe("waivers in a run", function()
     local said = table.concat(messages, "\n")
     assert.matches("1 waiver%(s%)", said)
     assert.matches("SEC%-01 %(2026%-10%-15%)", said)
+    -- it points at the commands that deal with an expired waiver
+    assert.is_truthy(said:find(":Rules renew <ID> expires=YYYY-MM-DD", 1, true))
+    assert.is_truthy(said:find(":Rules unwaive <ID>", 1, true))
   end)
 end)
 

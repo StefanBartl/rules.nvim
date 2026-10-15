@@ -44,6 +44,8 @@ describe(":Rules option float", function()
       "RULES_GATE",
       "RULES_ID",
       "RULES_RETIRED_ID",
+      "RULES_WAIVED_ID",
+      "RULES_PROJECT_DIR",
       "RULES_FAMILY",
       "RULES_PLACE",
       "RULES_RULESET",
@@ -107,6 +109,9 @@ describe(":Rules option float", function()
       reinstate = { "after", "before", "section", "first", "layout", "yes", "dry" },
       move = { "to", "after", "before", "first", "dry" },
       list = { "family", "severity", "format" },
+      waive = { "project", "dry" },
+      renew = { "no-expiry", "project", "dry" },
+      unwaive = { "yes", "project", "dry" },
     }
     for verb, flags in pairs(wanted) do
       local route = by_path[verb]

@@ -1,10 +1,10 @@
 ---@module 'rules.ui.routes'
 ---@brief The grammar of the write verbs of `:Rules` for `lib.nvim`'s composer -- one tree: dispatch, `<Tab>`, option float.
 ---@description
---- `new`, `set`, `retire`, `reinstate`, `move` and `list`, each with the flags and `key=` pairs it takes. Every flag,
---- every `key=` and every positional argument carries a `desc`: the option float (the help of the command line) shows
---- it, and `TESTS/usrcmds_help_spec.lua` pins that none is left without. The handlers are in `rules.ui.cmd`; this file
---- only says what a command line may look like.
+--- `new`, `set`, `retire`, `reinstate`, `move`, `list`, `waive`, `renew` and `unwaive`, each with the flags and `key=`
+--- pairs it takes. Every flag, every `key=` and every positional argument carries a `desc`: the option float (the help
+--- of the command line) shows it, and `TESTS/usrcmds_help_spec.lua` pins that none is left without. The handlers are in
+--- `rules.ui.cmd` and `rules.ui.waiver_cmd`; this file only says what a command line may look like.
 ---
 ---  - `:Rules new [<FAMILY> [title...]] [severity= text= ruleset=] [--to= --after= --before= --first] [--yes] [--dry]`
 ---  - `:Rules set <ID> key=value ... [--dry]`
@@ -12,8 +12,11 @@
 ---  - `:Rules reinstate <ID> [--after=<ID> | --before=<ID> | --section=<heading> [--first]] [--layout=<file>] [--yes] [--dry]`
 ---  - `:Rules move <ID> (--to=<file>#<section> | --after=<ID> | --before=<ID>) [--first] [--dry]`
 ---  - `:Rules list [--family=<PREFIX>] [--severity=<level>] [--format=json]`
+---  - `:Rules waive <ID> reason=... [expires=YYYY-MM-DD] [paths=a,b] [--project=<dir>] [--dry]`
+---  - `:Rules renew <ID> [expires=YYYY-MM-DD | --no-expiry] [reason=...] [--project=<dir>] [--dry]`
+---  - `:Rules unwaive <ID> [--project=<dir>] [--yes] [--dry]`
 ---
---- Not its job: running anything (`rules.ui.cmd`), the argument types (`rules.bindings.usrcmds`).
+--- Not its job: running anything (`rules.ui.cmd`, `rules.ui.waiver_cmd`), the argument types (`rules.bindings.usrcmds`).
 
 local M = {}
 
@@ -27,6 +30,14 @@ end
 local function handler(name)
   return function(ctx)
     require("rules.ui.cmd")[name](ctx)
+  end
+end
+
+---@param name string
+---@return fun(ctx: table)
+local function waiver_handler(name)
+  return function(ctx)
+    require("rules.ui.waiver_cmd")[name](ctx)
   end
 end
 
@@ -50,6 +61,14 @@ local function concat(...)
   end
   return out
 end
+
+---The project of the waivers file: the verbs of a waiver take it from the buffer or the working directory when it is left out.
+---@type table
+local PROJECT = {
+  name = "project",
+  type = "RULES_PROJECT_DIR",
+  desc = "Project folder inside the working directory (default: that of this buffer)",
+}
 
 ---The flags of each route, also read by the handlers (`rules.ui.cmd.words` takes a command line apart the way the
 ---composer does).
@@ -79,7 +98,34 @@ M.FLAGS = {
     { name = "yes", bool = true, desc = "Reinstate without asking" },
     DRY,
   },
+  waive = { PROJECT, DRY },
+  renew = {
+    { name = "no-expiry", bool = true, desc = "The waiver never expires (instead of expires=)" },
+    PROJECT,
+    DRY,
+  },
+  unwaive = {
+    { name = "yes", bool = true, desc = "Remove the waiver without asking" },
+    PROJECT,
+    DRY,
+  },
 }
+
+---The `expires=` pair: its help names today's date, read when the help is shown (the help of a session that crosses
+---midnight must not name yesterday), so `desc` is looked up on every read.
+---@return table
+local function expires_kv()
+  local kv = { key = "expires", type = "STRING" }
+  return setmetatable(kv, {
+    __index = function(_, field)
+      if field == "desc" then
+        return ("Last day the waiver holds, YYYY-MM-DD (today is %s)"):format(require("rules.engine.waivers").clock())
+      end
+    end,
+  })
+end
+
+local REASON_DESC = "Why the finding is accepted (a value may hold spaces)"
 
 local SEVERITY_DESC = "How serious a failure of the rule is"
 
@@ -166,6 +212,40 @@ function M.routes()
       desc = "List the rules in the quickfix list, each at its source line; --family= and --severity= narrow it, "
         .. "--format=json prints the document of the machine contract",
       run = handler("list"),
+    },
+    {
+      path = { "waive" },
+      args = { { name = "id", type = "RULES_ID", desc = "Id of the rule whose finding is accepted, e.g. DEP-06" } },
+      kv = {
+        { key = "reason", type = "STRING", desc = REASON_DESC },
+        expires_kv(),
+        { key = "paths", type = "STRING", desc = "Only these places, comma separated, e.g. src/legacy,docs/*.md" },
+      },
+      flags = M.FLAGS.waive,
+      desc = "Accept the findings of a rule in this project: a waiver in .rules-waivers.json with a reason (reason=, "
+        .. "required), a last day (expires=) and places (paths=, comma separated; a blank in a path is typed as it is). "
+        .. "The project is that of this buffer or the working directory (--project= names it)",
+      run = waiver_handler("waive"),
+    },
+    {
+      path = { "renew" },
+      args = { { name = "id", type = "RULES_WAIVED_ID", desc = "Id of the rule whose waiver is renewed, e.g. DEP-06" } },
+      kv = {
+        expires_kv(),
+        { key = "reason", type = "STRING", desc = REASON_DESC },
+      },
+      flags = M.FLAGS.renew,
+      desc = "Give a waiver a new last day (expires=YYYY-MM-DD, or --no-expiry for none) and, with reason=, a new "
+        .. "reason; its paths stay. The way on for a waiver that expired",
+      run = waiver_handler("renew"),
+    },
+    {
+      path = { "unwaive" },
+      args = { { name = "id", type = "RULES_WAIVED_ID", desc = "Id of the rule whose waiver is removed, e.g. DEP-06" } },
+      flags = M.FLAGS.unwaive,
+      desc = "Remove a waiver from .rules-waivers.json: the findings it accepted flag again. Asks first (--yes skips "
+        .. "the question)",
+      run = waiver_handler("unwaive"),
     },
   }
 end
