@@ -312,6 +312,17 @@ bytes.
 A rule file without a block gets one: right under its heading and the blank
 lines below it. A rule file *with* a block keeps it where it is.
 
+The generator copies the lines of a rule file as they are, so what separates two
+rules in a document is in the rule file: a blank line, `---` and a blank line at
+its end (what the shipped rulesets and `rules-ops/1` `new` write; a document
+without dividers has rule files without). The generator adds nothing of its own.
+
+**Rules added through the layout.** `rules-ops/1` puts a `{{rule ID}}` line into
+a section by its heading: behind the last rule token of the section, or in front
+of the first one. A section with no rule token has only an introduction, which is
+not a rule, so the new token goes behind it (also for "first"), between one blank
+line before and one after; the introduction stays above the rules.
+
 **Table of contents.** One line per heading from level 2 on, each a link to its
 anchor, without the title (level 1) and without the heading called "Table of
 content". A repeated anchor gets `-1`, `-2`. The existing rulesets spell it in

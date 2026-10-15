@@ -195,7 +195,8 @@ writes a ruleset in the one-file-per-rule form ([RULESET-FORMAT.md](RULESET-FORM
   second `--` is.
 - **A place** is one of `--to=<file>#<section>` (`<file>` is the `output` path
   of a layout, `<section>` the text of a heading; `--first` puts the rule at the
-  start of the section instead of its end), `--to=<file>` alone (the top of the
+  start of the section instead of its end; in a section with no rule yet both
+  mean behind its introduction text), `--to=<file>` alone (the top of the
   layout), `--after=<id>` or `--before=<id>` (in the layout that holds that
   rule). A blank in a section is written with a backslash before it
   (`#Core\ Rules`); `<Tab>` writes it so. A word that is left over is refused
@@ -251,7 +252,10 @@ The prose of the rule, as long as it needs.
 Family, Title and one severity are required; Place is optional (`after <ID>`,
 `before <ID>`, `<file>#<section>` or `<file>`), a `Ruleset:` line appears when
 several rulesets are configured, and everything below `## text` is the prose.
-`<C-s>` submits: first the form says what is missing, all at once, as `!` lines
+The prose goes on as typed: the form (like the engine) neither joins nor wraps
+lines. Wrapping Markdown safely needs to know lists, tables, quotes, fences and
+code spans, and the buffer is a Neovim buffer, so `gq` and `'textwidth'` do it
+where you want it. `<C-s>` submits: first the form says what is missing, all at once, as `!` lines
 at the top (they go away on the next submit); then the door runs a `dry_run`
 and a refusal is shown in the form too; then a question shows what would be
 made (id, severity, title, file, place) with `Back to the form` as the answer
