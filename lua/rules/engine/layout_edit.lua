@@ -7,7 +7,10 @@
 ---
 --- A place is `{ after = ID }`, `{ before = ID }` (a rule that already stands in the layout) or
 --- `{ section = "heading text", first? = true }` (the end of that section, or its start): a section is a heading
---- up to the next heading of the same or a higher level. `{ top = true }` is the start of the layout: before the
+--- up to the next heading of the same or a higher level. The start is before the first rule token of the section;
+--- a section with no token yet has an introduction (the text between its heading and its next heading), which is not
+--- a rule, so there both the start and the end are behind the introduction, with a blank line before the token and one
+--- after it. A `#` line in a fenced block is no heading. `{ top = true }` is the start of the layout: before the
 --- first rule that stands above every heading, else right under the frontmatter.
 ---
 --- Not its job: finding the layouts of a ruleset (`rules.ops`), writing files, regenerating the documents.
@@ -61,6 +64,31 @@ local function join(lines, eol, final)
   return final and (text .. eol) or text
 end
 
+---The headings of a layout: line index -> `{ level, text }`. A `#` line inside a fenced block (a code example in an
+---introduction) is no heading.
+---@param lines string[]
+---@return table<integer, { [1]: integer, [2]: string }>
+local function headings_of(lines)
+  local out = {}
+  local fence = 0
+  for i, line in ipairs(lines) do
+    local ticks = line:match("^(`+)")
+    if fence > 0 then
+      if ticks and #ticks >= fence and line:match("^`+%s*$") then
+        fence = 0
+      end
+    elseif ticks and #ticks >= 3 then
+      fence = #ticks
+    else
+      local level, text = heading(line)
+      if level then
+        out[i] = { level, text }
+      end
+    end
+  end
+  return out
+end
+
 ---Line index of the token of `id`, outside a fenced block.
 ---@param lines string[]
 ---@param id string
@@ -100,11 +128,12 @@ function M.locate(text, id)
   if not at then
     return nil
   end
+  local marks = headings_of(lines)
   local section, prev
   for i = at - 1, 1, -1 do
-    local level, name = heading(lines[i])
-    if level then
-      section = name
+    local mark = marks[i]
+    if mark then
+      section = mark[2]
       break
     end
     prev = prev or token_id(lines[i])
@@ -130,17 +159,24 @@ function M.remove(text, id)
   return join(lines, eol, final), nil
 end
 
----The line before which a token goes in the section named `name`, or `nil` when there is no such section.
+---Where a token goes in the section named `name`.
+---
+---With tokens in the section: after the last one, or before the first one (`first`). Without any: after the
+---introduction of the section (the text between its heading and the next heading of any level, which is not a rule),
+---for `first` as well, with one blank line before the token and one after it.
 ---@param lines string[]
 ---@param name string
 ---@param first boolean
----@return integer|nil
+---@return integer|nil slot  the token goes before this line
+---@return boolean|nil blank_before  a blank line goes in front of the token
+---@return boolean|nil blank_after  a blank line goes behind it
 local function section_slot(lines, name, first)
+  local marks = headings_of(lines)
   local start, level
-  for i, line in ipairs(lines) do
-    local l, text = heading(line)
-    if l and text == name then
-      start, level = i, l
+  for i = 1, #lines do
+    local mark = marks[i]
+    if mark and mark[2] == name then
+      start, level = i, mark[1]
       break
     end
   end
@@ -148,11 +184,16 @@ local function section_slot(lines, name, first)
     return nil
   end
   local stop = #lines + 1
+  -- the first heading of any level below the section's own: where its introduction ends
+  local intro_end
   for i = start + 1, #lines do
-    local l = heading(lines[i])
-    if l and l <= level then
-      stop = i
-      break
+    local mark = marks[i]
+    if mark then
+      intro_end = intro_end or i
+      if mark[1] <= level then
+        stop = i
+        break
+      end
     end
   end
   local first_token, last_token
@@ -164,17 +205,24 @@ local function section_slot(lines, name, first)
   end
   if first then
     if first_token then
-      return first_token
+      return first_token, false, false
     end
   elseif last_token then
-    return last_token + 1
+    return last_token + 1, false, false
   end
-  -- no token in the section: right under the heading, after the blank lines that follow it
-  local slot = start + 1
-  while slot < stop and lines[slot] == "" do
-    slot = slot + 1
+  -- no token in the section: behind the introduction. The blank lines that end it stay behind the token, so the
+  -- token has one blank line in front of it and keeps the blank line(s) that were in front of the next heading.
+  -- (`first` is the same place: the introduction is not a rule, so the start of the rules is behind it.)
+  if not intro_end then
+    -- the last section of the layout: the token goes at its very end, the blank lines there are the end of the file
+    return #lines + 1, lines[#lines] ~= "", false
   end
-  return slot
+  local slot = intro_end
+  while slot - 1 > start and lines[slot - 1] == "" do
+    slot = slot - 1
+  end
+  -- a blank line behind it unless one is there already
+  return slot, true, lines[slot] ~= ""
 end
 
 ---The line before which a token goes at the top of the layout: before the first token that stands above every heading,
@@ -191,8 +239,9 @@ local function top_slot(lines)
       end
     end
   end
+  local marks = headings_of(lines)
   for i = start, #lines do
-    if heading(lines[i]) then
+    if marks[i] then
       break
     elseif token_id(lines[i]) then
       return i
@@ -212,7 +261,7 @@ function M.place(text, id, where)
   if find(lines, id) then
     return nil, ("the layout has {{rule %s}} already"):format(id)
   end
-  local slot
+  local slot, blank_before, blank_after
   if where.after or where.before then
     local anchor = where.after or where.before
     local at = find(lines, anchor)
@@ -221,7 +270,7 @@ function M.place(text, id, where)
     end
     slot = where.after and (at + 1) or at
   elseif where.section then
-    slot = section_slot(lines, where.section, where.first == true)
+    slot, blank_before, blank_after = section_slot(lines, where.section, where.first == true)
     if not slot then
       return nil, ("the layout has no section %q"):format(where.section)
     end
@@ -230,7 +279,16 @@ function M.place(text, id, where)
   else
     return nil, "a place needs after, before, section or top"
   end
-  table.insert(lines, slot, "{{rule " .. id .. "}}")
+  local put = { "{{rule " .. id .. "}}" }
+  if blank_before then
+    table.insert(put, 1, "")
+  end
+  if blank_after then
+    put[#put + 1] = ""
+  end
+  for n, line in ipairs(put) do
+    table.insert(lines, slot + n - 1, line)
+  end
   return join(lines, eol, final), nil
 end
 
