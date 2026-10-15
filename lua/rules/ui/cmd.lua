@@ -111,10 +111,10 @@ function M.open_rule(id)
   if not path then
     return
   end
-  -- table form: the path reaches `:edit` as one word, with no escaping to undo
-  local ok, err = pcall(vim.cmd, { cmd = "edit", args = { path } })
+  -- the path reaches `:edit` as one word: no `%` or `#` of it is expanded (a folder called `a#b`)
+  local ok, err = require("rules.util.edit").path(path)
   if not ok then
-    notify.error(("could not open %s: %s"):format(path, tostring(err)))
+    notify.error(("could not open %s: %s"):format(path, err))
   end
 end
 

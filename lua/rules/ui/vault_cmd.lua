@@ -183,10 +183,10 @@ end
 ---@param path string
 ---@param line? integer
 local function open_file(path, line)
-  -- table form: the path reaches `:edit` as one word, with no escaping to undo
-  local ok, err = pcall(vim.cmd, { cmd = "edit", args = { path } })
+  -- the path reaches `:edit` as one word: no `%` or `#` of it is expanded (a folder called `a#b`)
+  local ok, err = require("rules.util.edit").path(path)
   if not ok then
-    notify.error(("cannot open %s: %s"):format(path, tostring(err)))
+    notify.error(("cannot open %s: %s"):format(path, err))
     return
   end
   if line and line > 1 then
@@ -201,15 +201,15 @@ local function open_explorer(dir)
     return
   end
   if vim.fn.exists(":Filetree") == 2 then
-    -- table form: the argument reaches the command as one word, no `fnameescape` backslashes to undo
-    local ok = pcall(vim.cmd, { cmd = "Filetree", args = { "open", dir } })
+    -- the argument reaches the command as one word, and its `%` and `#` are not expanded
+    local ok = pcall(vim.cmd, require("rules.util.edit").spec("Filetree", { "open", dir }))
     if ok then
       return
     end
   end
-  local ok, err = pcall(vim.cmd, { cmd = "edit", args = { dir } })
+  local ok, err = require("rules.util.edit").path(dir)
   if not ok then
-    notify.error(("cannot open %s: %s"):format(dir, tostring(err)))
+    notify.error(("cannot open %s: %s"):format(dir, err))
   end
 end
 

@@ -81,9 +81,10 @@ local LAYOUT = table.concat({
 
 ---A vault with two rulesets: `lua` (family DEP: DEP-01, DEP-06, the retired DEP-03; a layout and its generated
 ---document) and `native` (family ERR).
+---@param folder? string  the name of the vault folder (default `rules-vault`)
 ---@return string vault, string lua, string native
-local function make_vault()
-  local vault = tmp_dir() .. "/rules-vault"
+local function make_vault(folder)
+  local vault = tmp_dir() .. "/" .. (folder or "rules-vault")
   local lua, native = vault .. "/rulesets/lua", vault .. "/rulesets/native"
   write_raw(lua .. "/_rules/DEP/DEP-01.md", rule_file("DEP-01", "recommended", "one"))
   write_raw(lua .. "/_rules/DEP/DEP-06.md", rule_file("DEP-06", "critical", "six"))
@@ -392,6 +393,35 @@ describe(":RulesVault", function()
       assert.is_truthy(err:find("did you mean lua?", 1, true))
     end)
 
+    it("an exact family or rule id wins over a ruleset of the same name in another case, on every file system", function()
+      -- rulesets `dep` and `dep-06` next to the family DEP and the rule DEP-06
+      write_raw(vault .. "/rulesets/dep/_rules/.gitkeep", "")
+      write_raw(vault .. "/rulesets/dep-06/_rules/.gitkeep", "")
+      for _, blind in ipairs({ true, false }) do
+        ops.CASE_BLIND = blind
+        local ctx = context()
+        local label = blind and "case blind" or "case sensitive"
+        assert.are.equal("family", ops.resolve(ctx, "DEP").kind, label)
+        assert.are.equal("id", ops.resolve(ctx, "DEP-06").kind, label)
+        -- the lower case word is the ruleset, exactly
+        local named = ops.resolve(ctx, "dep")
+        assert.are.equal("ruleset", named.kind, label)
+        assert.are.equal("dep", named.name, label)
+        assert.are.equal("dep-06", ops.resolve(ctx, "dep-06").name, label)
+        -- the same answer for the other verbs that read the target
+        local roots = assert(ops.search_roots(ctx, ops.resolve(ctx, "DEP")))
+        assert.are.equal(real(lua .. "/_rules/DEP"), real(roots[1]), label)
+      end
+      -- the case blind reading stays as the fallback when nothing matches exactly
+      ops.CASE_BLIND = true
+      local fallback = ops.resolve(context(), "Dep")
+      assert.are.equal("ruleset", fallback.kind)
+      assert.are.equal("dep", fallback.name)
+      assert.are.equal("lua", ops.resolve(context(), "LUA").name)
+      ops.CASE_BLIND = false
+      assert.is_nil(ops.resolve(context(), "Dep"))
+    end)
+
     it("settles a word-less target: the ruleset of the buffer, else the only one, else a pick", function()
       -- the buffer lies in native
       vim.cmd({ cmd = "edit", args = { native .. "/_rules/ERR/ERR-100.md" } })
@@ -479,6 +509,63 @@ describe(":RulesVault", function()
       assert.are.equal(real(lua .. "/_rules/DEP/DEP-06.md"), real(vim.api.nvim_buf_get_name(0)))
       assert.is_true(vim.api.nvim_win_get_cursor(0)[1] > 1)
       assert.are.same({}, explored)
+    end)
+
+    describe("a path with % or # in it", function()
+      local saved_filetree
+
+      ---Two files to stand for the current and the alternate buffer: `%` and `#` have something to expand to.
+      local function with_alternate()
+        local dir = tmp_dir()
+        write_raw(dir .. "/first.md", "1\n")
+        write_raw(dir .. "/second.md", "2\n")
+        vim.cmd({ cmd = "edit", args = { dir .. "/first.md" } })
+        vim.cmd({ cmd = "edit", args = { dir .. "/second.md" } })
+        assert.are_not.equal("", vim.fn.bufname("#"))
+      end
+
+      before_each(function()
+        saved_filetree = vim.fn.exists(":Filetree") == 2
+        assert.is_false(saved_filetree, "the spec expects no :Filetree of its own")
+      end)
+
+      after_each(function()
+        pcall(vim.api.nvim_del_user_command, "Filetree")
+      end)
+
+      for _, folder in ipairs({ "a#b", "pct%x", "x#y%z" }) do
+        it(("'%s': a rule file and a folder open as they are"):format(folder), function()
+          local v, vlua = make_vault(folder)
+          config.setup({ vault = v })
+          settings.reset()
+          contract.clear_cache()
+          require("rules.ui.candidates").reset()
+
+          with_alternate()
+          run("RulesVault open DEP-06")
+          assert.are.equal(real(vlua .. "/_rules/DEP/DEP-06.md"), real(vim.api.nvim_buf_get_name(0)))
+
+          -- the folder of a family with no explorer seam and no :Filetree: the editor's own `:edit`
+          cmd.explorer_open = nil
+          with_alternate()
+          run("RulesVault open DEP")
+          assert.are.equal(real(vlua .. "/_rules/DEP"), real(vim.api.nvim_buf_get_name(0)))
+
+          -- the same through :Filetree (a command whose argument is a file name)
+          local got
+          vim.api.nvim_create_user_command("Filetree", function(o)
+            got = o.fargs
+          end, { nargs = "*", complete = "file" })
+          with_alternate()
+          run("RulesVault open DEP")
+          assert.are.same({ "open", real(vlua .. "/_rules/DEP") }, { got[1], real(got[2]) })
+
+          -- the file of a rule, opened by the id from the form of :Rules new
+          with_alternate()
+          require("rules.ui.cmd").open_rule("DEP-01")
+          assert.are.equal(real(vlua .. "/_rules/DEP/DEP-01.md"), real(vim.api.nvim_buf_get_name(0)))
+        end)
+      end
     end)
 
     it("opens the file of a retired rule id", function()
@@ -885,12 +972,28 @@ describe(":RulesVault", function()
       }) do
         assert.is_true(vim.tbl_contains(words, word), word)
       end
-      assert.is_false(vim.tbl_contains(words, "DEP-03"), "a retired rule is not offered (RULES_ID lists the loaded ones)")
+      assert.is_true(vim.tbl_contains(words, "DEP-03"), "a retired rule is a rule id of the vault: resolve takes it")
+    end)
+
+    it("offers the ids and families of the vault's rulesets, not of the rulesets that setup() loads", function()
+      local other = tmp_dir() .. "/other"
+      write_raw(other .. "/_rules/ZZZ/ZZZ-01.md", rule_file("ZZZ-01", "critical", "elsewhere"))
+      config.setup({ vault = vault, rulesets = { other } })
+      settings.reset()
+      contract.clear_cache()
+      require("rules.ui.candidates").reset()
+      local words = complete("RulesVault open ")
+      for _, word in ipairs({ "DEP", "ERR", "DEP-01", "DEP-03", "DEP-06", "ERR-100", "ERR-101" }) do
+        assert.is_true(vim.tbl_contains(words, word), word)
+      end
+      assert.is_false(vim.tbl_contains(words, "ZZZ"))
+      assert.is_false(vim.tbl_contains(words, "ZZZ-01"))
+      assert.is_nil(ops.resolve(assert(ops.context()), "ZZZ-01"), "and resolve does not take them either")
     end)
 
     it("narrows by what is typed, ids and families through the types of :Rules", function()
       assert.are.same(
-        { "DEP-01", "DEP-06" },
+        { "DEP-01", "DEP-03", "DEP-06" },
         vim.tbl_filter(function(w)
           return w:match("^DEP%-")
         end, complete("RulesVault clipboard DEP-0"))
@@ -906,6 +1009,25 @@ describe(":RulesVault", function()
       assert.are.same({ "all", "catalogs", "layouts", "rules" }, words)
     end)
 
+    it("offers no part after a rule id or a family, which take none", function()
+      assert.are.same({}, complete("RulesVault open DEP-06 "))
+      assert.are.same({}, complete("RulesVault open DEP-03 "))
+      assert.are.same({}, complete("RulesVault clipboard DEP "))
+      assert.are.same({}, complete("RulesVault clipboard ERR --rel "))
+      -- and the command says why, the same as it does not offer
+      local _, err = ops.resolve(assert(ops.context()), "DEP-06", "rules")
+      assert.is_truthy(err:find("goes with a ruleset, not with the rule id DEP-06", 1, true))
+      -- a part word alone is the part, and takes no second one; a word that is nothing takes none
+      assert.are.same({}, complete("RulesVault open layouts "))
+      assert.are.same({}, complete("RulesVault open nosuchword "))
+      -- a ruleset does, also behind a flag
+      local words = complete("RulesVault clipboard --rel lua ")
+      table.sort(words)
+      assert.are.same({ "all", "catalogs", "layouts", "rules" }, words)
+      local narrowed = complete("RulesVault open native la")
+      assert.are.same({ "layouts" }, narrowed)
+    end)
+
     it("offers the flags of a verb", function()
       local flags = complete("RulesVault clipboard DEP-06 --")
       assert.is_true(vim.tbl_contains(flags, "--rel"))
@@ -916,12 +1038,14 @@ describe(":RulesVault", function()
       end
     end)
 
-    it("fails soft without a vault: the parts and the ids of whatever is loaded, never an error", function()
+    it("fails soft without a vault: the parts only (the ids are the vault's), never an error", function()
       config.setup({})
       settings.reset()
       local words = complete("RulesVault open ")
       assert.is_true(vim.tbl_contains(words, "layouts"))
       assert.is_false(vim.tbl_contains(words, "lua"))
+      assert.is_false(vim.tbl_contains(words, "DEP-06"))
+      assert.are.same({}, complete("RulesVault open lua "))
     end)
 
     it("folds the case of a ruleset only where the file system does", function()
