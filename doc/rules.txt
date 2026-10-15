@@ -55,7 +55,7 @@ the working directory) and from the `.rules.json` of a vault. Highest first:
 a headless call (--ruleset, --gate, $RULES_RULESETS, $RULES_GATES), setup(),
 the project file, the vault file, the defaults. `rulesets` is taken whole from
 the highest place that names it; `gates` is merged by gate name; `agent` field
-by field. `lua_predicates` and `trust` are setup() options only. In a file, `[]`
+by field. `lua_predicates`, `trust` and `keys` are setup() options only. In a file, `[]`
 and `{}` are told apart: a list where an object is meant (or the reverse) is an
 error, not "empty".
 >json
@@ -299,6 +299,21 @@ prose of the rule. Family, Title and one severity are required.
                     would be made and ask; only "Create the rule" writes
     q, <C-q>        cancel; asks first when something was typed
     g?              help
+
+These are the defaults. `setup({ keys = { form = { ... } } })` changes them,
+by action: `toggle` (<Space>), `accept` (<CR>), `submit` (<C-s>, normal and
+insert mode), `close` (q), `cancel` (<C-q>, normal and insert mode) and `help`
+(g?). An action takes a key, a list of keys (all are bound) or `false` (no
+key); one that is not named keeps its default: >lua
+    require("rules").setup({
+      keys = { form = { submit = "<C-g>", toggle = { "<Space>", "x" }, help = false } },
+    })
+<
+The hint under the title and `g?` show the keys that are bound. An action or a
+group this plugin does not have, a value of the wrong type and two actions on
+one key are warned about by setup(), never ignored silently. `keys` is a
+setup() option only; in a `.rules.json` it is an unknown key. See
+docs/CONFIG.md.
 
 ==============================================================================
 GATES                                                             *rules-gates*

@@ -7,6 +7,7 @@
 local DEFAULTS = require("rules.config.DEFAULTS")
 local schema = require("rules.config.schema")
 local merge = require("rules.config.merge")
+local keys_mod = require("rules.config.keys")
 local notify = require("rules.util.notify")
 
 local M = {}
@@ -57,6 +58,19 @@ local function validate(opts)
   return checked.clean
 end
 
+--- Two actions on one key: the form binds them in a fixed order and the later one wins, so the other one does not work.
+--- Said at `setup()`, not found out at the first `<Space>` in the form. The keys stay as set (the choice is the user's).
+---@param form table<string, string|string[]|false>
+---@return nil
+local function warn_key_conflicts(form)
+  local order = table.concat(schema.FORM_ACTIONS, ", ")
+  for _, conflict in ipairs(keys_mod.conflicts(form, schema.FORM_ACTIONS)) do
+    local who = table.concat(conflict.actions, ", ")
+    local text = "setup(): keys.form: %s share the key %s; only the one the form binds last works (order: %s)"
+    notify.warn(text:format(who, conflict.key, order) .. " -- give one of them another key, or false")
+  end
+end
+
 ---@param opts Rules.Opts|nil
 ---@return nil
 function M.setup(opts)
@@ -70,10 +84,13 @@ function M.setup(opts)
       state.agent = merge.agent(DEFAULTS.agent, value)
     elseif key == "gates" then
       state.gates = merge.gates(DEFAULTS.gates, value)
+    elseif key == "keys" then
+      state.keys = merge.keys(DEFAULTS.keys, value)
     else
       state[key] = vim.deepcopy(value)
     end
   end
+  warn_key_conflicts(state.keys.form)
   -- the settings of the last run were resolved with the old `setup()`
   require("rules.settings").reset()
 end

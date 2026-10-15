@@ -95,6 +95,11 @@ writer, the open buffers of a changed file are reloaded (a buffer with unsaved
 changes is reported, not overwritten). See
 [docs/BINDINGS.md](docs/BINDINGS.md#making-changing-retiring-and-moving-rules).
 
+The keys of the `:Rules new` form (`<Space>`, `<CR>`, `<C-s>`, `q`, `<C-q>`, `g?`) can be changed, by action, in
+`setup({ keys = { form = { toggle, accept, submit, close, cancel, help } } })`: a key, a list of keys, or `false` for none.
+Mistakes are warned about, never ignored; `keys` is a `setup()` option only. See
+[docs/CONFIG.md](docs/CONFIG.md#the-keys-of-the-form).
+
 `:RulesVault open DEP-06` goes to the file of a rule, `:RulesVault open DEP` to the folder of a family, `:RulesVault tree lua`
 shows a ruleset family by family, `:RulesVault clipboard DEP-06 --link` copies `[DEP-06](path)` (for a finding that
 becomes a task), and `:RulesVault create ~/rules-vault` makes a vault: it lists what happens and the one step that is

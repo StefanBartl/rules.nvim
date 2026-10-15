@@ -11,6 +11,9 @@
 ---   lua_predicates  boolean           `setup()` only: a file in a repository must not decide what code may run
 ---   trust           list of strings   `setup()` and a call only: folders whose rulesets may run `lua_predicate` checks
 ---                                     although a project file named them; a file must never grant itself trust
+---   keys            object            `setup()` only: `form` = action -> key, a list of keys, or `false` (the keys of the
+---                                     `:Rules new` form: `toggle`, `accept`, `submit`, `close`, `cancel`, `help`); the keys
+---                                     of your editor are yours, not a repository's
 ---
 --- `check` never raises and never guesses: it returns the part that is valid, every problem with the dotted key it
 --- belongs to, and every key it does not know. What to do with a problem is the caller's: `setup()` drops the key
@@ -32,7 +35,7 @@ local M = {}
 ---(`rules.api`, `scripts/rules.lua`): its keys are checked like the others, an unknown one is not looked for.
 ---@type table<Rules.Config.Scope, string[]>
 M.KEYS = {
-  setup = { "rulesets", "gates", "lua_predicates", "vault", "agent", "trust" },
+  setup = { "rulesets", "gates", "lua_predicates", "vault", "agent", "trust", "keys" },
   project = { "rulesets", "gates", "agent", "vault" },
   vault = { "rulesets", "gates", "agent" },
   call = { "rulesets", "gates", "agent", "vault", "trust" },
@@ -41,16 +44,26 @@ M.KEYS = {
 ---The keys of the `agent` object.
 M.AGENT_KEYS = { "backends", "models", "batch_size", "max_context_bytes", "deny", "scopes" }
 
+---The groups of `keys` (buffer-local keys of one UI each).
+M.KEY_GROUPS = { "form" }
+
+---The actions of the form of `:Rules new` whose key can be set, in the order the form binds them (the later one wins when
+---two actions share a key). `toggle` and `accept` both tick the severity under the cursor and are the key itself
+---anywhere else; `close` and `cancel` both cancel the form.
+M.FORM_ACTIONS = { "toggle", "accept", "submit", "close", "cancel", "help" }
+
 ---A hint for a key that is known elsewhere but not in this place.
 ---@type table<Rules.Config.Scope, table<string, string>>
 local ELSEWHERE = {
   project = {
     lua_predicates = "is a setup() option only (a file in a repository must not decide what code may run)",
     trust = "is a setup() option only (a file in a repository must not grant itself trust)",
+    keys = "is a setup() option only (the keys of your editor are yours, not a repository's)",
   },
   vault = {
     lua_predicates = "is a setup() option only (a file must not decide what code may run)",
     trust = "is a setup() option only (a file must not grant trust)",
+    keys = "is a setup() option only (the keys of your editor are yours, not a vault's)",
     vault = "belongs in setup() or a project file (a vault does not name another vault)",
   },
 }
@@ -325,6 +338,72 @@ local function lua_predicates(value, problems)
   return value
 end
 
+---The key(s) of one action: a key (a string), a list of keys, or `false` to switch the action's key off.
+---@param value any
+---@param key string  dotted path of the action, e.g. `keys.form.submit`
+---@param problems Rules.Config.Problem[]
+---@return string|string[]|false|nil  `nil`: not valid (a problem was added)
+local function action_keys(value, key, problems)
+  if value == false then
+    return false
+  end
+  if type(value) == "string" and value ~= "" then
+    return value
+  end
+  if type(value) == "table" and is_list(value) and next(value) ~= nil then
+    local out, seen = {}, {}
+    for i, item in ipairs(value) do
+      if type(item) ~= "string" or item == "" then
+        problems[#problems + 1] =
+          { key = key, message = ("must be a list of keys (non-empty strings); item %d is %s"):format(i, describe(item)) }
+        return nil
+      end
+      if not seen[item] then
+        seen[item] = true
+        out[#out + 1] = item
+      end
+    end
+    return out
+  end
+  problems[#problems + 1] = {
+    key = key,
+    message = ("must be a key (a non-empty string), a list of keys, or false to switch it off, got %s"):format(describe(value)),
+  }
+  return nil
+end
+
+---`keys`: per UI, the action -> key(s) map. An action that is not named keeps its default; one that is wrong is dropped
+---with its problem (the others stay); a group or an action this plugin does not have is unknown (never silently bound to
+---nothing).
+---@param value any
+---@param problems Rules.Config.Problem[]
+---@param unknown Rules.Config.Unknown[]
+---@return table|nil
+local function keys(value, problems, unknown)
+  if not is_object(value) then
+    problems[#problems + 1] =
+      { key = "keys", message = ("must be an object ({ form = { ... } }), got %s"):format(describe(value)) }
+    return nil
+  end
+  find_unknown(value, M.KEY_GROUPS, "keys.", "setup", unknown)
+  local out = {}
+  if value.form ~= nil then
+    local form = value.form
+    if not is_object(form) then
+      problems[#problems + 1] = { key = "keys.form", message = ("must map an action to a key, got %s"):format(describe(form)) }
+    else
+      find_unknown(form, M.FORM_ACTIONS, "keys.form.", "setup", unknown)
+      out.form = {}
+      for _, action in ipairs(M.FORM_ACTIONS) do
+        if form[action] ~= nil then
+          out.form[action] = action_keys(form[action], "keys.form." .. action, problems)
+        end
+      end
+    end
+  end
+  return out
+end
+
 ---@param value any
 ---@param scope Rules.Config.Scope
 ---@return Rules.Config.Checked
@@ -360,6 +439,9 @@ local function check_table(value, scope)
   end
   if allowed.trust and value.trust ~= nil then
     clean.trust = string_list(value.trust, "trust", problems)
+  end
+  if allowed.keys and value.keys ~= nil then
+    clean.keys = keys(value.keys, problems, result.unknown)
   end
   return result
 end

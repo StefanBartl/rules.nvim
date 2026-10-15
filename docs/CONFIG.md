@@ -27,6 +27,8 @@ How two places combine:
 - `lua_predicates` comes from `setup()` only: a file in a repository must not decide what code may run.
 - `trust` comes from `setup()` and a call only (`--trust`, `$RULES_TRUST`): a file must not grant itself trust, see
   [A word on trust](#a-word-on-trust).
+- `keys` comes from `setup()` only: the keys of your editor are yours, not a repository's or a vault's. In a file it is an
+  unknown key with that hint. See [The keys of the form](#the-keys-of-the-form).
 
 ## `.rules.json`
 
@@ -61,7 +63,7 @@ The same schema in a project and in a vault. Paths are relative to the file that
 | `vault` | string | the vault of this project (a project file only; see below) |
 
 The `agent` block is read, checked and merged here; the planner that uses it is described in [AGENT.md](AGENT.md).
-`setup()` takes the same keys (`rulesets`, `gates`, `agent`, `vault`) plus `lua_predicates` and `trust`.
+`setup()` takes the same keys (`rulesets`, `gates`, `agent`, `vault`) plus `lua_predicates`, `trust` and `keys`.
 
 Only the file at the root being checked is read (`:Rules check` uses its `path` argument, else the working directory).
 There is no search upwards.
@@ -89,8 +91,45 @@ survives a `batch_size` that is not a number.
 
 A key the schema does not know is ignored with a warning and the nearest known key as a hint (the ERR-50 pattern of
 `setup()`): `unknown key(s) ignored: ruleset (did you mean rulesets?)`. A key that is known elsewhere but not in this
-place says why (`lua_predicates` is a `setup()` option only; `vault` does not belong in a vault's own file). Each
-warning is shown once per session.
+place says why (`lua_predicates`, `trust` and `keys` are `setup()` options only; `vault` does not belong in a vault's
+own file). Each warning is shown once per session.
+
+### The keys of the form
+
+The buffer-local keys of the `:Rules new` form (see [BINDINGS.md](BINDINGS.md#the-form)) are a `setup()` option:
+
+```lua
+require("rules").setup({
+  keys = {
+    form = {
+      toggle = "<Space>",        -- tick or untick the severity under the cursor (the default)
+      accept = { "<CR>", "t" },  -- a list binds every key of it
+      submit = "<C-g>",
+      close = "q",
+      cancel = false,            -- false: this action has no key
+      help = "g?",
+    },
+  },
+})
+```
+
+| Action | Default | Does |
+| --- | --- | --- |
+| `toggle` | `<Space>` | tick or untick the severity under the cursor; anywhere else the key does what it always does |
+| `accept` | `<CR>` | the same for a second key |
+| `submit` | `<C-s>` (normal and insert mode) | check the form, dry run, ask, write |
+| `close` | `q` | cancel; asks first when something was typed |
+| `cancel` | `<C-q>` (normal and insert mode) | the same for a second key, also in insert mode |
+| `help` | `g?` | list the keys in force |
+
+An action that is not named keeps its default; a key is a string, a list of strings (every one is bound) or `false`. The
+form's own hint line and its `g?` list show the keys that are really bound. The usual loud failures of `setup()` apply
+(ERR-22, ERR-50): an action this plugin does not have (`keys.form.sumbit (did you mean submit?)`) or a group it does not have
+(`keys.menu`) is an unknown option, a value of the wrong type (a number, an empty string or list, a list with a non-string)
+is dropped with its dotted key (`keys.form.submit must be a key ...`), and the default stays. Two actions on one key
+(`submit = "<Space>"` next to the default `toggle`, in any spelling: `<C-s>` and `<C-S>` are one key) are named at `setup()`
+(`keys.form: toggle, submit share the key <Space>`); the keys stay as set and the action the form binds last works (the order
+of the table).
 
 ### No machine path in a repository
 
