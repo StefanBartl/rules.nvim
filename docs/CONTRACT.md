@@ -40,6 +40,7 @@ left out. At most 256 KiB.
 | `rule` | `id` (required) | `rules.rule`: one rule with `text`, `check` and the `etag` of its file. |
 | `next_id` | `family` (letters) | `rules.next_id`: the next free id of a family, or of every family. |
 | `sources` | none | `rules.sources`: the files, each with its `etag`. |
+| `waivers` | `project` | `rules.waivers`: the waivers of a project, each with `expired` and `known`, see [Waivers](#waivers). |
 | `ops` | `client_op_id`, `dry_run`, `ops` (flat: the fields are the request's own) | `rules.result`: one entry per operation, see [rules-ops/1](#rules-ops1-write). |
 
 ### `etag` and `etag_scope`
@@ -110,6 +111,9 @@ is true only if all entries are. `dry_run` checks everything and writes nothing.
 | `retire` | `id`, `replaced_by`?, `reason`?, `if_match`? | Moves the file to `_retired/` (the id stays taken) and takes the rule out of every layout that holds it. `inverse`: `reinstate` with `places`, one entry for each layout the rule stood in. |
 | `reinstate` | `id`, a place? or `places`? | Brings a retired rule back to the file it came from. `places` (`{ "regeln/DEP.md": { "after": "DEP-01" } }`, keyed by the `output` of the layout, goes alone) puts it back into each of those layouts. `inverse`: `retire`. |
 | `move` | `id`, a place | Moves the `{{rule ID}}` line of the rule within a layout or to another one; the rule's file is not touched. `inverse`: `move` back. |
+| `waive` | `id`, `reason`, `expires`?, `paths`?, `project`?, `if_match`? | Adds the waiver of a project's `.rules-waivers.json` (not a ruleset file). `inverse`: `remove`. See [Waivers](#waivers). |
+| `renew` | `id`, `expires` or `no_expiry`, `reason`?, `project`?, `if_match`? | Gives a waiver a new last day. `inverse`: `renew` back. |
+| `remove` | `id`, `project`?, `if_match`? | Drops a waiver. `inverse`: `waive` with the old values. |
 
 A **place** is `after` or `before` (an id that stands in a layout; the layout
 is the one that holds it, or the one named by `layout`), `section` (a heading
@@ -170,7 +174,7 @@ above and below the token, which the token is then put back between, exactly).
   (some documents have none), and a generated document must stay byte for byte
   what the rule files and the layout say.
 - **Warnings.** An entry of `new` (also in a `dry_run`) may carry `warnings`, a list of texts: things to know that did not
-  stop the operation. Today there is one: the rules-vault the ruleset lies in is a git repository that is behind its
+  stop the operation (`waive` and `renew` have one of their own, see [Waivers](#waivers)). For `new` there is one: the rules-vault the ruleset lies in is a git repository that is behind its
   upstream (`git rev-list --count HEAD..@{u}`, read only, no network, a short timeout), so another machine may make the same
   id: *pull before you create*. The field is absent when there is nothing to say, and always absent without git, without an
   upstream or for a ruleset outside the vault. It is additive: `schema` stays `1`, no golden file changes (the fixtures are no
@@ -197,6 +201,80 @@ above and below the token, which the token is then put back between, exactly).
   an error, for its own ruleset. A ruleset whose operation started to write is
   made again also when the operation failed after it started to write (a step
   back that fails leaves files half changed).
+
+## Waivers
+
+The waivers of a project (`.rules-waivers.json`, format in [CONFIG.md](CONFIG.md#rules-waiversjson)) are read by
+`waivers` and written by `waive`, `renew` and `remove`. They live in the **checked project**, not in a ruleset: the
+operations do not take the lock of a ruleset, do not touch a rule or a layout, and make no catalog.
+
+### The project
+
+`project` (a field of each waiver operation, a parameter of `waivers`) is the folder whose `.rules-waivers.json` is meant.
+Left out, it is the project the engine was configured with (`opts.project`, `--project=<dir>`, `$RULES_PROJECT`, in the
+editor the working directory); with none, the request is `invalid_argument`. A given project is checked:
+
+- it has no `..` and no control character; a relative one starts at the configured project (and needs one);
+- it is a folder that exists (`not_found`), and is taken by its **real path**, so a link, a short Windows name or `/var`
+  against `/private/var` is the same folder;
+- with a configured project it must be that project or a folder inside it (`invalid_argument`): a request does not
+  reach further than the engine was pointed;
+- it is never inside a ruleset (`invalid_argument`): a waiver belongs to the project that is checked, not to a ruleset.
+  A ruleset that **is** the configured project (a vault checking itself), or a project that holds the rulesets, is fine.
+
+No answer names the project: messages say "the project" and "the waivers file", never a path of this machine.
+
+### The file
+
+- Written **canonically**: sorted keys, two spaces, LF and a final newline. A waiver with only a reason is written as
+  the short text (`"DEP-01": "reason"`), any other as an object. The file is written again whole, so an entry nobody
+  touched keeps its **meaning** (and its form) but may change its layout and its place; it is a rewrite, not a patch.
+- Atomic (a temporary file beside it, renamed over it) and under a lock of its own, a hidden
+  `.rules-waivers.json.lock` beside the file (`lib.nvim` `with_lock`); a held lock is `locked` (`retryable`). A lock
+  or write failure says so without the path.
+- `if_match` is the `etag` of the **file**; a project without one has the etag of an empty file
+  (`sha256:e3b0c44298fc1c14`), so "create it only if nobody did" works. The `rules.waivers` document carries the current
+  `etag`.
+- A file that exists and cannot be used (not JSON, an unknown key, a bad date, an empty file, a folder) is
+  `invalid_argument` and is **not** touched; a link where the file belongs is `forbidden` (the write would replace the
+  link).
+- At most 500 waivers in a file (`payload_too_large` beyond that).
+
+### The operations
+
+| Operation | Fields | What it does |
+| --- | --- | --- |
+| `waive` | `id`, `reason`, `expires`?, `paths`?, `project`?, `if_match`? | Adds the waiver of a rule. The rule must be **loaded** (an id no ruleset has is `invalid_argument`; the trust gate does not matter, a waiver runs no code). `reason`: required, says something, one line, no control character, at most 500 characters. `expires`: `YYYY-MM-DD`, a real day. `paths`: a list of 1 to 50 distinct paths (see CONFIG.md). A waiver that is there already is `invalid_argument` (renew or remove it); the very same one again is `unchanged`. `inverse`: `remove`. |
+| `renew` | `id`, `expires` or `no_expiry: true`, `reason`?, `project`?, `if_match`? | Gives a waiver a new last day (or none) and optionally a new reason; the `paths` stay. `expires` or `no_expiry` is required, not both. No waiver for the id: `not_found`. Renewing an expired waiver is what it is for. The same values again are `unchanged`. `before`: `{ expires }` or `{ no_expiry: true }`, and `reason` when it changed. `inverse`: `renew` with those. |
+| `remove` | `id`, `project`?, `if_match`? | Drops the waiver; the rule does not have to exist (a waiver of a retired rule is removed this way). No waiver: `not_found`. The last waiver leaves a file with `{}`. `before`: the waiver (`reason`, `expires`?, `paths`?). `inverse`: `waive` with those values (it needs the rule to be loaded again). |
+
+An entry has `etag_before` and `etag_after` (of the file), `changed_ids` (the rule id), the `before` and `inverse` above,
+and with `dry_run` the outcome `would_waive`, `would_renew` or `would_remove` and `diff` (`before` and `after`, the whole
+file text), and nothing written. Outcomes: `waived`, `renewed`, `removed`, `unchanged`, `conflict`, `failed`. `inverse`
+carries `if_match` (the etag after) and **no `project`**: send it with the same `project` as the request it undoes (or
+none, for the configured one); the `if_match` stops a replay against another folder.
+
+Errors: `invalid_argument` (a bad id, reason, date, path or project, an unknown rule for `waive`, a file that cannot be
+used, a waiver there already), `not_found` (no waiver to renew or remove; a project that is not a folder), `conflict`
+(`details.expected`, `details.actual`), `locked` (retryable), `forbidden` (the file is a link), `payload_too_large`,
+`io`.
+
+**A date in the past** is not refused: `waive` or `renew` with an `expires` before today succeeds and the entry carries a
+`warnings` text (the waiver is expired from the start and suppresses nothing). The `inverse` of a `renew` or a `remove` of
+an expired waiver has to be able to put that date back.
+
+### `waivers` (read)
+
+`waivers` { `project`? } answers `rules.waivers`: `today` (the day the expiry is judged against), `etag` and `exists` (of the
+file), `counts` (`total`, `expired`, `unknown`) and `items` in id order: `id`, `reason`, `expires`?, `paths`?, `expired`
+(the last day is before `today`) and `known` (a loaded rule has the id; false: the waiver protects nothing). A file that
+cannot be used is an error document, never an empty list. A report of a check (`check_family_json`, `run_gate_json`)
+marks the same fact per rule: `expired_waiver`, `waiver_expires`, `waiver_paths`, `partial_waiver`
+([BINDINGS.md](BINDINGS.md#waivers)); `scripts/ruleset.lua check --waivers --project=<dir>` exits 1 on an expired waiver
+(CI).
+
+"Today" is the machine's local calendar date; `opts.today` (`YYYY-MM-DD`) of `rules.api` and `rules.ops` fixes it for a
+reproducible run (a bad value is `invalid_argument`).
 
 ## Entry points
 
@@ -247,7 +325,7 @@ never trusted), so a question costs milliseconds, not a parse of the ruleset.
 local text, code = require("rules.api").call("rule", '{"params":{"id":"DEP-06"}}', { rulesets = { dir } })
 ```
 
-`opts` is `{ rulesets?, gates?, vault?, project?, trust? }`; what it leaves out comes from
+`opts` is `{ rulesets?, gates?, vault?, project?, trust?, today? }`; what it leaves out comes from
 `setup()`, the project file and the vault ([CONFIG.md](CONFIG.md)). `trust` is a list of
 folders (`--trust=<dir>` of the scripts, `$RULES_TRUST` for every entry point): the
 contract itself runs no check, the option only tells which rulesets are trusted for a

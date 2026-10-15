@@ -102,6 +102,67 @@ An entry of `rulesets` that resolves outside the project folder (`../shared`) wa
 project file. The warning names the key and carries no path of this machine in a document. The entry stays usable, but its
 rulesets are **not trusted**: see [A word on trust](#a-word-on-trust).
 
+## `.rules-waivers.json`
+
+The other file of a project: the findings it has consciously accepted. It lives in the **checked project** (the root a
+`:Rules check` or `gate` is run on), never in a ruleset or the vault: the rulesets say what is wrong, the project says
+what it has accepted. How a waived rule shows up in a report is in [BINDINGS.md](BINDINGS.md#waivers); changing the file
+through the machine contract (`waive`, `renew`, `remove`) is in [CONTRACT.md](CONTRACT.md#waivers).
+
+A file is one JSON object. Its keys are rule ids, its values one of two forms that may be mixed in one file:
+
+```json
+{
+  "DEP-01": "every finding is a fixture string of the tests",
+  "DEP-04": {
+    "reason": "legacy call sites, ticket JIRA-123 tracks the fix",
+    "expires": "2026-12-31",
+    "paths": ["src/legacy", "docs/**/*.md"]
+  }
+}
+```
+
+| Form | Meaning |
+| --- | --- |
+| `"reason"` (a text) | no expiry, every path. The only form older versions knew; it stays valid and keeps this meaning. |
+| `{ "reason", "expires"?, "paths"? }` | the same, with the two limits below. Any other key is an error. |
+
+- **`reason`** is required in the object form and must say something. One line, no control character, at most 500
+  characters (it is rendered as one line of the report).
+- **`expires`** is a calendar date, `YYYY-MM-DD`: a real day (`2028-02-29` yes, `2027-02-29` no), no time and no time
+  zone. The waiver is valid **through** that day; the day after it is **expired**: the finding flags again, with a line
+  that says `waiver expired on <date>` and the reason. "Today" is the date of the machine that runs the check (local
+  calendar date); `opts.today` of `rules.api` and `rules.ops`, and `--today=` of `scripts/ruleset.lua check`, give a
+  fixed day (a reproducible run, a spec). The clock is one function, `rules.engine.waivers.clock`.
+- **`paths`** limit the waiver to findings in those places: a non-empty list (at most 50) of files, folders or globs,
+  relative to the project root, written with `/`, no `..`, no absolute path, no `~`. A plain name is that file or
+  the folder with that name (and everything under it, `src/legacy` or `src/legacy/`); a glob (`*` inside one folder,
+  `**` across folders, `?`, `[ab]`, `{a,b}`; `vim.glob`) must match the whole path, or a folder above the file.
+  Matched as written (case counts). A finding that is no file at all (a check that errored names the project, not a
+  file) is never inside `paths`. A rule with findings both inside and outside stays failing with the ones outside,
+  and the report says how many were waived.
+- At most 500 waivers in a file. A waiver whose rule id no ruleset has is not an error (the rule may live in a ruleset
+  that is not loaded right now): it protects nothing, and `:checkhealth rules` and `scripts/ruleset.lua check --waivers`
+  say so.
+
+### A file that cannot be used is an error
+
+Like `.rules.json`: a waivers file that exists and cannot be used (not JSON, a list instead of an object, an unknown
+key, a date that is none, a path with `..`, an empty file, a folder in its place) is an error of the run. `:Rules
+check`, `:Rules gate` and their headless counterparts (`check_family_json`, `run_gate_json`) stop and say why; the
+findings it was meant to hold never come back silently as "no waivers" with a warning on the side. A project without
+the file has no waivers, which is not an error.
+
+### CI
+
+```bash
+nvim --headless -u NONE -i NONE -n -l scripts/ruleset.lua check --waivers --project=. <ruleset-folder>
+```
+
+exits 1 when the waivers file cannot be used or a waiver in it has **expired**, and prints each one with its date and
+reason; a waiver for a rule that is not loaded is a note. `--today=YYYY-MM-DD` judges the expiry as of that day.
+`--waivers` needs `--project=<dir>` (or `$RULES_PROJECT`), exit code 2 without.
+
 ## The rules-vault
 
 A vault is a folder (a repository of its own) that holds the rulesets of a person, one folder each:
@@ -277,6 +338,7 @@ RULES_VAULT=~/rules-vault nvim --headless -u NONE -i NONE -n -l scripts/rules.lu
 nvim --headless -u NONE -i NONE -n -l scripts/rules.lua list --format=json --vault=~/rules-vault --project=. --family=DEP
 nvim --headless -u NONE -i NONE -n -l scripts/ruleset.lua catalog --check @vault/lua   # or no folder: every ruleset
 nvim --headless -u NONE -i NONE -n -l scripts/ruleset.lua check --vault=~/rules-vault   # all rulesets load, no duplicate id
+nvim --headless -u NONE -i NONE -n -l scripts/ruleset.lua check --waivers --project=. @vault/lua   # also: no expired waiver in ./.rules-waivers.json
 ```
 
 | | |

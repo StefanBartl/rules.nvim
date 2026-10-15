@@ -386,27 +386,68 @@ doesn't keep flagging them:
 
 ```json
 {
-  "DEP-04": "legacy call site, ticket JIRA-123 tracks the actual fix"
+  "DEP-04": "legacy call site, ticket JIRA-123 tracks the actual fix",
+  "DEP-01": {
+    "reason": "fixture strings of the tests, not real calls",
+    "expires": "2026-12-31",
+    "paths": ["TESTS", "docs/**/*.md"]
+  }
 }
 ```
 
 A waived rule that would otherwise fail or error reports as **waived**
-instead — visible in the buffer report with its reason, excluded from the
-quickfix worklist, and never counted by `check_family_json`'s exit code. A
-waiver for a rule that currently passes has no effect; it just sits unused
-until the rule fails again. This is deliberately different from deleting the
-rule or the ruleset entry: the record that a specific finding was seen and
-accepted survives.
+instead — visible in the buffer report with its reason (and its last day and
+its paths when it has them), excluded from the quickfix worklist, and never
+counted by `check_family_json`'s exit code. A waiver for a rule that currently
+passes has no effect; it just sits unused until the rule fails again. This is
+deliberately different from deleting the rule or the ruleset entry: the record
+that a specific finding was seen and accepted survives.
 
-A `.rules-waivers.json` that isn't a `{"RULE-ID": "reason"}` object — a list,
-or a value that isn't a string — is a load error, notified the same way a
-bad ruleset file is, not a silent zero-waivers file. Same reasoning as
+The file format (the short form, the object form, `expires`, `paths`, the caps)
+is in [CONFIG.md](CONFIG.md#rules-waiversjson). In short:
+
+- **`expires`** (`YYYY-MM-DD`) is the last day the waiver counts. The day after,
+  it is **expired**: the finding is not waived any more and flags again, and the
+  report says `waiver expired on <date> (<reason>): renew it or remove it` under
+  the rule (also under a rule that passes now: the waiver is still there to be
+  renewed or removed). `:Rules check` and `:Rules gate` also notify how many
+  waivers of the project expired, whatever family they were run for.
+  `check_family_json` carries it as `expired_waiver` (`reason`, `expires`) of
+  the entry, and a waived entry has `waiver_expires` and `waiver_paths`.
+- **`paths`** limit the waiver to findings in those files or folders (globs
+  allowed). A finding outside them still flags; the ones inside are counted
+  (`partial_waiver` in JSON, `N more finding(s) waived in …` in the report).
+
+A `.rules-waivers.json` that cannot be used — not an object (a list), a value
+that is neither a reason text nor an object, an unknown key, a date that is no
+real calendar date, a path with `..`, an unparseable or empty file — is an
+**error of the run**, not a warning followed by "no waivers": `:Rules check`
+and `:Rules gate` stop and name the file's problem, `check_family_json` and
+`run_gate_json` return the text as their error. Same reasoning as
 `docs/RULESET-FORMAT.md`'s check primitives: a malformed input fails loudly
 instead of quietly doing nothing. A reason is also re-validated on every
 load: no newline (it is rendered as one report line), at most 500
-characters, and at most 500 entries in the file — each is a load error too.
+characters, and at most 500 entries in the file.
+
+The date a run counts as today is the machine's (local calendar date).
+Specs and reproducible CI runs fix it: `rules.engine.waivers.clock` is the one
+seam, `opts.today` of `rules.api`/`rules.ops` and `--today=` of
+`scripts/ruleset.lua check` override it per call.
 
 `:checkhealth rules` cross-checks the current working directory's waivers
 against every loaded rule id and warns about any entry that matches
 nothing — a rule that was renamed/retired, or a plain typo, left silently
-protecting nothing.
+protecting nothing — and about any waiver that has expired.
+
+### In CI
+
+A project that wants an expired waiver to fail its pipeline runs
+
+```sh
+nvim --headless -u NONE -i NONE -n -l scripts/ruleset.lua check --waivers --project=. <ruleset-folder>
+```
+
+which exits 1 when the waivers file cannot be used or a waiver has expired
+(`CONFIG.md` has the details). Changing the file is not a text edit by hand:
+`waive`, `renew` and `remove` of [`rules-ops/1`](CONTRACT.md#waivers) check the
+request, take a lock, write the file canonically and answer with an `inverse`.

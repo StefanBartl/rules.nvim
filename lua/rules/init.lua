@@ -92,7 +92,7 @@ end
 local function warn_expired(expired)
   if expired and #expired > 0 then
     notify.warn(
-      ("%d waiver(s) in %s expired: %s -- renew or remove them (:Rules waive/renew/unwaive, rules-ops/1)"):format(
+      ("%d waiver(s) in %s expired: %s -- renew them (rules-ops/1 renew) or remove them"):format(
         #expired,
         waivers.FILE,
         table.concat(expired, ", ")

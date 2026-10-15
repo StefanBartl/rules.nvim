@@ -177,6 +177,13 @@ just grep it. Omit `check` entirely for those. `:Rules check` never invents
 a pass/fail for a rule like this; it lists it as a worklist entry (ID, title,
 source location) instead, for a human or an agent session to work through.
 
+## Waivers are not part of a ruleset
+
+A ruleset says what is wrong; what a project has consciously accepted lives in the **project**, in its
+`.rules-waivers.json` (a reason, an optional last day `expires`, optional `paths`): never in a rule file, a layout or the
+vault. The format is in [CONFIG.md](CONFIG.md#rules-waiversjson), the operations that write it (`waive`, `renew`,
+`remove`) in [CONTRACT.md](CONTRACT.md#waivers).
+
 ## One file per rule
 
 A rule is a file of its own, so a tool can create, change or retire exactly one
