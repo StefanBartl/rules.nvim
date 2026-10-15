@@ -97,12 +97,17 @@ local function run(op_list, dry)
   return result
 end
 
----Open the file of a rule.
+---Open the file of a rule. Says why when it cannot (the settings cannot be used), says nothing when no rule has the id.
 ---@param id string
-local function open_rule(id)
+function M.open_rule(id)
   local contract = require("rules.contract")
-  local scan = contract.view(contract.editor_opts())
-  local path = scan and scan.abs[id]
+  local scan, scan_err = contract.view(contract.editor_opts())
+  if not scan then
+    -- the settings cannot be used (a broken .rules.json, a vault that is no folder): say it, do not do nothing
+    notify.error(("could not open %s: %s"):format(id, scan_err and scan_err.message or "the rules could not be read"))
+    return
+  end
+  local path = scan.abs[id]
   if not path then
     return
   end
@@ -217,7 +222,7 @@ function M.new_form(given)
       end
       ui.close(buf)
       write().say(result, { op })
-      open_rule(made.id)
+      M.open_rule(made.id)
     end)
   end
   local open = M.form_open or ui.open
@@ -235,7 +240,7 @@ local function make(op, dry)
   local result = run({ op }, dry)
   local entry = ok_entry(result)
   if entry and entry.outcome == "created" then
-    open_rule(entry.id)
+    M.open_rule(entry.id)
   end
 end
 

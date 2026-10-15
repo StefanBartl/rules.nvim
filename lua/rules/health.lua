@@ -59,6 +59,10 @@ local function report_vault(res, report)
     report.error(("vault %s (from %s) is not a folder"):format(res.vault.root, where))
     return
   end
+  if res.vault.file_problem then
+    report.error("the vault's own .rules.json cannot be used (see above): no ruleset is offered by it")
+    return
+  end
   report.ok(("vault %s (from %s)"):format(res.vault.root, where))
   local names = {}
   for _, folder in ipairs(res.vault.loaded or res.vault.rulesets) do
@@ -138,7 +142,7 @@ function M.check()
 
   local report = { ok = ok, warn = warn, error = error_, info = info }
   local settings = require("rules.settings")
-  local res = settings.resolve({ project = vim.fn.getcwd() })
+  local res = settings.resolve({ project = vim.fn.getcwd(), need_vault = true })
 
   start("rules.nvim: settings files")
   report_files(res, report)
