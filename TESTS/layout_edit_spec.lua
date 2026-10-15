@@ -1,7 +1,8 @@
 -- TESTS/layout_edit_spec.lua -- the layout editor (`rules.engine.layout_edit`): what it takes for a heading or a token,
 -- where a token goes in a section, and that `remove` and `place` give back the bytes they were given.
 -- The real layouts of a vault are an opt-in second look at the end of this file (RULES_REAL_LUA, RULES_REAL_NATIVE,
--- RULES_REAL_GO: the ruleset folders; their `_layouts` are copied before anything runs, nothing is written into them).
+-- RULES_REAL_GO: the ruleset folders; their layouts are copied to a temporary folder before anything is read, nothing
+-- is ever written into them).
 ---@diagnostic disable: need-check-nil
 local layout_edit = require("rules.engine.layout_edit")
 
@@ -282,8 +283,12 @@ describe("layout_edit: the real layouts", function()
   it("give the same bytes back for every token that is taken out and put back", function()
     local total, same, other_section = 0, 0, 0
     local bad = {}
+    local copies = vim.fn.tempname()
+    vim.fn.mkdir(copies, "p")
     for _, dir in ipairs(folders) do
-      for _, path in ipairs(vim.fn.glob(dir .. "/_layouts/**/*.md", false, true)) do
+      for n, source in ipairs(vim.fn.glob(dir .. "/_layouts/**/*.md", false, true)) do
+        local path = ("%s/%d.md"):format(copies, n)
+        assert(vim.uv.fs_copyfile(source, path), "could not copy " .. source)
         local fh = assert(io.open(path, "rb"))
         local text = fh:read("*a")
         fh:close()
