@@ -146,7 +146,9 @@ rulesets are **not trusted**: see [A word on trust](#a-word-on-trust).
 The other file of a project: the findings it has consciously accepted. It lives in the **checked project** (the root a
 `:Rules check` or `gate` is run on), never in a ruleset or the vault: the rulesets say what is wrong, the project says
 what it has accepted. How a waived rule shows up in a report is in [BINDINGS.md](BINDINGS.md#waivers); changing the file
-through the machine contract (`waive`, `renew`, `remove`) is in [CONTRACT.md](CONTRACT.md#waivers).
+through the machine contract (`waive`, `renew`, `remove`) is in [CONTRACT.md](CONTRACT.md#waivers), and in the editor with
+`:Rules waive`, `:Rules renew` and `:Rules unwaive` ([BINDINGS.md](BINDINGS.md#waiving-findings): which project they write,
+how `paths=` is typed).
 
 A file is one JSON object. Its keys are rule ids, its values one of two forms that may be mixed in one file:
 

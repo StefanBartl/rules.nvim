@@ -261,7 +261,8 @@ used, a waiver there already), `not_found` (no waiver to renew or remove; a proj
 
 **A date in the past** is not refused: `waive` or `renew` with an `expires` before today succeeds and the entry carries a
 `warnings` text (the waiver is expired from the start and suppresses nothing). The `inverse` of a `renew` or a `remove` of
-an expired waiver has to be able to put that date back.
+an expired waiver has to be able to put that date back. The editor commands `:Rules waive`, `renew` and `unwaive` are this door and
+nothing else ([BINDINGS.md](BINDINGS.md#waiving-findings)); they show the warning at warn level.
 
 ### `waivers` (read)
 
