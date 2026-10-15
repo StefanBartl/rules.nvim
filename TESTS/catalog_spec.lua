@@ -412,6 +412,24 @@ describe("rules.engine.catalog.render", function()
     return parser.split_text(id .. ".md", files[id])
   end
 
+  it("fills every whole-line token, also one in a fence or a comment, which the layout editor does not see", function()
+    -- documented difference (docs/RULESET-FORMAT.md, "What the editor takes for a heading or a token"): the editor
+    -- (`rules.engine.layout_edit`) refuses to place an id a second time that stands like this, because the generator
+    -- would place it twice
+    local layout_edit = require("rules.engine.layout_edit")
+    local lines = { "## S", "", "~~~", "{{rule A-1}}", "~~~", "", "<!--", "{{rule A-2}}", "-->" }
+    local layout = assert(catalog.parse_layout(layout_text("a.md", lines)))
+    local text, problems, used = catalog.render(layout, lookup)
+    assert.are.same({}, problems)
+    assert.are.same({ "A-1", "A-2" }, used)
+    assert.is_truthy(text:find("Text one.", 1, true))
+    assert.is_truthy(text:find("Text two.", 1, true))
+    local source = layout_text("a.md", lines)
+    assert.is_false(layout_edit.has(source, "A-1"))
+    assert.is_false(layout_edit.has(source, "A-2"))
+    assert.is_nil((layout_edit.place(source, "A-1", { section = "S" })))
+  end)
+
   it("puts the rules in the order of the tokens and the table of contents where it is asked", function()
     local layout = assert(catalog.parse_layout(layout_text("a.md", {
       "# Title",
