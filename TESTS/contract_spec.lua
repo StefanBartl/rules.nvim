@@ -507,6 +507,22 @@ describe("rules-export/1 golden files", function()
       '{"client_op_id":"c-1","dry_run":true,"ops":[{"op":"new","family":"DEP","title":"golden","severity":"critical"}]}'
     expect_golden("result", (api.call("ops", request, opts)))
   end)
+
+  it("match the waivers document and a waive dry run (a project with a waivers file, a fixed day)", function()
+    local root, opts = fixture()
+    local project = tmp_dir()
+    write_raw(
+      project .. "/.rules-waivers.json",
+      table.concat({
+        '{"DEP-01": "plain", "OLD-01": "gone",',
+        ' "DEP-09": {"reason": "ran out", "expires": "2025-12-31", "paths": ["src", "docs/**/*.md"]}}',
+      })
+    )
+    opts = vim.tbl_extend("force", opts, { rulesets = { root }, project = project, today = "2026-01-01" })
+    expect_golden("waivers", (api.call("waivers", nil, opts)))
+    local request = '{"client_op_id":"c-2","dry_run":true,"ops":[{"op":"renew","id":"DEP-09","expires":"2026-12-31"}]}'
+    expect_golden("result_renew", (api.call("ops", request, opts)))
+  end)
 end)
 
 describe("rules.host", function()

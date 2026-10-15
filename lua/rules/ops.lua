@@ -1,5 +1,5 @@
 ---@module 'rules.ops'
----@brief The write door of `rules-ops/1`: new, set, retire, reinstate, move.
+---@brief The write door of `rules-ops/1`: new, set, retire, reinstate, move, and the waivers (waive, renew, remove).
 ---@description
 --- Built on `lib.nvim.contract.ops` (the shape check of the whole request first, one entry per operation, `dry_run`,
 --- `client_op_id`, no path of this machine in an entry). What an operation DOES is here.
@@ -22,6 +22,10 @@
 ---    `{ [layout output] = place }`. `inverse`: `retire`.
 ---  - `move` { id, after? | before? | (layout, section, first?, nth?) } moves the `{{rule ID}}` line of a rule, within a
 ---    layout or to another one; the rule's file is not touched. `inverse`: `move` back.
+---
+---  - `waive` { id, reason, expires?, paths?, project?, if_match? }, `renew` { id, expires | no_expiry, reason?, project?,
+---    if_match? } and `remove` { id, project?, if_match? } write the `.rules-waivers.json` of a PROJECT, not a ruleset
+---    (`rules.waiver_ops`: the project, the lock of the file, the inverse).
 ---
 --- A rule that lives in a document with many rules (`etag_scope = "file"`) is not written: migrate it first
 --- (`scripts/ruleset.lua migrate`). A rule whose check holds a Lua function is not patched in `check` or `agent`.
@@ -47,6 +51,8 @@ local rule_edit = require("rules.engine.rule_edit")
 local layout_edit = require("rules.engine.layout_edit")
 local catalog = require("rules.engine.catalog")
 local fswalk = require("rules.engine.fswalk")
+local waivers = require("rules.engine.waivers")
+local wops = require("rules.waiver_ops")
 
 local M = {}
 
@@ -581,24 +587,7 @@ local function rule_file_of(ctx, view, id)
   return path, nil
 end
 
----@param current string
----@param if_match string|nil
----@return table|nil entry
-local function conflict(current, if_match)
-  if if_match == nil or if_match == current then
-    return nil
-  end
-  return {
-    ok = false,
-    outcome = "conflict",
-    error = {
-      code = "conflict",
-      message = "the file is not the version the caller saw",
-      retryable = false,
-      details = json.object({ expected = if_match, actual = current }),
-    },
-  }
-end
+local conflict = wops.conflict
 
 ---The warnings that go with a rule made in the ruleset `root`: the rules-vault it lies in is a git repository that is
 ---behind its upstream. Two machines that make a rule in one family without a pull in between make the same id, and
@@ -1334,8 +1323,41 @@ end
 
 door = ops_lib.make({
   doc = contract.doc,
-  order = { "new", "set", "retire", "reinstate", "move" },
+  order = { "new", "set", "retire", "reinstate", "move", "waive", "renew", "remove" },
+  types = wops.TYPES,
   ops = {
+    waive = {
+      fields = {
+        id = "string",
+        reason = "string",
+        expires = "string",
+        paths = "text_list",
+        project = "string",
+        if_match = "string",
+      },
+      run = function(op, ctx)
+        return wops.waive(op, ctx, door)
+      end,
+    },
+    renew = {
+      fields = {
+        id = "string",
+        expires = "string",
+        no_expiry = "boolean",
+        reason = "string",
+        project = "string",
+        if_match = "string",
+      },
+      run = function(op, ctx)
+        return wops.renew(op, ctx, door)
+      end,
+    },
+    remove = {
+      fields = { id = "string", project = "string", if_match = "string" },
+      run = function(op, ctx)
+        return wops.remove(op, ctx, door)
+      end,
+    },
     new = {
       fields = fields(PLACE_FIELDS, {
         family = "string",
@@ -1373,6 +1395,10 @@ door = ops_lib.make({
     if #paths == 0 then
       return nil, errors.fail("not_found", "no ruleset is configured (rulesets is empty)")
     end
+    local today, today_err = waivers.today(opts and opts.today)
+    if not today then
+      return nil, errors.fail("invalid_argument", today_err)
+    end
     return {
       root = paths[1],
       paths = paths,
@@ -1386,7 +1412,7 @@ door = ops_lib.make({
       dry = params.dry_run == true,
       touched = {},
       owner = {},
-      today = (opts and opts.today) or os.date("%Y-%m-%d"),
+      today = today,
     }
   end,
   finish = function(ctx, results)

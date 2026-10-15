@@ -3,10 +3,11 @@
 ---@description
 --- A table of methods on `lib.nvim.contract.api`; the mechanics (request size, schema, unknown parameter, type,
 --- error codes) are lib.nvim's. A request is `{ "schema": 1, "params": { ... } }`. `opts` is
---- `{ rulesets?, gates?, vault?, project?, trust? }` (default: `rules.settings`: `setup()`, the project file, the vault),
---- hidden in every error text.
+--- `{ rulesets?, gates?, vault?, project?, trust?, today? }` (default: `rules.settings`: `setup()`, the project file, the
+--- vault; `today` is the date waivers are judged against, default the real one), hidden in every error text.
 ---
---- Methods: `hello`, `snapshot`, `list`, `rule`, `next_id`, `sources` (read), `ops` (the write door, `rules.ops`).
+--- Methods: `hello`, `snapshot`, `list`, `rule`, `next_id`, `sources`, `waivers` (read), `ops` (the write door,
+--- `rules.ops`).
 ---
 ---```lua
 --- local text, code = require("rules.api").call("rule", '{"params":{"id":"LUA-12"}}', { rulesets = { dir } })
@@ -19,7 +20,7 @@ local M = {}
 
 local api = api_mod.make({
   doc = contract.doc,
-  engine_opts = { "rulesets", "gates", "vault", "project", "trust" },
+  engine_opts = { "rulesets", "gates", "vault", "project", "trust", "today" },
   root_of = function(opts)
     return contract.root_of(opts)
   end,
@@ -59,6 +60,12 @@ local api = api_mod.make({
       params = {},
       run = function(_, opts)
         return contract.sources(opts)
+      end,
+    },
+    waivers = {
+      params = { project = "string" },
+      run = function(params, opts)
+        return contract.waivers(params, opts)
       end,
     },
     ops = require("rules.ops").method(),

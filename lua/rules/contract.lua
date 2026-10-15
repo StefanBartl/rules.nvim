@@ -81,6 +81,7 @@ M.doc = d
 ---@field vault? string                 the rules-vault; default `setup({ vault })`, `$RULES_VAULT`, then the project file
 ---@field project? string               the root whose `.rules.json` is read; no project, no project file
 ---@field trust? string[]              folders whose rulesets are trusted (`setup({ trust })`, `--trust`): see `rules.settings`
+---@field today? string                 the date waivers are judged against (`YYYY-MM-DD`); default today
 
 ---Paths that differ only in case are one folder on Windows and (by default) on macOS.
 local CASE_INSENSITIVE = vim.fn.has("win32") == 1 or vim.fn.has("mac") == 1
@@ -524,7 +525,7 @@ end
 function M.hello(opts)
   local doc = d.head(d.kind("hello"), M.root_of(opts))
   doc.schemas = json.array({ M.SCHEMA })
-  doc.capabilities = json.array({ "hello", "snapshot", "list", "rule", "next_id", "sources", "ops" })
+  doc.capabilities = json.array({ "hello", "snapshot", "list", "rule", "next_id", "sources", "waivers", "ops" })
   doc.limits = json.object({
     list_items = M.MAX_LIST_ITEMS,
     request_bytes = 256 * 1024,
@@ -532,7 +533,7 @@ function M.hello(opts)
   })
   doc.enums = json.object({ severity = json.array(vim.deepcopy(M.SEVERITIES)) })
   doc.read_only = false
-  doc.ops = json.array({ "new", "set", "retire", "reinstate", "move" })
+  doc.ops = json.array({ "new", "set", "retire", "reinstate", "move", "waive", "renew", "remove" })
   return doc
 end
 
@@ -745,6 +746,16 @@ function M.sources(opts)
   doc.items = json.array(view.files)
   doc.load_errors = json.array(view.load_errors)
   return d.seal(doc, view.rev), nil
+end
+
+---`rules.waivers`: the waivers of a project (`.rules-waivers.json`), each with `expired` and `known`. The project is
+---`params.project`, else the configured one; see `rules.waiver_ops`.
+---@param params { project?: string }|nil
+---@param opts Rules.Contract.Opts|nil
+---@return table|nil doc
+---@return Lib.Contract.Error|nil err
+function M.waivers(params, opts)
+  return require("rules.waiver_ops").document(params, opts)
 end
 
 ---The error document of a failure (the root is hidden in the message).
