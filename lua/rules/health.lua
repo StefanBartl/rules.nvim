@@ -192,7 +192,7 @@ function M.check()
   if #rules > 0 then
     start("rules.nvim: waivers")
     local waivers = require("rules.engine.waivers")
-    local repo_waivers, werr = waivers.load(vim.fn.getcwd())
+    local repo_waivers, werr = waivers.load_entries(vim.fn.getcwd())
     if werr then
       warn(werr)
     elseif next(repo_waivers) == nil then
@@ -210,6 +210,10 @@ function M.check()
             table.concat(orphaned, ", ")
           )
         )
+      end
+      local expired = waivers.expired(repo_waivers, waivers.today(nil))
+      if #expired > 0 then
+        warn(("%d waiver(s) in cwd expired and suppress nothing: %s"):format(#expired, table.concat(expired, ", ")))
       end
     end
   end

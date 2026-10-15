@@ -106,9 +106,10 @@ function M.scope_to_diff(results, changed)
         end
       end
       if #kept > 0 then
-        scoped[#scoped + 1] = { rule = res.rule, status = res.status, findings = kept }
+        scoped[#scoped + 1] = vim.tbl_extend("force", res, { findings = kept })
       else
-        scoped[#scoped + 1] = { rule = res.rule, status = "pass", findings = {} }
+        -- the note of an expired waiver stays: it is a fact about the waiver file, not about the diff
+        scoped[#scoped + 1] = { rule = res.rule, status = "pass", findings = {}, expired_waiver = res.expired_waiver }
       end
     else
       scoped[#scoped + 1] = res
