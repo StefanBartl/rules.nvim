@@ -28,6 +28,29 @@ local M = {}
 ---@field entries table[]               one per operation, in order
 ---@field buffers Rules.BufferReport|nil  what happened to the open buffers (a real write only)
 
+---The operations that write the waivers file of a PROJECT, which lies outside every ruleset.
+local WAIVER_OPS = { waive = true, renew = true, remove = true }
+
+---What a write may change on disk, for the buffers to be looked after: the rulesets, and the waivers file of the project
+---of each waiver operation (resolved by the door's own function, so the file is the one it writes; a project it
+---refuses has no file, and the door says why).
+---@param op_list table[]
+---@param copts Rules.Contract.Opts
+---@return string[]
+local function written_roots(op_list, copts)
+  local rulesets = contract.rulesets(copts)
+  local roots = vim.list_slice(rulesets, 1, #rulesets)
+  for _, op in ipairs(op_list) do
+    if WAIVER_OPS[op.op] then
+      local dir = require("rules.waiver_ops").resolve_project(op.project, copts, rulesets)
+      if dir then
+        roots[#roots + 1] = require("rules.engine.waivers").path(dir)
+      end
+    end
+  end
+  return roots
+end
+
 ---Run operations through the door.
 ---@param op_list table[]  operations of `rules-ops/1` (`{ op = "set", id = ..., patch = ... }`)
 ---@param opts? Rules.WriteOpts
@@ -36,7 +59,7 @@ function M.run(op_list, opts)
   opts = opts or {}
   local snaps
   if not opts.dry then
-    snaps = buffers.snapshot((contract.rulesets(opts.contract or contract.editor_opts())))
+    snaps = buffers.snapshot(written_roots(op_list, opts.contract or contract.editor_opts()))
   end
   local doc, err = ops.run({ ops = op_list, dry_run = opts.dry == true }, opts.contract or contract.editor_opts())
   if not doc then
@@ -66,6 +89,49 @@ end
 ---The most lines of a diff that are shown in a message.
 M.MAX_DIFF_LINES = 20
 
+---The diff of a dry run, cut to `MAX_DIFF_LINES`, put behind a line of text.
+---@param text string
+---@param entry table
+---@return string
+local function with_diff(text, entry)
+  local diff = entry.diff and entry.diff.before and entry.diff.after and unified(entry.diff.before, entry.diff.after)
+  if not diff then
+    return text
+  end
+  local lines = vim.split(diff, "\n", { plain = true })
+  if #lines > M.MAX_DIFF_LINES then
+    local more = #lines - M.MAX_DIFF_LINES
+    lines = vim.list_slice(lines, 1, M.MAX_DIFF_LINES)
+    lines[#lines + 1] = ("... %d more line(s)"):format(more)
+  end
+  return text .. "\n" .. table.concat(lines, "\n")
+end
+
+---Where a waiver operation wrote: the waivers file of its project, as the request named the project (the working
+---directory's when it named none).
+---@param op table
+---@return string
+local function waivers_file(op)
+  local file = require("rules.engine.waivers").FILE
+  local project = type(op.project) == "string" and op.project:gsub("[/\\]+$", "") or ""
+  if project == "" or project == "." then
+    return file
+  end
+  return project .. "/" .. file
+end
+
+M.waivers_file = waivers_file
+
+---The last day of a waiver operation, as told.
+---@param op table
+---@return string
+local function through(op)
+  if op.no_expiry then
+    return " (no expiry)"
+  end
+  return type(op.expires) == "string" and (" through " .. op.expires) or ""
+end
+
 ---@param entry table
 ---@param op table
 ---@return "info"|"warn"|"error" level
@@ -87,17 +153,19 @@ local function describe(entry, op)
   elseif outcome == "changed" then
     text = ("changed %s"):format(id)
   elseif outcome == "would_change" then
-    text = ("would change %s"):format(id)
-    local diff = entry.diff and entry.diff.before and entry.diff.after and unified(entry.diff.before, entry.diff.after)
-    if diff then
-      local lines = vim.split(diff, "\n", { plain = true })
-      if #lines > M.MAX_DIFF_LINES then
-        local more = #lines - M.MAX_DIFF_LINES
-        lines = vim.list_slice(lines, 1, M.MAX_DIFF_LINES)
-        lines[#lines + 1] = ("... %d more line(s)"):format(more)
-      end
-      text = text .. "\n" .. table.concat(lines, "\n")
-    end
+    text = with_diff(("would change %s"):format(id), entry)
+  elseif outcome == "waived" then
+    text = ("waived %s%s in %s"):format(id, through(op), waivers_file(op))
+  elseif outcome == "would_waive" then
+    text = with_diff(("would waive %s%s in %s"):format(id, through(op), waivers_file(op)), entry)
+  elseif outcome == "renewed" then
+    text = ("renewed the waiver of %s%s in %s"):format(id, through(op), waivers_file(op))
+  elseif outcome == "would_renew" then
+    text = with_diff(("would renew the waiver of %s%s in %s"):format(id, through(op), waivers_file(op)), entry)
+  elseif outcome == "removed" then
+    text = ("removed the waiver of %s from %s"):format(id, waivers_file(op))
+  elseif outcome == "would_remove" then
+    text = with_diff(("would remove the waiver of %s from %s"):format(id, waivers_file(op)), entry)
   elseif outcome == "unchanged" then
     text = ("%s is unchanged"):format(id)
   elseif outcome == "retired" then
