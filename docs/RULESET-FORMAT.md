@@ -185,6 +185,19 @@ way). Convention for where it lives: `<FAMILY>/<ID>.md` under a folder of the
 ruleset, `_rules/` by default (`_rules/DEP/DEP-06.md`); the loader reads every
 `.md` file under a `rulesets` path, so the place is yours to choose.
 
+One place is not free: **a `.md` file under a folder named `_rules` is a rule file, and
+one that yields no rule is an error**, not a file that is passed over. That is an empty
+file (or blanks only), a file without a frontmatter, a frontmatter with neither `id` nor
+`severity` that holds no ` ```rule ` block, and a file with merge-conflict markers
+(`<<<<<<<`, `=======` or `>>>>>>>` at the start of a line, outside a code fence; told
+even when the file still yields a rule). This is what a bad merge or a lost write
+leaves behind, and a ruleset that silently has one rule less is worse than one that
+says so. Not a fault there: files that are not `.md` (`.gitkeep`), a `README.md` (any
+case), a layout and a generated document. Anywhere else a Markdown file without a rule
+is an ordinary document (notes, a README), and a document with ` ```rule ` blocks loads
+as it always did, also under `_rules/`. `:Rules check`, `scripts/ruleset.lua check`,
+`catalog --check` and `scripts/roundtrip.lua` all report such a file as a load error.
+
 ````markdown
 ---
 id: DEP-06
@@ -263,9 +276,19 @@ the heading when there is none (`:Rules show` jumps there).
 A rule that is retired (`rules-ops/1` `retire`, see [CONTRACT.md](CONTRACT.md))
 moves to `<ruleset>/_retired/<FAMILY>/<ID>.md` with some facts added to its
 frontmatter (`status: retired`, `retired`, `was`, `replaced_by`, `reason`). The
-loader does not read a `_retired/` folder, so the rule is no longer run, in no
+loader does not run a `_retired/` folder, so the rule is no longer run, in no
 gate, in no document; its id stays taken, and `next_id` counts it. Bringing it
 back (`reinstate`) puts the file where it was.
+
+The check reads the ids of that folder too (without loading the rules): **a live rule
+with the id of a retired one is a `duplicate rule id` error**, in one ruleset and across
+rulesets (`duplicate rule id AAA-05: <live file>:<line> and <retired file> (retired)`),
+and so is one id retired twice. That is the case git merges without a conflict: one
+machine made AAA-05 and retired it, the other did not pull and made AAA-05 again. The id
+of a retired file is the one in its name; when its frontmatter says another one, that is
+told, and both are taken. A retired file that does not read (empty, no frontmatter with
+an `id`, merge-conflict markers) is a load error as well; a `README.md` or a file that is
+not `.md` in `_retired/` is none.
 
 ## Layouts and catalogs
 

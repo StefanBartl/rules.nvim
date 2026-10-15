@@ -6,6 +6,9 @@
 --   * a patch that says what is there (`severity`, `text`) gives the same bytes back;
 --   * changing the severity, the title and the text and changing it back gives the same bytes back;
 --   * the changed text reads back as written.
+-- A folder that does not load without errors fails as well (`load error:` lines count as `failed`): an empty rule
+-- file, one with merge-conflict markers or none of the frontmatter, a live and a retired rule with one id. Without
+-- that such a file would be passed over as "no rule file".
 -- This is the property `rules-ops/1` `set` is built on (`rules.engine.rule_edit`); run it on a real ruleset
 -- before trusting a write on it. Exit code: 0 all held, 1 a property failed, 2 wrong usage or no lib.nvim.
 -- lib.nvim is found through $LIB_NVIM_DIR, $LIB_NVIM_PATH, $REPOS_DIR/lib.nvim, .deps/lib.nvim, a sibling
@@ -56,6 +59,7 @@ if #dirs == 0 then
   os.exit(2)
 end
 
+local loader = require("rules.engine.loader")
 local parser = require("rules.engine.parser")
 local rule_edit = require("rules.engine.rule_edit")
 local fswalk = require("rules.engine.fswalk")
@@ -72,6 +76,13 @@ end
 local files, refused, failed = 0, {}, {}
 
 for _, dir in ipairs(dirs) do
+  -- a file the loader cannot read as a rule (an empty one, one with merge-conflict markers, one with no frontmatter under
+  -- `_rules/`) would otherwise be passed over below as "no rule file": the folder has to load without errors, each
+  -- on its own (a duplicate id across two folders is for `ruleset.lua check`)
+  local _, load_errors = loader.load({ dir })
+  for _, err in ipairs(load_errors) do
+    failed[#failed + 1] = "load error: " .. err
+  end
   for _, file in ipairs(fswalk.files(dir)) do
     local name = file:match("[^/]+$")
     if file:match("%.md$") and not file:find("/_retired/", 1, true) then
