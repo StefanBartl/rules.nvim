@@ -370,6 +370,98 @@ describe("rules.engine.layout_edit", function()
     assert.is_truthy(why:find("no section", 1, true))
   end)
 
+  describe("a section", function()
+    local function layout(lines)
+      return table.concat(lines, "\n") .. "\n"
+    end
+    local INTRO = layout({
+      "---",
+      "kind: layout",
+      "output: regeln/GO.md",
+      "---",
+      "# Go",
+      "",
+      "## Empty",
+      "",
+      "Intro one.",
+      "",
+      "Intro two.",
+      "",
+      "## Full",
+      "",
+      "Intro of full.",
+      "",
+      "{{rule GO-01}}",
+      "{{rule GO-02}}",
+      "",
+      "## Last",
+      "",
+      "Intro of last.",
+    })
+
+    it("without rules gets the token behind its introduction, for the end and for the start", function()
+      for _, first in ipairs({ false, true }) do
+        local out = assert(layout_edit.place(INTRO, "NEW-01", { section = "Empty", first = first }))
+        assert.is_truthy(out:find("Intro two.\n\n{{rule NEW-01}}\n\n## Full", 1, true), tostring(first) .. out)
+        -- nothing else moved
+        assert.are.equal(INTRO, (assert(layout_edit.remove(out, "NEW-01"))))
+      end
+    end)
+
+    it("with rules keeps working as before: after the last token, before the first for `first`", function()
+      local last = assert(layout_edit.place(INTRO, "NEW-01", { section = "Full" }))
+      assert.is_truthy(last:find("{{rule GO-02}}\n{{rule NEW-01}}\n\n## Last", 1, true))
+      local first = assert(layout_edit.place(INTRO, "NEW-01", { section = "Full", first = true }))
+      assert.is_truthy(first:find("Intro of full.\n\n{{rule NEW-01}}\n{{rule GO-01}}", 1, true))
+    end)
+
+    it("that is the last of the layout gets the token at the end, one blank line behind the introduction", function()
+      local out = assert(layout_edit.place(INTRO, "NEW-01", { section = "Last" }))
+      assert.is_truthy(out:find("Intro of last.\n\n{{rule NEW-01}}\n", 1, true))
+      assert.are.equal("{{rule NEW-01}}\n", out:sub(-16))
+      -- a section with a heading and nothing else, at the end
+      local bare = assert(layout_edit.place("# T\n\n## A\n", "NEW-01", { section = "A" }))
+      assert.are.equal("# T\n\n## A\n\n{{rule NEW-01}}\n", bare)
+      local glued = assert(layout_edit.place("# T\n## A", "NEW-01", { section = "A" }))
+      assert.are.equal("# T\n## A\n\n{{rule NEW-01}}", glued)
+    end)
+
+    it("puts one blank line before and after the token whatever the author left between text and heading", function()
+      -- no blank line between the introduction and the next heading
+      local tight = assert(layout_edit.place("## A\n\nIntro.\n## B\n", "NEW-01", { section = "A" }))
+      assert.are.equal("## A\n\nIntro.\n\n{{rule NEW-01}}\n\n## B\n", tight)
+      -- a heading right under a heading
+      local empty = assert(layout_edit.place("## A\n## B\n", "NEW-01", { section = "A" }))
+      assert.are.equal("## A\n\n{{rule NEW-01}}\n\n## B\n", empty)
+      -- blank lines the author put in front of the next heading stay in front of it
+      local wide = assert(layout_edit.place("## A\n\nIntro.\n\n\n## B\n", "NEW-01", { section = "A" }))
+      assert.are.equal("## A\n\nIntro.\n\n{{rule NEW-01}}\n\n\n## B\n", wide)
+    end)
+
+    it("with a subsection puts the token behind the introduction of the section, in front of the subsection", function()
+      local text = "## A\n\nIntro.\n\n### Sub\n\n{{rule GO-01}}\n\n## B\n"
+      local out = assert(layout_edit.place("## A\n\nIntro.\n\n### Sub\n\nSub text.\n\n## B\n", "NEW-01", { section = "A" }))
+      assert.are.equal("## A\n\nIntro.\n\n{{rule NEW-01}}\n\n### Sub\n\nSub text.\n\n## B\n", out)
+      -- tokens in the subsection count for the section: the end of A is behind them
+      local with = assert(layout_edit.place(text, "NEW-01", { section = "A" }))
+      assert.are.equal("## A\n\nIntro.\n\n### Sub\n\n{{rule GO-01}}\n{{rule NEW-01}}\n\n## B\n", with)
+    end)
+
+    it("does not take a # line of a code block in the introduction for a heading", function()
+      local text = table.concat({ "## A", "", "```lua", "# not a heading", "```", "", "## B", "" }, "\n")
+      local out = assert(layout_edit.place(text, "NEW-01", { section = "A" }))
+      assert.are.equal("## A\n\n```lua\n# not a heading\n```\n\n{{rule NEW-01}}\n\n## B\n", out)
+      assert.is_nil((layout_edit.place(text, "NEW-01", { section = "not a heading" })))
+    end)
+
+    it("keeps CR LF line endings when it puts the token behind an introduction", function()
+      local crlf = (INTRO:gsub("\n", "\r\n"))
+      local out = assert(layout_edit.place(crlf, "NEW-01", { section = "Empty" }))
+      assert.is_nil(out:find("[^\r]\n"))
+      assert.is_truthy(out:find("Intro two.\r\n\r\n{{rule NEW-01}}\r\n\r\n## Full", 1, true))
+    end)
+  end)
+
   it("refuses a rule that is in the layout already, and an anchor that is not", function()
     assert.is_nil((layout_edit.place(LAYOUT_DEP, "DEP-01", { after = "DEP-02" })))
     assert.is_nil((layout_edit.place(LAYOUT_DEP, "NEW-01", { after = "GHOST-01" })))
@@ -464,6 +556,100 @@ describe("rules-ops/1 new", function()
       assert.are.equal("invalid_argument", entry.error.code, vim.inspect(case))
     end
     assert.is_nil(read_raw(root .. "/_rules/DEP/DEP-04.md"))
+  end)
+
+  it("puts the token of a section with no rule behind its introduction, and the document reads in order", function()
+    local root, opts = fixture()
+    local layout = root .. "/_layouts/regeln/DEP.md"
+    write_raw(
+      layout,
+      table.concat({
+        "---",
+        "kind: layout",
+        "output: regeln/DEP.md",
+        "---",
+        "# Dependencies",
+        "",
+        "## Core",
+        "",
+        "{{rule DEP-01}}",
+        "{{rule DEP-02}}",
+        "{{rule DEP-03}}",
+        "",
+        "## Fresh",
+        "",
+        "Introduction of the fresh section.",
+        "",
+        "## Later",
+        "",
+        "Later text.",
+        "",
+      }, "\n")
+    )
+    for n, text in ipairs({ "Four.", "Five." }) do
+      local entry = one(opts, {
+        op = "new",
+        family = "DEP",
+        title = "n" .. n,
+        severity = "critical",
+        text = text,
+        section = "Fresh",
+        layout = "regeln/DEP.md",
+      })
+      assert.is_true(entry.ok, vim.inspect(entry))
+    end
+    assert.are.equal(
+      "## Fresh\n\nIntroduction of the fresh section.\n\n{{rule DEP-04}}\n{{rule DEP-05}}\n\n## Later\n",
+      read_raw(layout):match("## Fresh.-## Later\n")
+    )
+    local doc = read_raw(root .. "/regeln/DEP.md")
+    local intro, four, five, later =
+      doc:find("Introduction of the fresh", 1, true),
+      doc:find("DEP-04", 1, true),
+      doc:find("DEP-05", 1, true),
+      doc:find("## Later", 1, true)
+    assert.is_true(intro < four and four < five and five < later)
+  end)
+
+  it("ends the file of a rule with the divider, whether the text brings it or not, never twice", function()
+    local root, opts = fixture()
+    local texts = { "Plain.", "Divided.\n\n---", "Divided and blank.\n\n---\n\n", "Blank lines.\n\n\n", "" }
+    for n, text in ipairs(texts) do
+      local entry = one(opts, { op = "new", family = "SEP", title = "t" .. n, severity = "critical", text = text })
+      assert.is_true(entry.ok, vim.inspect(entry))
+      local file = read_raw(root .. "/_rules/SEP/" .. entry.id .. ".md")
+      -- the shape of the rule files of the shipped rulesets: text, blank line, divider, blank line
+      assert.is_truthy(file:match("[^\n]\n\n%-%-%-\n\n$"), entry.id .. vim.inspect(file))
+      assert.is_nil(file:find("%-%-%-\n+%-%-%-\n"), entry.id)
+    end
+    -- the divider is no part of the text: it reads back as given
+    contract.clear_cache()
+    local view = assert(contract.view(opts))
+    assert.are.equal("Plain.", view.full["SEP-01"].text)
+    assert.are.equal("Divided.", view.full["SEP-02"].text)
+    assert.are.equal("Divided and blank.", view.full["SEP-03"].text)
+    assert.are.equal("Blank lines.", view.full["SEP-04"].text)
+    assert.are.equal("", view.full["SEP-05"].text)
+  end)
+
+  it("keeps two new rules apart in the generated document", function()
+    local root, opts = fixture()
+    assert.is_true(
+      one(opts, { op = "new", family = "DEP", title = "four", severity = "critical", text = "Four.", after = "DEP-03" }).ok
+    )
+    assert.is_true(
+      one(opts, { op = "new", family = "DEP", title = "five", severity = "critical", text = "Five.", after = "DEP-04" }).ok
+    )
+    local doc = read_raw(root .. "/regeln/DEP.md")
+    assert.is_truthy(doc:find("Four.\n\n---\n\n#### `DEP-05`", 1, true), doc)
+  end)
+
+  it("stores the text as given: a long line is not wrapped", function()
+    local root, opts = fixture()
+    local long = ("word "):rep(40) .. "`a code span with blanks in it`."
+    local entry = one(opts, { op = "new", family = "DEP", title = "long", severity = "critical", text = long })
+    assert.is_true(entry.ok, vim.inspect(entry))
+    assert.is_truthy(read_raw(root .. "/_rules/DEP/DEP-04.md"):find("\n" .. long .. "\n", 1, true))
   end)
 
   it("takes the new file back when the layout cannot take the rule", function()

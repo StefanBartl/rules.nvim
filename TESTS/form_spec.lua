@@ -73,6 +73,13 @@ describe("rules.form.parse", function()
     assert.are.equal("Family: not a field\n<!-- not a hint -->\n! not a report", parsed.text)
   end)
 
+  it("does not wrap or join the lines of the prose: long lines and line breaks go on as typed", function()
+    local long = ("word "):rep(30) .. "`a span with blanks`"
+    local parsed = form.parse({ "Family: A", "## text", long, "second line", "", "- item " .. long, "" })
+    assert.are.equal(long .. "\nsecond line\n\n- item " .. long, parsed.text)
+    assert.are.equal(parsed.text, form.validate(vim.tbl_extend("force", parsed, { ticks = { "critical" }, title = "T" })).text)
+  end)
+
   it("names a ticked choice that is no severity", function()
     local parsed = form.parse({ "## severity (one)", "- [x] urgent" })
     assert.are.same({ "urgent" }, parsed.unknown)

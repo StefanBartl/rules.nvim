@@ -671,7 +671,8 @@ function M.apply(path, text, patch)
   return new_text, nil
 end
 
----The text of a new rule file.
+---The text of a new rule file: the frontmatter, the heading, the block, the text as given (never wrapped), and the
+---divider `---` between blank lines at the end (added unless the text ends with one).
 ---@param spec { id: string, severity: string, title: string, text?: string, check?: table, agent?: table }
 ---@return string|nil text
 ---@return string|nil err
@@ -704,12 +705,19 @@ function M.render_new(spec)
   end
   if spec.text and spec.text ~= "" then
     vim.list_extend(out, vim.split(spec.text, "\n", { plain = true }))
-  else
-    -- the file ends after the heading (and block): drop the blank line that would trail
-    if out[#out] == "" then
-      out[#out] = nil
-    end
   end
+  -- The file ends as the rule files of the shipped rulesets do: the text, a blank line, the divider `---`, a blank
+  -- line (the generator copies the lines of a rule file as they are, so this is what keeps two rules in a document
+  -- apart). A text that ends with the divider already is not given a second one, and a blank line or two at its end
+  -- change nothing: the callers do not have to know the convention.
+  while out[#out] ~= nil and out[#out]:match("^%s*$") do
+    out[#out] = nil
+  end
+  if not (spec.text and spec.text ~= "" and out[#out]:match("^%s*%-%-%-%s*$")) then
+    out[#out + 1] = ""
+    out[#out + 1] = "---"
+  end
+  out[#out + 1] = ""
   local text = table.concat(out, "\n") .. "\n"
   local rule, errs = parser.parse_rule_text(spec.id .. ".md", text)
   if not rule or #errs > 0 then
