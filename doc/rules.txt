@@ -310,6 +310,16 @@ instead of "fail" — visible in the buffer report with its reason, excluded
 from the quickfix worklist, and never counted by `check_family_json`'s exit
 code. See docs/BINDINGS.md in the plugin's repository for detail.
 
+A waiver can also be an object with an expiry and a scope: >json
+    { "DEP-04": { "reason": "legacy", "expires": "2026-12-31",
+                "paths": ["src/legacy", "docs/**/*.md"] } }
+<
+It counts through its `expires` day (YYYY-MM-DD); the day after, the finding
+flags again and the report says the waiver expired. `paths` limit it to
+findings in those files or folders. A waivers file that cannot be used is an
+error of the run, never "no waivers". The format is in docs/CONFIG.md, the
+write operations (waive, renew, remove) in docs/CONTRACT.md.
+
 `:checkhealth rules` cross-checks the current working directory's waivers
 against every loaded rule and warns about an orphaned entry — a waiver
 whose rule id was retired or mistyped, which would otherwise sit silently
