@@ -211,7 +211,27 @@ COMMANDS                                                        *rules-commands*
     stays taken. Asks first (--yes skips the question; a session without a
     screen needs it). The engine is asked with a dry run before the
     question, so a rule that is not there is told without one. --by names
-    the rule that takes its place.
+    the rule that takes its place. |:Rules_reinstate| brings it back.
+
+                                                              *:Rules_reinstate*
+:Rules reinstate {id} [--after={id} | --before={id} | --section={heading}
+                      [--first]] [--layout={file}] [--yes] [--dry]
+    Brings a retired rule back: its file returns from `_retired/` and the
+    id is in use again (`reinstate` of `rules-ops/1`, nothing else). Asks
+    first (--yes skips the question; a session without a screen needs it);
+    the engine is asked with a dry run before the question, so an id that
+    is not retired or a place that does not exist is told without one, in
+    the engine's own words. `<Tab>` offers the retired ids only.
+
+    The place puts the rule into a layout: --after / --before in the layout
+    that holds that rule (--layout names it when several do), --section with
+    --layout (--first: the start of the section, not its end; write a blank
+    in the heading as `\ `). It is handed to the engine as typed. Without a
+    place the command does not guess one: where the rule stood is not
+    recorded on disk, so it comes back in no layout, the question and the
+    message say so, and |:Rules_move| puts it in one. Open buffers of the
+    layout and of the rule's file are reloaded; one with unsaved changes is
+    reported as a conflict and left as it is.
 
                                                                    *:Rules_move*
 :Rules move {id} {place} [--dry]

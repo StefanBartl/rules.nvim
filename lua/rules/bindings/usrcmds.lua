@@ -70,6 +70,37 @@ local function register_argtypes()
       return argtypes.prefix(candidates.ids(), arg_lead)
     end,
   })
+
+  -- the ids `:Rules reinstate` can bring back: retired ones only, an active id is no candidate
+  argtypes.register("RULES_RETIRED_ID", {
+    desc = "Exact id of a retired rule, e.g. DEP-06",
+    validate = function(raw)
+      return true, raw, nil
+    end,
+    complete = function(arg_lead)
+      return argtypes.prefix(candidates.retired_ids(), arg_lead)
+    end,
+  })
+
+  argtypes.register("RULES_LAYOUT", {
+    desc = "Output path of a layout, e.g. regeln/DEP.md",
+    validate = function(raw)
+      return true, raw, nil
+    end,
+    complete = function(arg_lead)
+      return candidates.layouts(arg_lead)
+    end,
+  })
+
+  argtypes.register("RULES_SECTION", {
+    desc = "Heading text of a layout, a blank written as a backslash and a blank",
+    validate = function(raw)
+      return true, raw, nil
+    end,
+    complete = function(arg_lead)
+      return candidates.sections(arg_lead)
+    end,
+  })
 end
 
 --- Create the `:Rules` and `:RulesVault` verbs.

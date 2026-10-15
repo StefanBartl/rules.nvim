@@ -1,14 +1,15 @@
 ---@module 'rules.ui.routes'
 ---@brief The grammar of the write verbs of `:Rules` for `lib.nvim`'s composer -- one tree: dispatch, `<Tab>`, option float.
 ---@description
---- `new`, `set`, `retire`, `move` and `list`, each with the flags and `key=` pairs it takes. Every flag, every `key=`
---- and every positional argument carries a `desc`: the option float (the help of the command line) shows it, and
---- `TESTS/usrcmds_help_spec.lua` pins that none is left without. The handlers are in `rules.ui.cmd`; this file only
---- says what a command line may look like.
+--- `new`, `set`, `retire`, `reinstate`, `move` and `list`, each with the flags and `key=` pairs it takes. Every flag,
+--- every `key=` and every positional argument carries a `desc`: the option float (the help of the command line) shows
+--- it, and `TESTS/usrcmds_help_spec.lua` pins that none is left without. The handlers are in `rules.ui.cmd`; this file
+--- only says what a command line may look like.
 ---
 ---  - `:Rules new [<FAMILY> [title...]] [severity= text= ruleset=] [--to= --after= --before= --first] [--yes] [--dry]`
 ---  - `:Rules set <ID> key=value ... [--dry]`
 ---  - `:Rules retire <ID> [--by=<ID>] [reason=...] [--yes] [--dry]`
+---  - `:Rules reinstate <ID> [--after=<ID> | --before=<ID> | --section=<heading> [--first]] [--layout=<file>] [--yes] [--dry]`
 ---  - `:Rules move <ID> (--to=<file>#<section> | --after=<ID> | --before=<ID>) [--first] [--dry]`
 ---  - `:Rules list [--family=<PREFIX>] [--severity=<level>] [--format=json]`
 ---
@@ -65,6 +66,19 @@ M.FLAGS = {
     DRY,
   },
   move = concat(PLACE, { DRY }),
+  reinstate = {
+    { name = "after", type = "RULES_ID", desc = "Put it right after this rule, in the layout that holds that rule" },
+    { name = "before", type = "RULES_ID", desc = "Put it right before this rule, in the layout that holds that rule" },
+    { name = "section", type = "RULES_SECTION", desc = "Heading of the section to put it in (with --layout)" },
+    { name = "first", bool = true, desc = "With --section: the start of the section, not its end" },
+    {
+      name = "layout",
+      type = "RULES_LAYOUT",
+      desc = "Layout (its output path) of --section, or of the rule of --after/--before",
+    },
+    { name = "yes", bool = true, desc = "Reinstate without asking" },
+    DRY,
+  },
 }
 
 local SEVERITY_DESC = "How serious a failure of the rule is"
@@ -119,6 +133,15 @@ function M.routes()
       desc = "Move a rule's file to _retired/ and out of every layout; its id stays taken. Asks first (--yes skips "
         .. "the question), --by=<ID> names the rule that takes its place",
       run = handler("retire"),
+    },
+    {
+      path = { "reinstate" },
+      args = { { name = "id", type = "RULES_RETIRED_ID", desc = "Id of the retired rule to bring back, e.g. DEP-06" } },
+      flags = M.FLAGS.reinstate,
+      desc = "Bring a retired rule back from _retired/. Where it stood is not recorded: give --after=<ID>, "
+        .. "--before=<ID> or --section=<heading> --layout=<file>, or it stands in no layout. Asks first (--yes "
+        .. "skips the question)",
+      run = handler("reinstate"),
     },
     {
       path = { "move" },

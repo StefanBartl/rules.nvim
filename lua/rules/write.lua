@@ -104,6 +104,10 @@ local function describe(entry, op)
     text = ("retired %s"):format(id)
   elseif outcome == "would_retire" then
     text = ("would retire %s"):format(id)
+  elseif outcome == "reinstated" then
+    text = ("reinstated %s%s"):format(id, placed)
+  elseif outcome == "would_reinstate" then
+    text = ("would reinstate %s%s"):format(id, placed)
   elseif outcome == "moved" then
     text = ("moved %s%s"):format(id, layout and (" to %s"):format(layout) or "")
   elseif outcome == "would_move" then
@@ -165,9 +169,16 @@ function M.messages(result, op_list)
       }
     end
     if #report.gone > 0 then
+      -- the file that is gone is the rule's (retire) or the retired copy of it (reinstate)
+      local why = "retired"
+      for _, op in ipairs(op_list) do
+        if op.op == "reinstate" then
+          why = "reinstated"
+        end
+      end
       out[#out + 1] = {
         level = "warn",
-        text = ("%s is no longer there (retired): the buffer was left open"):format(shown(report.gone)),
+        text = ("%s is no longer there (%s): the buffer was left open"):format(shown(report.gone), why),
       }
     end
     if #report.stale > 0 then
