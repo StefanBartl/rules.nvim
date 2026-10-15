@@ -63,6 +63,118 @@ describe("rules.check_family_json", function()
   end)
 end)
 
+describe("waivers in a run", function()
+  local waivers = require("rules.engine.waivers")
+
+  ---@return string dir  a project with one critical rule that fails (a grep for a word the project has)
+  local function failing_project()
+    local dir = tmp_dir()
+    write_file(dir, "a.md", {
+      "```rule",
+      'id = "SEC-01",',
+      'severity = "critical",',
+      'check = { type = "grep", pattern = "FORBIDDEN" },',
+      "```",
+    })
+    write_file(dir, "code.lua", { "local x = 'FORBIDDEN'" })
+    config.setup({ rulesets = { dir }, gates = { all = { "SEC" } } })
+    return dir
+  end
+
+  local saved_clock
+  before_each(function()
+    saved_clock = waivers.clock
+  end)
+  after_each(function()
+    waivers.clock = saved_clock
+  end)
+
+  it("a waivers file that exists and cannot be used is an error of the run, never 'no waivers'", function()
+    local dir = failing_project()
+    write_file(dir, ".rules-waivers.json", { '{"SEC-01": {"reason": "r", "expires": "tomorrow"}}' })
+
+    local json, code, results, err = rules.check_family_json("SEC", dir)
+    local gjson, gcode, gresults, gerr = rules.run_gate_json("all", dir)
+
+    assert.is_nil(json)
+    assert.is_nil(code)
+    assert.is_nil(results)
+    assert.matches("YYYY%-MM%-DD", err)
+    assert.is_nil(gjson)
+    assert.is_nil(gcode)
+    assert.is_nil(gresults)
+    assert.matches("YYYY%-MM%-DD", gerr)
+  end)
+
+  it("a waiver that is still valid waives the finding: the exit code is 0", function()
+    local dir = failing_project()
+    write_file(dir, ".rules-waivers.json", { '{"SEC-01": {"reason": "tracked", "expires": "2026-10-15"}}' })
+    waivers.clock = function()
+      return "2026-10-15"
+    end
+
+    local _, code, results = rules.check_family_json("SEC", dir)
+
+    assert.are.equal(0, code)
+    assert.are.equal("waived", results[1].status)
+    assert.are.equal("2026-10-15", results[1].waiver_expires)
+  end)
+
+  it("the day after, the finding flags again, the exit code is 1 and the result says the waiver expired", function()
+    local dir = failing_project()
+    write_file(dir, ".rules-waivers.json", { '{"SEC-01": {"reason": "tracked", "expires": "2026-10-15"}}' })
+    waivers.clock = function()
+      return "2026-10-16"
+    end
+
+    local json, code, results = rules.check_family_json("SEC", dir)
+    local entries = vim.json.decode(json)
+
+    assert.are.equal(1, code)
+    assert.are.equal("fail", results[1].status)
+    assert.are.same({ reason = "tracked", expires = "2026-10-15" }, results[1].expired_waiver)
+    assert.are.equal("2026-10-15", entries[1].expired_waiver.expires)
+    assert.are.equal("tracked", entries[1].expired_waiver.reason)
+  end)
+
+  it("a gate judges the waivers the same way", function()
+    local dir = failing_project()
+    write_file(dir, ".rules-waivers.json", { '{"SEC-01": {"reason": "tracked", "expires": "2026-10-15"}}' })
+    waivers.clock = function()
+      return "2026-10-16"
+    end
+
+    local _, code, results = rules.run_gate_json("all", dir)
+
+    assert.are.equal(1, code)
+    assert.are.equal("2026-10-15", results[1].expired_waiver.expires)
+  end)
+
+  it("a run tells that waivers expired, whatever family it was for", function()
+    local dir = failing_project()
+    write_file(dir, ".rules-waivers.json", { '{"SEC-01": {"reason": "tracked", "expires": "2026-10-15"}}' })
+    waivers.clock = function()
+      return "2026-10-16"
+    end
+    local original_notify = vim.notify
+    local messages = {}
+    ---@diagnostic disable-next-line: duplicate-set-field
+    vim.notify = function(msg)
+      messages[#messages + 1] = msg
+    end
+    local original_open = require("rules.report.buffer").open
+    require("rules.report.buffer").open = function() end
+
+    rules.check_family("SEC", dir)
+    require("rules.report.buffer").open = original_open
+    vim.notify = original_notify
+
+    local said = table.concat(messages, "\n")
+    assert.matches("1 waiver%(s%)", said)
+    assert.matches("SEC%-01 %(2026%-10%-15%)", said)
+  end)
+end)
+
 describe("rules.stats", function()
   it("counts total rules, per-family checked/manual and severity", function()
     local dir = tmp_dir()

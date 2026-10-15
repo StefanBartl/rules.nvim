@@ -18,6 +18,10 @@ local M = {}
 ---@field waiver_reason? string  set only when status is "waived" -- LLS-15,
 --- same reasoning as `Rules.Result.waiver_reason`: the key is genuinely
 --- absent otherwise, not present with a `nil` value
+---@field waiver_expires? string  "waived" only: the last day the waiver is valid, when it has one
+---@field waiver_paths? string[]  "waived" only: the paths the waiver is limited to, when it has any
+---@field partial_waiver? table  a waiver limited to paths covered `suppressed` findings of a failing rule
+---@field expired_waiver? { reason: string, expires: string }  the rule has a waiver that ran out: it suppresses nothing
 
 --- Turn a run's results into a plain array of JSON-encodable entries.
 ---@param results Rules.Result[]
@@ -31,6 +35,10 @@ function M.to_entries(results)
       status = res.status,
       findings = res.findings,
       waiver_reason = res.waiver_reason,
+      waiver_expires = res.waiver_expires,
+      waiver_paths = res.waiver_paths,
+      partial_waiver = res.partial_waiver,
+      expired_waiver = res.expired_waiver,
     }
   end
   return entries

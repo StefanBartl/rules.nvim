@@ -18,8 +18,15 @@ local M = {}
 ---@field waiver_reason? string  set only when status is "waived" -- LLS-15: the
 --- key is genuinely absent otherwise (see `check_family` below), not present
 --- with a `nil` value, so `?` is the accurate form, not `string|nil`
+---@field waiver_expires? string  "waived" only: the last day the waiver is valid, when it has one
+---@field waiver_paths? string[]  "waived" only: the paths the waiver is limited to, when it has any
+---@field partial_waiver? { reason: string, expires?: string, paths: string[], suppressed: integer }  a waiver limited to
+--- paths covered some findings of a failing rule: `suppressed` of them; the status stays what the rest makes it
+---@field expired_waiver? { reason: string, expires: string }  the rule has a waiver that ran out: it does not suppress
+--- anything and the report says so (any status but "manual")
 
 ---@class Rules.RunOpts
+---@field today? string  the date a waiver's expiry is judged against (`YYYY-MM-DD`); default: today's date (`waivers.clock`)
 ---@field lua_predicates? boolean|fun(rule: Rules.ParsedRule): boolean, string|nil  whether a `lua_predicate`
 ---   may run: `false` reports it as an error instead, a function decides per rule (the
 ---   desktop host asks its trust store, keyed on the rule's `source_file`; `rules` itself asks which ruleset
@@ -66,12 +73,17 @@ end
 ---@param rules Rules.ParsedRule[]
 ---@param family_prefix string
 ---@param root string
----@param waivers Rules.Waivers|nil  `{ [rule_id] = reason }`; a waived rule
----   that would otherwise fail or error reports as "waived" instead
+---@param waivers table<string, string|Rules.Waiver>|nil  `{ [rule_id] = reason }` or `{ [rule_id] = { reason, expires?,
+---   paths? } }` (`waivers.load_entries`); a waived rule that would otherwise fail or error reports as "waived" instead,
+---   unless the waiver is expired (it suppresses nothing and the result says so) or limited to `paths` (only the
+---   findings in them are suppressed)
 ---@param opts Rules.RunOpts|nil
 ---@return Rules.Result[]
 function M.check_family(rules, family_prefix, root, waivers, opts)
   waivers = waivers or {}
+  local waiver_lib = require("rules.engine.waivers")
+  local today = waiver_lib.today(opts and opts.today) or waiver_lib.clock()
+  local relative
   local results = {}
   -- Shared across every rule in this run so a `grep` check (the common
   -- case) doesn't re-walk the filesystem and re-read the same files once
@@ -81,12 +93,38 @@ function M.check_family(rules, family_prefix, root, waivers, opts)
     if M.family_of(rule.id) == family_prefix then
       local allowed, refusal = predicates_allowed(opts, rule)
       local status, findings = checks.run(rule.check, root, ctx, { lua_predicates = allowed, refusal = refusal })
-      local reason = waivers[rule.id]
-      if reason and (status == "fail" or status == "error") then
-        results[#results + 1] = { rule = rule, status = "waived", findings = findings, waiver_reason = reason }
-      else
-        results[#results + 1] = { rule = rule, status = status, findings = findings }
+      local waiver = waivers[rule.id]
+      if type(waiver) == "string" then
+        waiver = { reason = waiver }
       end
+      local result = { rule = rule, status = status, findings = findings }
+      if waiver and status ~= "manual" and waiver_lib.is_expired(waiver, today) then
+        result.expired_waiver = { reason = waiver.reason, expires = waiver.expires }
+      elseif waiver and (status == "fail" or status == "error") then
+        local inside, outside = findings, {}
+        if waiver.paths then
+          relative = relative or waiver_lib.relativizer(root)
+          inside = {}
+          for _, finding in ipairs(findings) do
+            local rel = relative(finding.file)
+            if rel and waiver_lib.path_matches(waiver.paths, rel) then
+              inside[#inside + 1] = finding
+            else
+              outside[#outside + 1] = finding
+            end
+          end
+        end
+        if #outside == 0 then
+          result.status = "waived"
+          result.waiver_reason = waiver.reason
+          result.waiver_expires = waiver.expires
+          result.waiver_paths = waiver.paths
+        elseif #inside > 0 then
+          result.findings = outside
+          result.partial_waiver = { reason = waiver.reason, expires = waiver.expires, paths = waiver.paths, suppressed = #inside }
+        end
+      end
+      results[#results + 1] = result
     end
   end
   return results

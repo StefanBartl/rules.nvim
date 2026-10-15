@@ -67,15 +67,38 @@ function M.load_rules(root)
   return rules
 end
 
---- This root's waivers, notifying (not raising) on a malformed waivers file.
+--- This root's waivers. A waivers file that exists and cannot be used is an error of the run, never "no waivers": the
+--- findings it was meant to hold would flag again without a word of why, and a CI run would fail for no visible reason.
 ---@param root string
----@return Rules.Waivers
+---@return Rules.WaiverEntries|nil entries  nil when the file cannot be used
+---@return string|nil err
+---@return string[]|nil expired  ids of the waivers that ran out, with their date, for a warning
 local function load_waivers(root)
-  local repo_waivers, err = waivers.load(root)
+  local entries, err = waivers.load_entries(root)
   if err then
-    notify.warn(err)
+    return nil, err, nil
   end
-  return repo_waivers
+  local today = waivers.today(nil)
+  local expired = {}
+  for _, id in ipairs(waivers.expired(entries, today)) do
+    expired[#expired + 1] = ("%s (%s)"):format(id, entries[id].expires)
+  end
+  return entries, nil, expired
+end
+
+--- Tell that waivers ran out: a run says it besides the lines of the report, so it does not depend on the rule being
+--- in the family that was run.
+---@param expired string[]|nil
+local function warn_expired(expired)
+  if expired and #expired > 0 then
+    notify.warn(
+      ("%d waiver(s) in %s expired: %s -- renew or remove them (:Rules waive/renew/unwaive, rules-ops/1)"):format(
+        #expired,
+        waivers.FILE,
+        table.concat(expired, ", ")
+      )
+    )
+  end
 end
 
 --- Host policy for a run: `setup({ lua_predicates })`, and a `lua_predicate` runs only in a ruleset that is trusted (what the
@@ -107,17 +130,22 @@ end
 ---@param family_prefix string
 ---@param path string|nil
 ---@return Rules.Result[]|nil results
----@return string|nil err  the settings of the project cannot be used
+---@return string|nil err  the settings of the project cannot be used, or its waivers file
+---@return string[]|nil expired  the waivers that ran out
 local function run_family(family_prefix, path)
   local root = path or vim.fn.getcwd()
   local rules, err, res = load(root)
   if not rules then
     return nil, err
   end
+  local entries, waiver_err, expired = load_waivers(root)
+  if not entries then
+    return nil, waiver_err
+  end
   if #gate.unknown_families(rules, { family_prefix }) > 0 then
     notify.warn(("--family=%q matches no loaded rule -- typo in the prefix, or not loaded/migrated yet"):format(family_prefix))
   end
-  return runner.check_family(rules, family_prefix, root, load_waivers(root), run_opts(res)), nil
+  return runner.check_family(rules, family_prefix, root, entries, run_opts(res)), nil, expired
 end
 
 --- Shared by `run_gate`/`run_gate_json`.
@@ -149,7 +177,11 @@ local function run_gate_results(gate_name, path, diff_ref)
       ("gate %q: family %q matches no loaded rule -- typo in gates config, or not migrated yet"):format(gate_name, family)
     )
   end
-  local results = gate.run(rules, families, root, load_waivers(root), run_opts(loaded_res or res))
+  local entries, waiver_err, expired = load_waivers(root)
+  if not entries then
+    return nil, waiver_err
+  end
+  local results = gate.run(rules, families, root, entries, run_opts(loaded_res or res))
 
   if diff_ref then
     local changed, err = gate.diff_files(root, diff_ref)
@@ -159,7 +191,7 @@ local function run_gate_results(gate_name, path, diff_ref)
     results = gate.scope_to_diff(results, changed)
   end
 
-  return results, nil
+  return results, nil, expired
 end
 
 --- Run one rule family against a path and report it (quickfix + buffer).
@@ -167,13 +199,14 @@ end
 ---@param path string|nil  defaults to the current working directory
 ---@return Rules.Result[]|nil results  nil when the settings of the project cannot be used (the error is shown)
 function M.check_family(family_prefix, path)
-  local results, err = run_family(family_prefix, path)
+  local results, err, expired = run_family(family_prefix, path)
   if not results then
     notify.error(err)
     return nil
   end
   require("rules.report.quickfix").set(results)
   require("rules.report.buffer").open(results)
+  warn_expired(expired)
   return results
 end
 
@@ -206,13 +239,14 @@ end
 ---@param diff_ref string|nil  scope to `git diff --name-only <ref>` against `path`
 ---@return Rules.Result[]|nil
 function M.run_gate(gate_name, path, diff_ref)
-  local results, err = run_gate_results(gate_name, path, diff_ref)
+  local results, err, expired = run_gate_results(gate_name, path, diff_ref)
   if not results then
     notify.error(err)
     return nil
   end
   require("rules.report.quickfix").set(results)
   require("rules.report.buffer").open(results)
+  warn_expired(expired)
   return results
 end
 

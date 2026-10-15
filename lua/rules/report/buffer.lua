@@ -27,9 +27,17 @@ function M.render(results)
     elseif res.status == "pass" then
       lines[#lines + 1] = ("%s %s -- ok"):format(icon, res.rule.id)
     elseif res.status == "waived" then
-      lines[#lines + 1] = ("⚪ %s -- waived (%s): %d finding(s) suppressed"):format(
+      local scope = ""
+      if res.waiver_expires then
+        scope = scope .. (", until %s"):format(res.waiver_expires)
+      end
+      if res.waiver_paths then
+        scope = scope .. (", only in %s"):format(table.concat(res.waiver_paths, ", "))
+      end
+      lines[#lines + 1] = ("⚪ %s -- waived (%s%s): %d finding(s) suppressed"):format(
         res.rule.id,
         res.waiver_reason,
+        scope,
         #res.findings
       )
     elseif res.status == "error" then
@@ -40,6 +48,18 @@ function M.render(results)
       for _, f in ipairs(res.findings) do
         lines[#lines + 1] = ("      %s:%d: %s"):format(f.file, f.line, f.text)
       end
+    end
+    local partial = res.partial_waiver
+    if partial then
+      lines[#lines + 1] = ("      %d more finding(s) waived in %s (%s)"):format(
+        partial.suppressed,
+        table.concat(partial.paths, ", "),
+        partial.reason
+      )
+    end
+    local expired = res.expired_waiver
+    if expired then
+      lines[#lines + 1] = ("      waiver expired on %s (%s): renew it or remove it"):format(expired.expires, expired.reason)
     end
   end
 
