@@ -32,7 +32,11 @@ An agent's answer is a proposal, never a verdict:
 2. ~~Block evaluation.~~ **Built (P0).** A block body is evaluated in an empty
    environment, under an instruction budget. `lua_predicate` runs only where the
    host trusts predicates (`setup({ lua_predicates = ... })`, or a per-rule
-   function for a host with its own trust list).
+   function for a host with its own trust list) and only in a ruleset the user
+   named himself: a ruleset a project `.rules.json` names is not trusted unless
+   its folder is in `setup({ trust })`, `--trust` or `$RULES_TRUST`
+   ([CONFIG.md](CONFIG.md#a-word-on-trust)). A headless or agent run has no prompt:
+   without `--trust` nothing a project file names runs Lua.
 3. `engine/agent/plan.lua` and `engine/agent/validate.lua`, pure functions with
    no `vim.api` and no network. `plan(rules, root)` returns requests batched
    per scope: several rules that look at the same files share one request, the
