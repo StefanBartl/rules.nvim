@@ -122,15 +122,28 @@ function M.ruleset_names(ctx)
   return out
 end
 
----The ruleset a word names: the exact name, else (only where the file system ignores case) the same name in another case.
+---The ruleset a word names, spelled exactly as its folder.
 ---@param ctx Rules.Vault.Ctx
 ---@param word string
 ---@return Rules.Vault.Ruleset|nil
-function M.match_ruleset(ctx, word)
+function M.match_ruleset_exact(ctx, word)
   for _, rs in ipairs(ctx.rulesets) do
     if rs.name == word then
       return rs
     end
+  end
+  return nil
+end
+
+---The ruleset a word names: the exact name, else (only where the file system ignores case) the same name in another case.
+---`resolve` asks for the two steps apart: an exact rule id or family beats a name in another case.
+---@param ctx Rules.Vault.Ctx
+---@param word string
+---@return Rules.Vault.Ruleset|nil
+function M.match_ruleset(ctx, word)
+  local exact = M.match_ruleset_exact(ctx, word)
+  if exact then
+    return exact
   end
   if M.CASE_BLIND then
     local folded = M.fold(word)
@@ -345,9 +358,11 @@ local function did_you_mean(ctx, index, word)
   return nil
 end
 
----Which ruleset, rule id, family and part the typed words mean. A single word that is a part and also the name of a
----ruleset means the ruleset (the part is still there as the second word). A part word alone is the part of the ruleset
----that is settled otherwise (the buffer's, the only one, the chosen one).
+---Which ruleset, rule id, family and part the typed words mean. The order, the same on every file system: a ruleset
+---spelled as its folder, a part word, a rule id or family spelled exactly, and only then (where the file system ignores
+---case) a ruleset in another case: `dep` is the ruleset `Dep` there, but `DEP` stays the family. A single word that is a
+---part and also the name of a ruleset means the ruleset (the part is still there as the second word). A part word alone
+---is the part of the ruleset that is settled otherwise (the buffer's, the only one, the chosen one).
 ---@param ctx Rules.Vault.Ctx
 ---@param first string|nil
 ---@param second string|nil
@@ -361,9 +376,13 @@ function M.resolve(ctx, first, second)
   if first == nil then
     return { kind = "none", part = part, part_given = second ~= nil }, nil
   end
-  local rs = M.match_ruleset(ctx, first)
-  if rs then
+  ---@param rs Rules.Vault.Ruleset
+  local function ruleset_target(rs)
     return { kind = "ruleset", name = rs.name, ruleset = rs, part = part, part_given = second ~= nil }, nil
+  end
+  local exact = M.match_ruleset_exact(ctx, first)
+  if exact then
+    return ruleset_target(exact)
   end
   if M.is_part(first) and second == nil then
     return { kind = "none", part = first, part_given = true }, nil
@@ -384,6 +403,11 @@ function M.resolve(ctx, first, second)
       end
       return { kind = "family", name = first, part = part, part_given = false, entries = entries }, nil
     end
+  end
+  -- nothing matched exactly: only now the name of a ruleset in another case, where the file system does not tell them apart
+  local folded = M.match_ruleset(ctx, first)
+  if folded then
+    return ruleset_target(folded)
   end
   local names = M.ruleset_names(ctx)
   local text = ("'%s' is neither a ruleset (%s), a rule id nor a family of the vault"):format(
