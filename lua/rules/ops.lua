@@ -297,6 +297,13 @@ local function fresh(ctx)
   return view, nil
 end
 
+---A text with LF line ends (a CR LF pair is a line end, a lone CR stays a control character).
+---@param text string
+---@return string
+local function lf(text)
+  return (text:gsub("\r\n", "\n"))
+end
+
 ---Validate a check or an agent hint given as data.
 ---@param value any
 ---@param what string
@@ -642,11 +649,13 @@ local function do_new(op, ctx)
   if op.title == "" or ops_lib.too_long(op.title, M.MAX_TITLE) then
     return refuse("invalid_argument", ("title must be 1 to %d characters"):format(M.MAX_TITLE))
   end
-  if op.text ~= nil then
-    if ops_lib.has_control(op.text) then
+  -- a text from a Windows clipboard or a CR LF file has CR LF line ends: those are line ends, not control characters
+  local text_in = type(op.text) == "string" and lf(op.text) or op.text
+  if text_in ~= nil then
+    if ops_lib.has_control(text_in) then
       return refuse("invalid_argument", "text contains a control character")
     end
-    if ops_lib.too_long(op.text, M.MAX_TEXT) then
+    if ops_lib.too_long(text_in, M.MAX_TEXT) then
       return refuse("payload_too_large", ("text is longer than %d characters"):format(M.MAX_TEXT))
     end
   end
@@ -685,7 +694,7 @@ local function do_new(op, ctx)
       id = id,
       severity = op.severity,
       title = op.title,
-      text = op.text,
+      text = text_in,
       check = op.check,
       agent = op.agent,
     })
@@ -758,7 +767,7 @@ local function do_set(op, ctx)
       )
     end
     count = count + 1
-    patch[key] = value
+    patch[key] = (key == "text" and type(value) == "string") and lf(value) or value
   end
   if count == 0 then
     return refuse("invalid_argument", "patch is empty")

@@ -229,14 +229,16 @@ end
 ---@field l2 integer   the last line
 
 ---The fields of a block's table constructor (`id = ...,`, `check = { ... },`), each with the lines it takes. `nil` when
----a field cannot be told by its name (a positional entry) or when two fields share a line: a block like that is not
----edited line by line.
+---a field cannot be told by its name (a positional entry), when two fields share a line or when a separator stands in
+---front of its field (comma-first style: a line that starts with `,`): a block like that is not edited line by line,
+---the caller writes it again from its table.
 ---@param source string  the lines of the block between the fences
 ---@return Rules.BlockField[]|nil
 local function top_fields(source)
   local fields = {}
   local depth, i, n, line = 0, 1, #source, 1
   local start, first_line, last_line = nil, 1, 1
+  local fresh = true -- nothing but blanks yet on this line
 
   ---@return boolean ok
   local function finish()
@@ -262,7 +264,12 @@ local function top_fields(source)
     local stop = i
     if c == "\n" then
       line = line + 1
+      fresh = true
     elseif not c:match("%s") then
+      if fresh and depth == 0 and (c == "," or c == ";") then
+        return nil
+      end
+      fresh = false
       if not start and not (c == "," or c == ";") then
         start, first_line = i, line
       end
@@ -386,6 +393,32 @@ local function replace(lines, from, to, new)
   end
 end
 
+-- ── the text of a rule ──────────────────────────────────────────────────────────
+
+---A text as given by a client, with LF line endings: a CR LF pair would leave a CR at the end of every line in a file
+---that ends its lines with LF (or in front of the CR of a file that ends them with CR LF), and the file would mix them.
+---@param text string
+---@return string
+local function lf(text)
+  return (text:gsub("\r\n", "\n"))
+end
+
+---Lines of a text for a rule file. A divider line (`---`, `***`, `___`) at the end of the text, right under a line of
+---text, would make that line a heading (`---`) or glue to it: a blank line goes in front of it.
+---@param text string
+---@return string[]
+local function text_lines(text)
+  local lines = vim.split(text, "\n", { plain = true })
+  local last = #lines
+  while last > 0 and lines[last]:match("^%s*$") do
+    last = last - 1
+  end
+  if last >= 2 and parser.is_framing(lines[last]) and not parser.is_framing(lines[last - 1]) then
+    table.insert(lines, last, "")
+  end
+  return lines
+end
+
 -- ── the edit ────────────────────────────────────────────────────────────────────
 
 ---Where a field stands among the others when a new one is written: the order `block_lines` writes them in.
@@ -436,11 +469,16 @@ local function edit_fields(lines, s, e, patch, repeats_severity)
         end
         new[1] = ("%s%s = %s,"):format(indent, key, text)
       end
-      local field
+      -- a key given twice: the last one is the one that counts in Lua, so that one is replaced; to remove the key every
+      -- one of them would have to go, which is the caller's whole-block rewrite
+      local field, count = nil, 0
       for _, f in ipairs(fields) do
         if f.key == key then
-          field = f
+          field, count = f, count + 1
         end
+      end
+      if count > 1 and value == vim.NIL then
+        return false
       end
       if field then
         edits[#edits + 1] = { l1 = s + field.l1, l2 = s + field.l2, new = new }
@@ -504,6 +542,7 @@ function M.apply(path, text, patch)
   local off = rule_file.offset
   local id = rule_file.id
   local edit_block = patch.check ~= nil or patch.agent ~= nil
+  local given = patch.text ~= nil and lf(patch.text) or nil
   ---@type string|nil
   local want_title
 
@@ -518,9 +557,13 @@ function M.apply(path, text, patch)
         last = i
       end
     end
-    local new = patch.text == "" and {} or vim.split(patch.text, "\n", { plain = true })
+    local new = given == "" and {} or text_lines(given)
     if first then
       replace(lines, first, last, new)
+      -- no text left: one blank line between what is above and what is below, as in a file made without text
+      if #new == 0 and lines[first - 1] == "" and lines[first] == "" then
+        table.remove(lines, first)
+      end
     elseif #new > 0 then
       local insert = {}
       if from > 1 and lines[from - 1] and lines[from - 1]:match("%S") then
@@ -647,8 +690,8 @@ function M.apply(path, text, patch)
   if patch.severity ~= nil and rule.severity ~= patch.severity then
     return nil, "the result would not have the severity asked for"
   end
-  if patch.text ~= nil then
-    local want = parser.prose(vim.split(patch.text, "\n", { plain = true }))
+  if given ~= nil then
+    local want = parser.prose(vim.split(given, "\n", { plain = true }))
     if rule.text ~= want then
       return nil, "the text would not read back as written (a heading or a separator line in it ends the text of a rule)"
     end
@@ -703,8 +746,9 @@ function M.render_new(spec)
     out[#out + 1] = "```"
     out[#out + 1] = ""
   end
-  if spec.text and spec.text ~= "" then
-    vim.list_extend(out, vim.split(spec.text, "\n", { plain = true }))
+  local given = spec.text ~= nil and lf(spec.text) or nil
+  if given and given ~= "" then
+    vim.list_extend(out, text_lines(given))
   end
   -- The file ends as the rule files of the shipped rulesets do: the text, a blank line, the divider `---`, a blank
   -- line (the generator copies the lines of a rule file as they are, so this is what keeps two rules in a document
@@ -713,7 +757,7 @@ function M.render_new(spec)
   while out[#out] ~= nil and out[#out]:match("^%s*$") do
     out[#out] = nil
   end
-  if not (spec.text and spec.text ~= "" and out[#out]:match("^%s*%-%-%-%s*$")) then
+  if not (given and given ~= "" and out[#out]:match("^%s*%-%-%-%s*$")) then
     out[#out + 1] = ""
     out[#out + 1] = "---"
   end
@@ -723,7 +767,7 @@ function M.render_new(spec)
   if not rule or #errs > 0 then
     return nil, ("the rule would not read back: %s"):format(tostring((errs or {})[1] or "unknown"))
   end
-  if spec.text and rule.text ~= parser.prose(vim.split(spec.text, "\n", { plain = true })) then
+  if given and rule.text ~= parser.prose(vim.split(given, "\n", { plain = true })) then
     return nil, "the text would not read back as written (a heading or a separator line in it ends the text)"
   end
   if spec.check ~= nil and not vim.deep_equal(rule.check, spec.check) then
