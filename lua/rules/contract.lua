@@ -652,6 +652,17 @@ end
 ---The longest id a rule may have (`docs/RULESET-FORMAT.md`): a longer one would not read back.
 local MAX_ID_BYTES = 100
 
+---The families a scan has, loaded or retired, as they are spelled (the part of an id before its number).
+---@param view Rules.Contract.View
+---@return table<string, true>
+function M.families(view)
+  local out = {}
+  for fam in pairs(numbering(view)) do
+    out[fam] = true
+  end
+  return out
+end
+
 ---The id one past the highest number of a family, in the width the family uses (at least two digits). `nil` when
 ---that id would be longer than an id may be: there is no id left in the family.
 ---@param family string

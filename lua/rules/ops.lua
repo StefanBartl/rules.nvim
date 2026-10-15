@@ -55,15 +55,23 @@ M.MAX_TEXT = 20000
 M.MAX_REASON = 300
 M.FAMILY_MAX = 12
 
----Why a family cannot be given to `new`, or `nil` when it can: uppercase letters `A-Z` only (the form of every family of
----a ruleset: `DEP`, `LUA`), 1 to `FAMILY_MAX`. Lower or mixed case is refused, not changed: a mistyped word of a title
----(`Fix`) must not become a family, and `dep` would be another family than `DEP` where the file system tells the
----folders apart and the same folder where it does not. The text goes after the word "family" (the form says "Family").
+---Why a family cannot be given to `new`, or `nil` when it can: a NEW family is uppercase letters `A-Z` only (the form
+---of every family of the shipped rulesets: `DEP`, `LUA`), 1 to `FAMILY_MAX`. Lower or mixed case is refused, not changed:
+---a mistyped word of a title (`Fix`) must not become a family, and `dep` would be another family than `DEP` where the
+---file system tells the folders apart and the same folder where it does not. A family that the ruleset HAS already
+---(`known`) is taken in its spelling, exactly: the format allows `Dep-01`, and its next id is `Dep-02`. The text goes
+---after the word "family" (the form says "Family").
 ---@param family any
+---@param known? fun(family: string): boolean  whether a family is in the ruleset (given: asked only for letters)
 ---@return string|nil why
-function M.family_error(family)
+function M.family_error(family, known)
+  if type(family) == "string" and family:match("^%a+$") and known and known(family) then
+    return nil
+  end
   if type(family) ~= "string" or not family:match("^[A-Z]+$") or #family > M.FAMILY_MAX then
-    return ("must be 1 to %d uppercase letters A-Z (e.g. DEP)"):format(M.FAMILY_MAX)
+    return ("must be 1 to %d uppercase letters A-Z (e.g. DEP), or a family the ruleset has, spelled as there"):format(
+      M.FAMILY_MAX
+    )
   end
   return nil
 end
@@ -636,6 +644,17 @@ local function do_new(op, ctx)
     return refuse("invalid_argument", "new needs family, title and severity")
   end
   local family_why = M.family_error(op.family)
+  if family_why and type(op.family) == "string" and op.family:match("^%a+$") then
+    -- letters, but not the form of a new family: it may be one the ruleset has (`Dep-01`), which the scan tells
+    local view, bad = fresh(ctx)
+    if not view then
+      return bad
+    end
+    local have = contract.families(view)
+    family_why = M.family_error(op.family, function(family)
+      return have[family] == true
+    end)
+  end
   if family_why then
     return refuse("invalid_argument", "family " .. family_why)
   end

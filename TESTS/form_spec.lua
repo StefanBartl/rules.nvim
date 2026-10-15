@@ -128,6 +128,17 @@ describe("rules.form.validate", function()
     assert.is_not_nil((form.validate(valid({ family = "ABCDEFGHIJKL" }))))
   end)
 
+  it("takes a family the ruleset has in its own spelling, and no other spelling of it", function()
+    local known = function(family)
+      return family == "Dep"
+    end
+    assert.is_not_nil((form.validate(valid({ family = "Dep" }), known)))
+    local op, errors = form.validate(valid({ family = "dep" }), known)
+    assert.is_nil(op)
+    assert.is_truthy(errors[1]:find("uppercase letters", 1, true))
+    assert.is_nil((form.validate(valid({ family = "Dep" }))))
+  end)
+
   it("refuses several ticks, an unknown tick and a place it cannot read", function()
     local _, e1 = form.validate(valid({ family = "DEP-1" }))
     assert.is_truthy(e1[1]:find("uppercase letters", 1, true))
