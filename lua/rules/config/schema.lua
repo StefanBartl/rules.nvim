@@ -12,7 +12,13 @@
 ---
 --- `check` never raises and never guesses: it returns the part that is valid, every problem with the dotted key it
 --- belongs to, and every key it does not know. What to do with a problem is the caller's: `setup()` drops the key
---- and warns (ERR-22), a file is refused as a whole (`rules.settings`: fail loudly).
+--- and warns (ERR-22), a file is refused as a whole (`rules.settings`: fail loudly). A problem drops only what is
+--- wrong: a bad field of `agent` does not take the valid ones (`deny`) with it.
+---
+--- `[]` and `{}` are two things in a JSON file and the same empty table in Lua. A decoded file is checked with
+--- `strict` (`vim.json.decode` marks an empty object with `vim.empty_dict()`, so an empty table without the mark was
+--- an array): `[]` is not an object and `{}` is not a list. `setup()` and a call cannot say which they mean, they get
+--- either.
 ---
 --- Not its job: reading a file (`rules.config.file`), merging the places (`rules.settings`).
 
@@ -36,12 +42,50 @@ M.AGENT_KEYS = { "backends", "models", "batch_size", "max_context_bytes", "deny"
 ---A hint for a key that is known elsewhere but not in this place.
 ---@type table<Rules.Config.Scope, table<string, string>>
 local ELSEWHERE = {
-  project = { lua_predicates = "is a setup() option only (a file in a repository must not decide what code may run)" },
+  project = {
+    lua_predicates = "is a setup() option only (a file in a repository must not decide what code may run)",
+  },
   vault = {
     lua_predicates = "is a setup() option only (a file must not decide what code may run)",
     vault = "belongs in setup() or a project file (a vault does not name another vault)",
   },
 }
+
+---Whether the current `check` reads a decoded JSON file (see the module header). Set by `M.check` for its duration.
+local strict = false
+
+---An empty table that `vim.json.decode` made from `{}` (not from `[]`).
+---@param value table
+---@return boolean
+local function is_empty_dict(value)
+  return next(value) == nil and getmetatable(value) == getmetatable(vim.empty_dict())
+end
+
+---Whether a value is an object (or, for Lua, an empty table).
+---@param value any
+---@return boolean
+local function is_object(value)
+  if type(value) ~= "table" then
+    return false
+  end
+  if next(value) ~= nil then
+    return not vim.islist(value)
+  end
+  return not strict or is_empty_dict(value)
+end
+
+---Whether a value is a list (or, for Lua, an empty table).
+---@param value any
+---@return boolean
+local function is_list(value)
+  if type(value) ~= "table" then
+    return false
+  end
+  if next(value) ~= nil then
+    return vim.islist(value)
+  end
+  return not (strict and is_empty_dict(value))
+end
 
 ---@class Rules.Config.Problem
 ---@field key string  dotted path of the key, "" for the document itself
@@ -64,7 +108,10 @@ local function describe(value)
   end
   local kind = type(value)
   if kind == "table" then
-    return vim.islist(value) and (next(value) == nil and "an empty list" or "a list") or "an object"
+    if next(value) == nil then
+      return strict and (is_empty_dict(value) and "an empty object" or "an empty list") or "an empty list"
+    end
+    return vim.islist(value) and "a list" or "an object"
   elseif kind == "string" then
     return value == "" and "an empty string" or "a string"
   elseif kind == "number" then
@@ -124,7 +171,7 @@ end
 ---@param problems Rules.Config.Problem[]
 ---@return string[]|nil
 local function string_list(value, key, problems)
-  if type(value) ~= "table" or (next(value) ~= nil and not vim.islist(value)) then
+  if not is_list(value) then
     problems[#problems + 1] = { key = key, message = ("must be a list of strings, got %s"):format(describe(value)) }
     return nil
   end
@@ -156,7 +203,7 @@ end
 ---@param problems Rules.Config.Problem[]
 ---@return table<string, string[]>|nil
 local function gates(value, problems)
-  if type(value) ~= "table" or (next(value) ~= nil and vim.islist(value)) then
+  if not is_object(value) then
     problems[#problems + 1] =
       { key = "gates", message = ("must map a gate name to a list of family prefixes, got %s"):format(describe(value)) }
     return nil
@@ -191,32 +238,30 @@ end
 ---@param scope Rules.Config.Scope
 ---@return table|nil
 local function agent(value, problems, unknown, scope)
-  if type(value) ~= "table" or (next(value) ~= nil and vim.islist(value)) then
+  if not is_object(value) then
     problems[#problems + 1] = { key = "agent", message = ("must be an object, got %s"):format(describe(value)) }
     return nil
   end
   if scope ~= "call" then
     find_unknown(value, M.AGENT_KEYS, "agent.", scope, unknown)
   end
-  local out, ok = {}, true
+  -- a field that is wrong is dropped on its own, with its problem: the valid ones (`deny`!) stay
+  local out = {}
   for _, name in ipairs({ "backends", "models", "deny" }) do
     if value[name] ~= nil then
-      local list = string_list(value[name], "agent." .. name, problems)
-      out[name], ok = list, ok and list ~= nil
+      out[name] = string_list(value[name], "agent." .. name, problems)
     end
   end
   for _, name in ipairs({ "batch_size", "max_context_bytes" }) do
     if value[name] ~= nil then
-      local number = whole_number(value[name], "agent." .. name, problems)
-      out[name], ok = number, ok and number ~= nil
+      out[name] = whole_number(value[name], "agent." .. name, problems)
     end
   end
   if value.scopes ~= nil then
     local scopes = value.scopes
-    if type(scopes) ~= "table" or (next(scopes) ~= nil and vim.islist(scopes)) then
+    if not is_object(scopes) then
       problems[#problems + 1] =
         { key = "agent.scopes", message = ("must map a family to { include = { ... } }, got %s"):format(describe(scopes)) }
-      ok = false
     else
       local families = {}
       for family in pairs(scopes) do
@@ -231,31 +276,26 @@ local function agent(value, problems, unknown, scope)
         local scope_value = scopes[family]
         if type(family) ~= "string" or family == "" then
           problems[#problems + 1] = { key = "agent.scopes", message = "a scope needs a family name (a non-empty string)" }
-          ok = false
-        elseif type(scope_value) ~= "table" or (next(scope_value) ~= nil and vim.islist(scope_value)) then
+        elseif not is_object(scope_value) then
           problems[#problems + 1] =
             { key = key, message = ("must be { include = { ... } }, got %s"):format(describe(scope_value)) }
-          ok = false
         else
           if scope ~= "call" then
             find_unknown(scope_value, { "include" }, key .. ".", scope, unknown)
           end
           if scope_value.include == nil then
             problems[#problems + 1] = { key = key, message = "needs include (a list of globs); no scope means not sent" }
-            ok = false
           else
             local include = string_list(scope_value.include, key .. ".include", problems)
             if include then
               out.scopes[family] = { include = include }
-            else
-              ok = false
             end
           end
         end
       end
     end
   end
-  return ok and out or nil
+  return out
 end
 
 ---@param value any
@@ -281,14 +321,13 @@ local function lua_predicates(value, problems)
   return value
 end
 
----Check a settings table.
----@param value any  the decoded file, the `setup()` argument or the options of a call
+---@param value any
 ---@param scope Rules.Config.Scope
 ---@return Rules.Config.Checked
-function M.check(value, scope)
+local function check_table(value, scope)
   ---@type Rules.Config.Checked
   local result = { clean = {}, problems = {}, unknown = {} }
-  if type(value) ~= "table" or (next(value) ~= nil and vim.islist(value)) then
+  if not is_object(value) then
     result.problems[1] = { key = "", message = ("must be an object, got %s"):format(describe(value)) }
     return result
   end
@@ -315,6 +354,18 @@ function M.check(value, scope)
   if allowed.lua_predicates and value.lua_predicates ~= nil then
     clean.lua_predicates = lua_predicates(value.lua_predicates, problems)
   end
+  return result
+end
+
+---Check a settings table.
+---@param value any  the decoded file, the `setup()` argument or the options of a call
+---@param scope Rules.Config.Scope
+---@param from_json? boolean  `value` was decoded from a JSON file: `[]` and `{}` are told apart (see the module header)
+---@return Rules.Config.Checked
+function M.check(value, scope, from_json)
+  strict = from_json == true
+  local result = check_table(value, scope)
+  strict = false
   return result
 end
 

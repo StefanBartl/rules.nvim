@@ -71,7 +71,8 @@ function M.read(dir, scope)
     return refuse(("is not valid JSON (%s)"):format((tostring(decoded):gsub("^.-:%d+:%s*", ""))))
   end
 
-  local checked = schema.check(decoded, scope)
+  -- strict: `[]` and `{}` are two things in a file (the decoder marks an empty object)
+  local checked = schema.check(decoded, scope, true)
   file.config, file.problems, file.unknown = checked.clean, checked.problems, checked.unknown
   return file
 end

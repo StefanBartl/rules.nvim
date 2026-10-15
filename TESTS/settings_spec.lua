@@ -235,7 +235,8 @@ describe("rules.settings", function()
 
     it("refuses a scope without include, and a family key that is no object", function()
       local project = tmp_dir()
-      project_file(project, { agent = { scopes = { LUA = {}, NEW = "x" } } })
+      -- raw JSON: LUA is an empty OBJECT here (a Lua {} would encode as an empty list)
+      project_file(project, '{"agent":{"scopes":{"LUA":{},"NEW":"x"}}}')
 
       local text = settings.error_text(settings.resolve({ project = project }), false)
 
@@ -316,6 +317,58 @@ describe("rules.settings", function()
       assert.is_nil(text:find(project, 1, true))
     end)
 
+    it("tells [] from {} in a file: a list is no object, an object is no list", function()
+      local refused = {
+        ["[]"] = "must be an object, got an empty list",
+        ['{"rulesets":{}}'] = "rulesets must be a list of strings, got an empty object",
+        ['{"gates":[]}'] = "gates must map a gate name to a list of family prefixes, got an empty list",
+        ['{"agent":[]}'] = "agent must be an object, got an empty list",
+        ['{"agent":{"deny":{}}}'] = "agent.deny must be a list of strings, got an empty object",
+        ['{"agent":{"scopes":[]}}'] = "agent.scopes must map a family",
+        ['{"agent":{"scopes":{"LUA":[]}}}'] = "agent.scopes.LUA must be { include = { ... } }, got an empty list",
+        ['{"agent":{"scopes":{"LUA":{"include":{}}}}}'] = "agent.scopes.LUA.include must be a list of strings",
+        ['{"gates":{"release":{}}}'] = "gates.release must be a list of strings, got an empty object",
+      }
+      for content, expected in pairs(refused) do
+        local project = tmp_dir()
+        write_raw(project .. "/.rules.json", content)
+
+        local text = settings.error_text(settings.resolve({ project = project }), false)
+
+        assert.is_truthy(text, content .. " must be refused")
+        assert.is_truthy(text:find(expected, 1, true), content .. " -> " .. tostring(text))
+      end
+    end)
+
+    it("takes [] where a list is meant and {} where an object is meant: an empty one is 'none'", function()
+      for _, content in ipairs({
+        "{}",
+        '{"rulesets":[]}',
+        '{"gates":{}}',
+        '{"agent":{}}',
+        '{"agent":{"deny":[],"scopes":{}}}',
+        '{"rulesets":[],"gates":{},"agent":{"backends":[]}}',
+      }) do
+        local project = tmp_dir()
+        write_raw(project .. "/.rules.json", content)
+
+        local res = settings.resolve({ project = project })
+
+        assert.are.equal(0, #res.problems, content)
+      end
+    end)
+
+    it("a project file with an empty object for rulesets does not blank out the vault: it is refused", function()
+      local vault, project = make_vault(), tmp_dir()
+      config.setup({ vault = vault })
+      project_file(project, '{"rulesets":{}}')
+
+      local res = settings.resolve({ project = project })
+
+      assert.is_true(#res.problems > 0)
+      assert.is_truthy(settings.error_text(res, false):find("rulesets must be a list", 1, true))
+    end)
+
     it("a vault that is no folder is a problem that names where it was set", function()
       vim.env.RULES_VAULT = tmp_dir() .. "/nowhere"
 
@@ -386,6 +439,40 @@ describe("rules.settings", function()
 
       assert.are.equal(1, #res.warnings)
       assert.is_truthy(settings.format(res.warnings[1], false):find("does not name another vault", 1, true))
+    end)
+
+    it("drops only the bad field of agent, not the block: deny survives a bad batch_size (ERR-22)", function()
+      local messages = capture(function()
+        config.setup({
+          agent = { batch_size = "many", deny = { ".env*" }, models = { "m" }, scopes = { LUA = { include = { "lua/**" } } } },
+        })
+      end)
+
+      assert.is_true(mentions(messages, "agent.batch_size must be a whole number"))
+      assert.are.same({ ".env*" }, config.get().agent.deny)
+      assert.are.same({ "m" }, config.get().agent.models)
+      assert.are.same({ "lua/**" }, config.get().agent.scopes.LUA.include)
+      assert.are.equal(8, config.get().agent.batch_size) -- only the field that was wrong falls back
+      assert.are.same({ ".env*" }, settings.resolve({}).agent.deny)
+    end)
+
+    it("drops only the bad scope and the bad list inside agent, whatever order the fields come in", function()
+      local messages = capture(function()
+        config.setup({
+          agent = {
+            deny = { ".env*" },
+            backends = "ollama",
+            scopes = { BAD = {}, OK = { include = { "a" } }, WORSE = { include = { 1 } } },
+          },
+        })
+      end)
+
+      assert.is_true(mentions(messages, "agent.backends must be a list of strings"))
+      assert.is_true(mentions(messages, "agent.scopes.BAD needs include"))
+      assert.is_true(mentions(messages, "agent.scopes.WORSE.include must be a list of non-empty strings"))
+      assert.are.same({ ".env*" }, config.get().agent.deny)
+      assert.are.same({}, config.get().agent.backends)
+      assert.are.same({ OK = { include = { "a" } } }, config.get().agent.scopes)
     end)
 
     it("drops an invalid setup() value and warns (ERR-22), keeping the valid ones", function()
