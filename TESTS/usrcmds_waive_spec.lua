@@ -659,6 +659,13 @@ describe(":Rules waive, renew, unwaive", function()
       assert.are.equal("pkgs" .. sep .. "b c" .. sep, require("rules.cmdline").unescape(typed))
     end)
 
+    it("--project= completes nothing for a lead with a backtick: it would be a command substitution", function()
+      -- without the guard the editor runs the command inside the backticks and completes what it printed
+      vim.fn.mkdir(project .. "/pkgsx/sub", "p")
+      assert.are.same({}, require("rules.ui.candidates").project_dirs("`echo pkgsx`"))
+      assert.are.same({}, complete("Rules waive DEP-01 --project=`echo pkgsx`"))
+    end)
+
     it("expires= has no completion", function()
       assert.are.same({}, complete("Rules waive DEP-01 expires="))
       assert.are.same({}, complete("Rules renew DEP-01 expires=20"))
