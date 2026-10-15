@@ -173,6 +173,19 @@ ruleset, and only what is missing: a file that is there is never touched. It lis
 cannot do for you: setting `vault = "<dir>"` in `setup()` or `$RULES_VAULT`, which is how the vault is found (see
 "Finding it"). It never adds a remote or reaches GitHub; `git init` happens only with `--git`.
 
+A ruleset made in a vault that has rulesets already must not hide them. The `.rules.json` that lists only the new ruleset
+would, because a list replaces the discovery of the folders under `rulesets/`. So the file is made only when the new
+ruleset is the only one; with other rulesets there, none is made (every folder is found without it, the new one too), and
+the plan and the result say so. A `.rules.json` that is there is never touched: when it does not list the new ruleset, the
+plan and the result say so and name the entry to add (`"rulesets/<name>"`); until it is added, `:RulesVault` and
+`check --vault` do not see the new ruleset.
+
+Nothing is written before the whole layout is checked, and a refusal names the folder or file in the way: a file where a
+folder is needed (also above the vault folder), a name of more than 255 bytes, a path over the limit of the system (259
+bytes on Windows, where Neovim cannot open longer ones even when long paths are on), and a link (symlink or junction) on
+the way that leads out of the vault folder or nowhere. A link that stays inside the folder is followed. The check is made
+again just before the first file is written.
+
 ### The CI of a vault
 
 `.github/workflows/ci.yml` of a new vault is `templates/rules-vault-ci.yml` of this plugin. It only reads (no push, no

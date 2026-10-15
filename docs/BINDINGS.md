@@ -37,7 +37,10 @@ and `move`, `--by=`, `--after=`, `--before=`, the severities, `--ruleset=` and
 the places of `--to=` (the layouts, then the headings of one layout) all
 tab-complete against whatever is actually loaded/configured right now. The
 first word of a `:RulesVault` verb completes to the rulesets of the vault, the
-parts, and the ids and families `:Rules` completes.
+parts, and the ids (retired ones too) and families **of the vault's rulesets**
+(the ones the command resolves a word in, not whatever `setup({ rulesets })`
+loads). The second word offers the parts only behind a ruleset: a rule id, a
+family or a part word alone takes none, and the command refuses one there.
 
 ## Finding rules in the vault
 
@@ -66,8 +69,11 @@ ones the vault offers, `rules.vault.rulesets()`.
   A word that is a part and also the name of a ruleset means the ruleset. A
   word that is none is an error that lists the rulesets and suggests the
   spelling it has (`dep-06`: did you mean `DEP-06`?). Ids and families are
-  exact. The name of a ruleset ignores case only where the file system does
-  (Windows, macOS). A rule id or a family takes no part.
+  exact, and an exact one beats a ruleset of the same name in another case:
+  `DEP` is the family even where a ruleset `dep` exists, on every system. Only
+  when nothing matches exactly does the name of a ruleset ignore case, and only
+  where the file system does (Windows, macOS). A rule id or a family takes no
+  part.
 - **Without a word** the ruleset is the one the current buffer lies in
   (compared by real path), the only one of the vault, or a pick.
 - **Parts.** `rules` is `_rules/` (the ruleset folder itself for a ruleset that
@@ -77,7 +83,8 @@ ones the vault offers, `rules.vault.rulesets()`.
 - **`open`** puts a rule file in a buffer at its heading, a folder in the
   explorer (`:Filetree open`, else the editor's own), a generated document in a
   buffer. When there are several (a family with a folder in two rulesets, two
-  generated documents) you pick one.
+  generated documents) you pick one. The path is opened as it is: a `%` or `#`
+  in a folder name (`a#b`) is not taken for the current or the alternate file.
 - **`clipboard` and `link`** use forward slashes on every system. A link target
   with a blank or a parenthesis is wrapped in `<...>`.
 - **`tree`** prints the ruleset family by family with the counts of rules and
@@ -98,12 +105,15 @@ ones the vault offers, `rules.vault.rulesets()`.
 folder of a vault and, in it, only what is missing; **a file that is there is
 never overwritten** (it is listed as kept). With no `<dir>` it asks for one. The
 name of the first ruleset is `default` unless given (letters, digits, `.`, `_`,
-`-`; no Windows device name).
+`-`; no Windows device name). On Windows a folder completed with `<Tab>` ends
+with a backslash (`sub\`): when `sub` is a folder and `sub lua` is not, the blank
+typed after it starts the next word, so `create sub\ lua` is the folder `sub` and
+the ruleset `lua`. In every other case `\ ` is a blank in the name (`my\ vault`).
 
 | Made | |
 | --- | --- |
 | `README.md` | what the vault is, its layout, how it is worked with |
-| `.rules.json` | `{"rulesets": ["rulesets/<name>"], "gates": {}}`, paths relative to the file |
+| `.rules.json` | `{"rulesets": ["rulesets/<name>"], "gates": {}}`, paths relative to the file. Made only when the new ruleset is the only one; in a vault with rulesets none is made (they are all found without it), and a file that is there stays and is reported when it does not list the new ruleset |
 | `.gitattributes` | `* text=auto eol=lf` |
 | `.gitignore` | editors, `.deps/` |
 | `.github/workflows/ci.yml` | from `templates/rules-vault-ci.yml` of this plugin: on Ubuntu and Windows: `.gitattributes` has `eol=lf`, `catalog --check` per ruleset, all rulesets load together without errors (`scripts/ruleset.lua check`: a duplicate id, an invalid severity), the round trip; see [CONFIG.md](CONFIG.md#the-ci-of-a-vault) |
@@ -125,6 +135,11 @@ The same step is said again when it is done, and the line is put in the `+`
 register. The vault is not used for the session: this step makes rules.nvim
 find it.
 
+- **Nothing is written before the layout is checked.** A file where a folder
+  is needed, a name over 255 bytes, a path over the limit (259 bytes on
+  Windows) and a link (symlink, junction) on the way that leads out of the
+  vault folder are refused with the name of the one in the way, before the
+  first file. See [CONFIG.md](CONFIG.md#making-a-vault).
 - `--git` runs `git init` in the folder, and only then. A folder that is a
   repository already, or lies inside another one, gets none. There is **never a
   remote**, a commit, a push or a call to GitHub: that is yours (the privacy of
