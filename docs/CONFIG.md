@@ -25,6 +25,8 @@ How two places combine:
 - `agent` is merged **field by field**; `agent.scopes` by family. The lists inside it (`backends`, `models`, `deny`,
   `include`) are replaced as a whole.
 - `lua_predicates` comes from `setup()` only: a file in a repository must not decide what code may run.
+- `trust` comes from `setup()` and a call only (`--trust`, `$RULES_TRUST`): a file must not grant itself trust, see
+  [A word on trust](#a-word-on-trust).
 
 ## `.rules.json`
 
@@ -59,7 +61,7 @@ The same schema in a project and in a vault. Paths are relative to the file that
 | `vault` | string | the vault of this project (a project file only; see below) |
 
 The `agent` block is read, checked and merged here; the planner that uses it is described in [AGENT.md](AGENT.md).
-`setup()` takes the same keys (`rulesets`, `gates`, `agent`, `vault`) plus `lua_predicates`.
+`setup()` takes the same keys (`rulesets`, `gates`, `agent`, `vault`) plus `lua_predicates` and `trust`.
 
 Only the file at the root being checked is read (`:Rules check` uses its `path` argument, else the working directory).
 There is no search upwards.
@@ -78,6 +80,11 @@ file and the key:
 `:Rules check` and `:Rules gate` stop with that message instead of running with other settings; `:checkhealth rules`
 shows it; the contract answers an `invalid_argument` document. A **missing** file is not an error.
 
+In a file `[]` and `{}` are two different things, and a value of the wrong one is a shape error, not "valid and empty":
+a top-level `[]`, `"rulesets": {}`, `"gates": []` and `"agent": []` are refused. (`setup()` is Lua, where `{}` is both,
+and takes either.) A bad field of `agent` in `setup()` drops only that field, with a warning that names it: a `deny` list
+survives a `batch_size` that is not a number.
+
 ### Unknown keys warn
 
 A key the schema does not know is ignored with a warning and the nearest known key as a hint (the ERR-50 pattern of
@@ -90,6 +97,10 @@ warning is shown once per session.
 A project file travels between machines, so a path of this machine in it is a mistake. A `rulesets` or `vault` entry
 that is absolute, starts with `~`, or starts with an environment variable **warns** (it is still used). Write a path
 relative to the file, or `@vault/<name>`.
+
+An entry of `rulesets` that resolves outside the project folder (`../shared`) warns too, and so does a `vault` key in a
+project file. The warning names the key and carries no path of this machine in a document. The entry stays usable, but its
+rulesets are **not trusted**: see [A word on trust](#a-word-on-trust).
 
 ## The rules-vault
 
@@ -114,7 +125,15 @@ normal state (the vault is optional), not an error.
 4. `vault` in the `.rules.json` of the project (to choose a different vault for one project)
 
 A vault that is named but is not a folder is an error that says where it was named (`$RULES_VAULT: the vault is not a
-folder`).
+folder`), and so is a vault whose own `.rules.json` cannot be used (not JSON, wrong shape, an entry such as
+`@vault/../x`): `vault.root()`, `vault.rulesets()` and `vault.source()` report it, and `:RulesVault` and
+`:checkhealth rules` say it. A broken vault file is never read as "no vault file" (that would offer every folder under
+`rulesets/`, `draft` included, that the file meant to leave out).
+
+It is an error **where the result depends on the vault**. A call that names its ruleset folder itself
+(`rules.lua call ... --ruleset=<folder>`, `ruleset.lua catalog <folder>`, `check <folder>`, `migrate <folder>`) does not
+break over a stale `$RULES_VAULT` (a warning says the vault was not usable and not needed). `@vault/<name>`, a call
+without rulesets (the vault would give them) and `:RulesVault` still fail loudly.
 
 ### What a vault gives
 
@@ -136,8 +155,8 @@ machine. A vault with two rulesets yields the same documents as passing both fol
 ```lua
 local vault = require("rules.vault")
 local root, message = vault.root()      -- "/home/me/rules-vault"; nil + "no vault is configured: ..." without one
-local where = vault.source()            -- "call" | "setup" | "env" | "project" | nil
-local folders = vault.rulesets()        -- { ".../rulesets/lua", ".../rulesets/native" }
+local where, problem = vault.source()   -- "call" | "setup" | "env" | "project" | nil; the problem of the vault, if any
+local folders, problem = vault.rulesets() -- { ".../rulesets/lua", ".../rulesets/native" }; {} + the problem if it is broken
 local state = vault.git_state(root)     -- { repo, clean, changes, inside?, error? } | nil without git
 ```
 
@@ -167,9 +186,14 @@ which turns the run red:
 | loading | `scripts/ruleset.lua check --vault=.` | **all rulesets together** have a load error: a **duplicate rule id** (also one id in two rulesets, which no single ruleset shows), an invalid `severity`, a rule file that does not read |
 | round trip | `scripts/roundtrip.lua rulesets/*/` | writing a rule file does not give its bytes back |
 
-`ruleset.lua check [--vault=D] [--project=D] [<folder>]` loads through the snapshot document of `rules-export/1` and
-exits 1 on any `load_errors`, 2 on wrong usage or when there is nothing to check. No `jq`, no other tool than Neovim and
-bash. The workflow runs the same commands you can run in the vault folder, with the path of your `rules.nvim` in place
+`ruleset.lua check [--vault=D] [--project=D] [--trust=D] [<folder>]` loads through the snapshot document of `rules-export/1`
+and exits 1 on any `load_errors` or on a configured ruleset that is not a folder (the entry and where it was named are in
+the message, `ruleset rulesets/gone (the .rules.json of the vault) is not a folder`), 2 on wrong usage or when there is
+nothing to check. With `--vault=D` and no folder it checks **every ruleset the vault offers** (its own list, else every
+folder under `rulesets/`) whatever a project file or `setup()` names, and warns about the folders under `rulesets/` that
+the vault file leaves out (the CI steps `catalog --check` and the round trip glob `rulesets/*/`, so those are checked
+there). `catalog` and `:Rules catalog` without a folder treat a configured ruleset that is gone, or is a file, the same
+way: an error, not a quiet skip. No `jq`, no other tool than Neovim and bash. The workflow runs the same commands you can run in the vault folder, with the path of your `rules.nvim` in place
 of `.deps/rules.nvim`.
 
 A **private `rules.nvim`** (a fork) cannot be checked out with the token of the vault repository: give the `actions/checkout`
@@ -229,10 +253,45 @@ nvim --headless -u NONE -i NONE -n -l scripts/ruleset.lua check --vault=~/rules-
 | `$RULES_PROJECT` / `--project=<dir>` | the root whose `.rules.json` is read; without it the headless tools read no project file |
 | `--vault=<dir>` | the vault (a call, above `setup()` and the environment) |
 | `--ruleset=@vault/<name>` | a ruleset of the vault |
+| `--trust=<dir>` (repeatable) / `$RULES_TRUST` | folders whose rulesets are trusted, see below; the scripts never run a check themselves |
 
 ## A word on trust
 
 A project file chooses which rulesets are loaded, and a ruleset may hold `lua_predicate` checks, which are arbitrary
-Lua. `lua_predicates` stays a `setup()` option on purpose, so a repository cannot switch it on, but with the default
-(`true`) a `.rules.json` that points at a ruleset inside a repository you do not trust makes `:Rules check` run its
-predicates. Set `lua_predicates = false` where you check code you did not write.
+Lua. A `.rules.json` in a repository you did not write could point at a ruleset in your own repository (or at a vault
+of its own) and make `:Rules check` run its Lua in your Neovim. So a `lua_predicate` runs **only in a ruleset that you
+named yourself**:
+
+| Trusted | Not trusted |
+| --- | --- |
+| a ruleset named in `setup({ rulesets })` | **every** ruleset a project `.rules.json` names: a relative path, `../shared`, an absolute path and `@vault/<name>` alike |
+| a ruleset of your vault, when the vault comes from `setup({ vault })` or `$RULES_VAULT` (or `--vault=D` of a tool) | the rulesets of a vault that a project `.rules.json` names with its `vault` key |
+| a ruleset of a call: `--ruleset=<path>`, `$RULES_RULESETS`, the `rulesets` option of `rules.api` (you typed it) | |
+| whatever lies under a folder in `trust` | |
+
+What happens to a rule whose predicate may not run: it is reported as an **error** with the finding `not run: ruleset is
+not trusted (...)` (no path of this machine in it), never as `pass`, and it counts for the exit code like any failed
+critical rule. The other check types (`grep`, `file_exists`, `json_key_absent`) of that ruleset run as usual.
+`:checkhealth rules` lists the rulesets that are not trusted and who named them.
+
+To grant trust, name the folder (a ruleset folder, one above it, or a single file). It is compared by real path: a link is
+followed, `/var` and `/private/var` are one folder, and a file that is reached through a link out of a trusted folder is
+not trusted.
+
+```lua
+require("rules").setup({ trust = { "~/work/shared-rules", "~/work/app/docs/rules" } })
+```
+
+```bash
+nvim --headless -u NONE -i NONE -n -l scripts/rules.lua call snapshot --project=. --trust=docs/rules
+RULES_TRUST=~/work/shared-rules nvim --headless ...   # a list of paths, `;` or `:` separated
+```
+
+`trust` exists in `setup()` and as the call options `--trust` / `$RULES_TRUST` only. In a project or vault file it is an
+unknown key (with the hint that it is a `setup()` option only): a file must not grant itself trust. A headless run has
+no prompt and no memory: without `--trust` or `$RULES_TRUST` the rulesets a project file names stay untrusted.
+
+`lua_predicates = false` in `setup()` still switches every predicate off, trusted or not (the error then says
+`lua_predicates is off`). `rules.nvim` itself runs checks only in the editor (`:Rules check`, `:Rules gate`); the
+scripts resolve the same settings and accept the same flags, so a tool that runs checks on top of them agrees with the
+editor.

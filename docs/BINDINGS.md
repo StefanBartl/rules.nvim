@@ -331,7 +331,12 @@ rules loaded.
 `lua_predicates` (default `true`) controls whether `lua_predicate` checks may
 run. Set it to `false` for a ruleset you did not write: each predicate then
 reports `error` ("predicate not trusted") instead of running, and every other
-check type runs as usual. See [RULESET-FORMAT.md](RULESET-FORMAT.md).
+check type runs as usual. A predicate also runs only in a ruleset you named
+yourself (`setup({ rulesets })`, your vault, a command line): a ruleset that a
+project `.rules.json` names reports `error` with `not run: ruleset is not trusted`
+unless its folder is in `setup({ trust = { ... } })` (headless: `--trust=<dir>`,
+`$RULES_TRUST`). See [CONFIG.md](CONFIG.md#a-word-on-trust) and
+[RULESET-FORMAT.md](RULESET-FORMAT.md).
 
 ```vim
 :Rules gate release

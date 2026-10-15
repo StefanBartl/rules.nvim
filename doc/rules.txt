@@ -39,7 +39,12 @@ loading zero rules.
 checks may run. A rule block body is always evaluated in an empty environment,
 but a predicate is arbitrary Lua that runs later; set `lua_predicates = false`
 to run a ruleset you did not write, and each predicate then reports `error`
-("predicate not trusted") instead of running. See docs/RULESET-FORMAT.md.
+("predicate not trusted") instead of running. A predicate also runs only in a
+ruleset you named yourself (setup({ rulesets }), your vault from setup() or
+$RULES_VAULT, a command line): a ruleset that a project `.rules.json` names, or
+a vault that file names, reports `error` ("not run: ruleset is not trusted")
+unless its folder is in `trust` (setup({ trust = { "~/rules" } }); headless:
+--trust=<dir>, $RULES_TRUST). See docs/CONFIG.md and docs/RULESET-FORMAT.md.
 
 ==============================================================================
 SETTINGS FILES                                                     *rules-config*
@@ -50,7 +55,9 @@ the working directory) and from the `.rules.json` of a vault. Highest first:
 a headless call (--ruleset, --gate, $RULES_RULESETS, $RULES_GATES), setup(),
 the project file, the vault file, the defaults. `rulesets` is taken whole from
 the highest place that names it; `gates` is merged by gate name; `agent` field
-by field. `lua_predicates` is a setup() option only.
+by field. `lua_predicates` and `trust` are setup() options only. In a file, `[]`
+and `{}` are told apart: a list where an object is meant (or the reverse) is an
+error, not "empty".
 >json
     {
       "rulesets": ["docs/rules", "@vault/lua"],
@@ -64,7 +71,9 @@ cannot be used (not JSON, not an object, a value of the wrong shape, over
 1 MiB) is an error naming the file and the key, never "no settings"; :Rules
 check and :Rules gate stop with it. An unknown key warns, with the nearest
 known key as a hint. An absolute path in a project file warns (a path of this
-machine in a repository). A missing file is not an error. See docs/CONFIG.md.
+machine in a repository), and so do an entry outside the project folder and a
+`vault` key (their rulesets are not trusted, see |rules-config|). A missing file
+is not an error. See docs/CONFIG.md.
 
 ==============================================================================
 VAULT                                                              *rules-vault*
@@ -79,9 +88,9 @@ that), and `rulesets` entries of setup() or a project file may name one with
 folder name (`lua`, `native`).
 >lua
     local vault = require("rules.vault")
-    vault.root()      -- path, or nil and a message
-    vault.source()    -- "call" | "setup" | "env" | "project" | nil
-    vault.rulesets()  -- the folders the vault offers
+    vault.root()      -- path, or nil and a message (also for a broken vault file)
+    vault.source()    -- "call" | "setup" | "env" | "project" | nil, then its problem
+    vault.rulesets()  -- the folders the vault offers; {} and the problem if broken
 <
 :checkhealth rules shows the vault, where it came from, its rulesets, and
 whether it is a clean git repository (read-only, no network).

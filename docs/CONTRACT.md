@@ -184,7 +184,8 @@ nvim --headless -u NONE -i NONE -n -l scripts/rules.lua list --format=json --fam
 `--gate=<name>=<FAM,FAM>` (repeatable, default `$RULES_GATES`). Without them the
 rulesets and gates come from the places in [CONFIG.md](CONFIG.md): `--vault=<dir>`
 (else `$RULES_VAULT`) with every folder under its `rulesets/`, and the `.rules.json` of
-`--project=<dir>` (else `$RULES_PROJECT`; no project, no project file). The document goes
+`--project=<dir>` (else `$RULES_PROJECT`; no project, no project file), and `--trust=<dir>`
+(repeatable, also `$RULES_TRUST`; see [CONFIG.md](CONFIG.md#a-word-on-trust)). The document goes
 to stdout. Exit code: 0 an answer, 1 an error document, 2 wrong usage or no
 lib.nvim. A `--limit` or `--offset` that is not a whole number (`2.5`, `inf`,
 `nan`) is an `invalid_argument` error document, exit code 1; text that is no
@@ -197,7 +198,8 @@ stdin and stdout (`ready\t1`, then `<id>\t<method>\t<params>` lines; see
 `lib.nvim/lua/lib/nvim/contract/host/README.md`). The rulesets and gates come
 from `$RULES_RULESETS` (paths separated by `;`) and `$RULES_GATES`
 (`name=FAM,FAM;name=FAM`), else from `$RULES_VAULT`, `$RULES_PROJECT` and the
-settings files ([CONFIG.md](CONFIG.md)). The process ends when its stdin ends.
+settings files ([CONFIG.md](CONFIG.md)); `$RULES_TRUST` lists the folders to trust (the host runs no check itself, see
+[A word on trust](CONFIG.md#a-word-on-trust)). The process ends when its stdin ends.
 
 The engine keeps its scan of the rulesets while no `.md` file of them changes
 (size and modification time; a file changed within the last two seconds is
@@ -209,8 +211,11 @@ never trusted), so a question costs milliseconds, not a parse of the ruleset.
 local text, code = require("rules.api").call("rule", '{"params":{"id":"DEP-06"}}', { rulesets = { dir } })
 ```
 
-`opts` is `{ rulesets?, gates?, vault?, project? }`; what it leaves out comes from
-`setup()`, the project file and the vault ([CONFIG.md](CONFIG.md)).
+`opts` is `{ rulesets?, gates?, vault?, project?, trust? }`; what it leaves out comes from
+`setup()`, the project file and the vault ([CONFIG.md](CONFIG.md)). `trust` is a list of
+folders (`--trust=<dir>` of the scripts, `$RULES_TRUST` for every entry point): the
+contract itself runs no check, the option only tells which rulesets are trusted for a
+tool that does ([CONFIG.md](CONFIG.md#a-word-on-trust)). It adds no field to a document.
 
 A vault with two rulesets yields the same documents as passing both folders
 explicitly; `source` stays the ruleset's folder name (`lua`, `native`), never a

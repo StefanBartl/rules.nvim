@@ -154,8 +154,9 @@ exit code).
 A project can carry its own defaults in a `.rules.json` at its root (`rulesets`, `gates`, `agent`), and your
 rulesets can live in a vault of their own (`setup({ vault = "~/rules-vault" })` or `$RULES_VAULT`; every folder under
 `rulesets/` is then loaded, and a project names one with `"@vault/lua"`). `setup()` wins over the project file, which
-wins over the vault's file. A file that cannot be read is an error, never "no settings". See
-[docs/CONFIG.md](docs/CONFIG.md).
+wins over the vault's file. A file that cannot be read is an error, never "no settings". A `lua_predicate` runs only in a
+ruleset you named yourself (`setup()`, your vault); a ruleset that a project file names is not trusted until its folder is
+in `setup({ trust = { ... } })`. See [docs/CONFIG.md](docs/CONFIG.md#a-word-on-trust).
 
 Verify your setup any time with:
 

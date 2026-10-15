@@ -108,8 +108,12 @@ things follow, and they are different in kind:
   `file_absent`, `json_key_absent`, rules with no check) runs either way.
 
 A host that keeps its own trust list can pass `lua_predicates` as a function
-`(rule) -> boolean` to `runner.check_family`/`gate.run` (the rule carries its
-`source_file`), so one trusted file does not trust every file.
+`(rule) -> boolean, reason?` to `runner.check_family`/`gate.run` (the rule carries its
+`source_file`), so one trusted file does not trust every file; the reason, when given,
+is what the `error` says. `rules.nvim` passes such a function itself: a predicate runs
+only in a ruleset that the user named (not one that a project `.rules.json` names, unless
+it is in `trust`), and says `not run: ruleset is not trusted` otherwise
+([CONFIG.md](CONFIG.md#a-word-on-trust)).
 
 ## `check` types
 
