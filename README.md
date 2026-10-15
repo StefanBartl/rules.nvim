@@ -1,5 +1,5 @@
 > **Alpha — small, working surface.** The engine, the four check types,
-> `:Rules check`/`gate`/`show`/`stats`/`new`/`set`/`retire`/`reinstate`/`move`/`list`, `:RulesVault`, and waivers are real and tested.
+> `:Rules check`/`gate`/`show`/`stats`/`new`/`set`/`retire`/`reinstate`/`move`/`list`/`waive`/`renew`/`unwaive`, `:RulesVault`, and waivers are real and tested.
 > Pin a commit if you depend on this.
 
 # rules.nvim
@@ -89,7 +89,10 @@ file, `:Rules retire <ID>` moves it to `_retired/` (it asks first), `:Rules
 reinstate <ID> --after=<ID>` brings a retired rule back (asks first; without a place
 it stands in no layout, and the command says so), `:Rules
 move <ID> --to=<file>#<section>` moves it in a layout, `:Rules list` puts the
-rules in the quickfix list. They are a thin layer over the write door of the
+rules in the quickfix list. `:Rules waive <ID> reason=...` (with `expires=`, `paths=`), `:Rules renew <ID> expires=...`
+and `:Rules unwaive <ID>` (it asks first) write the `.rules-waivers.json` of the project: the findings
+of a rule that were seen and accepted (see [Waivers](docs/BINDINGS.md#waivers) and
+[Waiving findings](docs/BINDINGS.md#waiving-findings)). They are a thin layer over the write door of the
 [machine contract](docs/CONTRACT.md) (`rules-ops/1`): the engine is the only
 writer, the open buffers of a changed file are reloaded (a buffer with unsaved
 changes is reported, not overwritten). See
@@ -137,7 +140,7 @@ installing it either.
 ```
 
 `cmd = { "Rules", "RulesVault" }`: the whole surface today is two usercommands, `:Rules` (`check`,
-`gate`, `show`, `stats`, `catalog`, `new`, `set`, `retire`, `reinstate`, `move`, `list`) and
+`gate`, `show`, `stats`, `catalog`, `new`, `set`, `retire`, `reinstate`, `move`, `list`, `waive`, `renew`, `unwaive`) and
 `:RulesVault` (`open`, `clipboard`, `link`, `find`, `grep`, `tree`, `cdx`, `create`), run on
 demand — nothing here needs to run at startup. Without `RulesVault` in `cmd`, lazy.nvim
 does not know the command until `:Rules` has loaded the plugin.

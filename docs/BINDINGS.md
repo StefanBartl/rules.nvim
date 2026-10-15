@@ -16,6 +16,9 @@
 | `:Rules reinstate` | `<id>` (a retired one) | `--after=<id>`, `--before=<id>`, `--section=<heading>`, `--first`, `--layout=<file>`, `--yes`, `--dry` | Brings a retired rule back: its file returns from `_retired/` and the id is in use again. A place puts it into a layout; without one it stands in no layout (where it stood is not recorded) and the command says so. Asks first |
 | `:Rules move` | `<id>` | `--to=<file>#<section>`, `--after=<id>`, `--before=<id>`, `--first`, `--dry` | Moves the rule's `{{rule ID}}` line within its layout or into another; the rule's own file is not touched |
 | `:Rules list` | — | `--family=<PREFIX>`, `--severity=<level>`, `--format=json` | Puts the rules in the quickfix list, each at its source line; `--format=json` prints the `rules.list` document of the [machine contract](CONTRACT.md) |
+| `:Rules waive` | `<id>` | `reason=` (required), `expires=<YYYY-MM-DD>`, `paths=<a,b>`, `--project=<dir>`, `--dry` | Accepts the findings of a rule in the project: adds its waiver to `.rules-waivers.json` (`waive` of `rules-ops/1`). A date in the past is written with a warning. See [Waiving findings](#waiving-findings) |
+| `:Rules renew` | `<id>` (one that has a waiver) | `expires=<YYYY-MM-DD>` or `--no-expiry`, `reason=`, `--project=<dir>`, `--dry` | Gives a waiver a new last day (or none) and optionally a new reason; the paths stay. The way on for an expired waiver |
+| `:Rules unwaive` | `<id>` (one that has a waiver) | `--project=<dir>`, `--yes`, `--dry` | Removes a waiver (`remove` of `rules-ops/1`): the findings it accepted flag again. Asks first |
 | `:RulesVault` | — | — | Shows the vault in use (where it was named, its rulesets, whether it is a clean git repository). See [Finding rules in the vault](#finding-rules-in-the-vault) |
 | `:RulesVault open` | `[<ruleset>\|<ID>\|<FAMILY>] [<part>]` | — | Opens the rule file of an id, the folder of a family in the explorer, or a part of a ruleset (`rules` by default, `layouts`, `catalogs`, `all`) |
 | `:RulesVault clipboard` | `[<ruleset>\|<ID>\|<FAMILY>] [<part>]` | `--rel`, `--link` | Copies the path to the `+` register; `--rel` relative to the folder of the current file; `--link` as a Markdown link, `[DEP-06](path)` |
@@ -39,6 +42,10 @@ the places of `--to=` (the layouts, then the headings of one layout) all
 tab-complete against whatever is actually loaded/configured right now. The `<id>` of
 `reinstate` completes to the **retired** rules only (an active id is no candidate), its
 `--layout=` to the layouts and its `--section=` to the headings of all layouts. The
+`<id>` of `waive` completes to the loaded rules, that of `renew` and `unwaive` to the
+rules that **have a waiver** in the project (read from its file on every `<Tab>`), and
+`--project=` to folders; `expires=` and `paths=` have no completion (the help of
+`expires=` names today's date). The
 first word of a `:RulesVault` verb completes to the rulesets of the vault, the
 parts, and the ids (retired ones too) and families **of the vault's rulesets**
 (the ones the command resolves a word in, not whatever `setup({ rulesets })`
@@ -493,4 +500,86 @@ nvim --headless -u NONE -i NONE -n -l scripts/ruleset.lua check --waivers --proj
 which exits 1 when the waivers file cannot be used or a waiver has expired
 (`CONFIG.md` has the details). Changing the file is not a text edit by hand:
 `waive`, `renew` and `remove` of [`rules-ops/1`](CONTRACT.md#waivers) check the
-request, take a lock, write the file canonically and answer with an `inverse`.
+request, take a lock, write the file canonically and answer with an `inverse`. In the
+editor that is [`:Rules waive`, `renew` and `unwaive`](#waiving-findings).
+
+## Waiving findings
+
+`:Rules waive`, `:Rules renew` and `:Rules unwaive` write the
+[`.rules-waivers.json`](CONFIG.md#rules-waiversjson) of a project, and nothing else does
+in the editor: like the other write verbs they are a thin layer over the write door
+([`rules-ops/1`](CONTRACT.md#waivers): `waive`, `renew`, `remove`). The command line is
+turned into one operation, the door checks it, takes the lock of the file, writes it
+canonically and answers, the answer is told. The commands check nothing of a waiver
+themselves: an id no loaded rule has, a date that is none, a path with `..`, a reason that
+says nothing, a waiver that is there already or is missing are what the door answers, word
+for word (`invalid_argument: ...`, `not_found: no waiver for DEP-01`).
+
+```vim
+:Rules waive DEP-01 reason=fixture strings of the tests
+:Rules waive DEP-04 reason=legacy call sites, ticket JIRA-123 expires=2030-12-31 paths=src/legacy,docs/**/*.md
+:Rules renew DEP-04 expires=2031-06-30
+:Rules renew DEP-04 --no-expiry reason=accepted for good
+:Rules unwaive DEP-04
+:Rules waive DEP-02 reason=r --project=packages/web --dry
+```
+
+- **Words and values** are read as for `:Rules set`: `reason=` takes a value with spaces, a
+  word that is no known `key=` goes on with the value before it, a run of blanks, a
+  backslash or a `%` or `#` in it comes out as typed, a word with two dashes is a flag
+  (`reason=run with --dry now` is a dry run) and a bare `--` ends the flags where it stands
+  for that (see [Words and values](#making-changing-retiring-and-moving-rules)). A word that
+  is not part of a value (it stands before the first `key=`) and a `key=` the verb does not
+  take are refused before anything is asked of the door.
+- **`paths=`** are separated by commas; **no blank is needed or wanted around a comma**
+  (blanks around one are dropped). A blank **inside** a path is part of it and is typed as
+  it is, no backslash: `paths=my dir/legacy,docs/a b.md` is `my dir/legacy` and `docs/a
+  b.md`. A comma inside braces belongs to a glob, so `paths=docs/**/*.{md,txt}` is one path.
+  A path with a comma outside braces cannot be written on the command line (write the file
+  by hand, or use the machine contract). Paths are relative to the project, written with
+  `/`; a backslash is refused by the door (`a path uses / ...`). `paths=` with nothing is
+  refused (leave it out for every path). The rules of a path (`..`, absolute, a glob that is
+  none) are the door's.
+- **`expires=`** is the last day the waiver counts, `YYYY-MM-DD` ([CONFIG.md](CONFIG.md#rules-waiversjson)).
+  It has no completion; the option float (the help of the command line) names today's date.
+  A date **in the past is written, with a warning** (the waiver is expired from the start and
+  suppresses nothing): an expired waiver is what `renew` is for, and `renew` can give a past
+  day too. The warning is shown at warn level, after the line that says what was written.
+- **`renew`** takes `expires=<day>` or `--no-expiry` (one of them; the door refuses none or
+  both) and optionally `reason=`. The paths of the waiver stay. A waiver for an id that has
+  none is `not_found`; the same values again are told as unchanged. `:Rules check` and
+  `:Rules gate` name this command (and `unwaive`) when waivers of the project have expired.
+- **`unwaive` asks first** (`No` is the button the dialog starts on; `--yes` skips the
+  question): the door is asked with a dry run, so an id without a waiver is told without a
+  question, and the question shows the reason, the last day and the paths of the waiver that
+  goes. A session without a screen to ask on needs `--yes`. The findings it accepted flag
+  again on the next check. `waive` and `renew` ask nothing: they only add or extend.
+- **`--dry`** is the door's `dry_run`: everything is checked and told, nothing is written, no
+  buffer is touched; the message shows the file that would be written as a diff.
+- **The project.** A waiver lives in the checked project, and `:Rules check` and `:Rules gate`
+  read the waivers file of the working directory. So the project is, in this order:
+  1. `--project=<dir>`, handed to the door as typed: a folder relative to the working directory
+     (a blank is written with a backslash before it, `--project=my\ app`; `<Tab>` offers folders and
+     writes it so), which must be the working directory or a folder inside it (the door answers
+     `project must be the configured project or a folder inside it` for any other, and for a
+     folder that does not exist). `--project=.` is the working directory;
+  2. the project **of the current buffer**: the nearest folder above its file that holds a
+     `.rules-waivers.json`, a `.rules.json` or a `.git`, when that folder lies **below** the
+     working directory (a monorepo, a folder of repositories). A buffer without a file, a
+     scratch buffer and a file outside the working directory have none;
+  3. the working directory.
+
+  A folder outside the working directory is never chosen on its own: a repository around the
+  working directory or one beside it is not looked at. To waive in the repository you stand in
+  while the working directory is a folder above it, change the directory or name the folder
+  with `--project=`. The message always names the file that was written, relative to the
+  working directory (`waived DEP-01 in packages/web/.rules-waivers.json`), so a waiver that
+  went to a project you did not mean is seen. The waivers are read from where `:Rules check`
+  runs: `:Rules check --family=DEP packages/web` reads those of `packages/web`.
+- **The open buffer** of the waivers file is looked after like a rule file: an unmodified
+  buffer is reloaded, one with unsaved changes is reported as a conflict (the file changed on
+  disk under it: `:edit!` takes the file's version, `:write!` the buffer's) and left as it
+  is, a file that is not open is not opened. It is the file of the project the write went to,
+  also when that is not the working directory.
+- **A file that cannot be used** (not JSON, an unknown key, a link where the file belongs)
+  is the door's refusal, told in its words; the commands never write over it.
