@@ -177,6 +177,7 @@ COMMANDS                                                        *rules-commands*
     --after={id}            right after that rule, in the layout that holds it
     --before={id}           right before that rule
     --first                 with --to: the start of the section, not its end
+                            (a section with no rule yet: behind its intro)
 
                                                                     *:Rules_set*
 :Rules set {id} {key}={value}... [--dry]
