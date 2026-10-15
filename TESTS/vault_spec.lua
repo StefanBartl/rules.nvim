@@ -171,6 +171,90 @@ describe("rules.vault", function()
     end)
   end)
 
+  describe("a vault whose own .rules.json cannot be used", function()
+    ---A vault whose file keeps `draft` out of the list -- the file the broken copy would let in.
+    ---@param content string
+    ---@return string vault, string lua, string native
+    local function vault_with_file(content)
+      local vault, lua, native = make_vault()
+      vim.fn.mkdir(vault .. "/rulesets/draft", "p")
+      write_raw(vault .. "/.rules.json", content)
+      return vault, lua, native
+    end
+
+    it("narrows the list when it is fine (the control)", function()
+      local vault, lua = vault_with_file('{"rulesets":["rulesets/lua"]}')
+      config.setup({ vault = vault })
+
+      assert.are.equal(norm(vault), vault_api.root({ project = tmp_dir() }))
+      assert.are.same({ norm(lua) }, vault_api.rulesets({ project = tmp_dir() }))
+    end)
+
+    it("is reported by root, rulesets and source, never read as 'no vault file'", function()
+      for _, content in ipairs({ '{"rulesets": [', "[]", '{"rulesets":{}}', "" }) do
+        local vault = vault_with_file(content)
+        config.setup({ vault = vault })
+        settings.reset()
+
+        local root, message = vault_api.root({ project = tmp_dir() })
+        local folders, folders_err = vault_api.rulesets({ project = tmp_dir() })
+        local source, source_err = vault_api.source({ project = tmp_dir() })
+
+        assert.is_nil(root, content)
+        assert.is_truthy(message:find(".rules.json", 1, true), content .. " -> " .. tostring(message))
+        assert.are.same({}, folders, content) -- not every folder, `draft` included
+        assert.are.equal(message, folders_err)
+        assert.are.equal("setup", source)
+        assert.are.equal(message, source_err)
+      end
+    end)
+
+    it("is reported even when setup({ rulesets }) names the rulesets: the vault itself is the subject", function()
+      local vault = vault_with_file("{ nope")
+      config.setup({ vault = vault, rulesets = { tmp_dir() } })
+
+      local root, message = vault_api.root({ project = tmp_dir() })
+
+      assert.is_nil(root)
+      assert.is_truthy(message:find("not valid JSON", 1, true))
+    end)
+
+    it("is a broken vault for :RulesVault (the context), not a missing one", function()
+      local vault = vault_with_file("{ nope")
+      config.setup({ vault = vault })
+
+      local ctx, kind, message = require("rules.vault_ops").context({ project = tmp_dir() })
+
+      assert.is_nil(ctx)
+      assert.are.equal("broken", kind)
+      assert.is_truthy(message:find("not valid JSON", 1, true))
+    end)
+
+    it("refuses an entry of its list that cannot be: @vault/../x is reported by rulesets and root", function()
+      local vault = vault_with_file('{"rulesets":["@vault/../secret","rulesets/lua"]}')
+      config.setup({ vault = vault })
+
+      local root, message = vault_api.root({ project = tmp_dir() })
+      local folders, folders_err = vault_api.rulesets({ project = tmp_dir() })
+
+      assert.is_nil(root)
+      assert.is_truthy(message:find('rulesets entry "@vault/../secret"', 1, true))
+      assert.are.same({}, folders)
+      assert.are.equal(message, folders_err)
+    end)
+
+    it("stops a check that would have used its rulesets, and says it in :checkhealth terms (a problem)", function()
+      local vault = vault_with_file("{ nope")
+      vim.env.RULES_VAULT = vault
+
+      local res = settings.resolve({ project = tmp_dir() })
+
+      assert.is_true(#res.problems > 0)
+      assert.are.same({}, res.rulesets) -- not the folders of rulesets/
+      assert.is_true(res.vault.file_problem)
+    end)
+  end)
+
   describe("git_state", function()
     ---@return string
     local function git_repo()
@@ -586,10 +670,193 @@ describe("rules.vault", function()
     end)
   end)
 
+  describe("configured rulesets that are gone, and a vault that is stale", function()
+    local lib_dir = vim.env.LIB_NVIM_DIR
+    local contract_file = vim.api.nvim_get_runtime_file("lua/rules/contract.lua", false)[1]
+    local plugin_root = vim.fs.dirname(vim.fs.dirname(vim.fs.dirname(vim.fs.normalize(vim.fn.fnamemodify(contract_file, ":p")))))
+
+    ---@param script string
+    ---@param args string[]
+    ---@param env table<string, string>|nil
+    ---@return vim.SystemCompleted
+    local function run(script, args, env)
+      local cmd = { vim.v.progpath, "--headless", "-u", "NONE", "-i", "NONE", "-n", "-l", plugin_root .. "/scripts/" .. script }
+      vim.list_extend(cmd, args)
+      local full = vim.tbl_extend("force", { LIB_NVIM_DIR = lib_dir }, env or {})
+      return vim.system(cmd, { text = true, env = full }):wait(30000)
+    end
+
+    ---A case that needs the scripts to find lib.nvim.
+    ---@param name string
+    ---@param fn fun()
+    local function case(name, fn)
+      it(name, function()
+        if not lib_dir or lib_dir == "" then
+          pending("LIB_NVIM_DIR is not set: the script cannot find lib.nvim")
+        end
+        fn()
+      end)
+    end
+
+    ---@param vault string
+    ---@param rulesets string[]
+    local function list(vault, rulesets)
+      write_raw(vault .. "/.rules.json", vim.json.encode({ rulesets = rulesets }))
+    end
+
+    case("catalog --check: a ruleset of the vault list that is no folder is a problem, not dropped", function()
+      local vault = make_vault()
+      list(vault, { "rulesets/lua", "rulesets/gone" })
+
+      local done = run("ruleset.lua", { "catalog", "--check" }, { RULES_VAULT = vault })
+
+      assert.are.equal(1, done.code, done.stdout .. done.stderr)
+      assert.is_truthy(done.stdout:find("problem: ruleset rulesets/gone (the .rules.json of the vault) is not a folder", 1, true))
+      assert.is_nil(done.stdout:match("problem: [^\n]*"):find(norm(vault), 1, true)) -- no path of this machine in it
+      assert.is_truthy(done.stdout:find("rulesets/lua", 1, true)) -- the others are still done
+    end)
+
+    case("catalog --check: a ruleset of the project file that is a file is a problem", function()
+      local project = tmp_dir()
+      write_raw(project .. "/one.md", "# x\n")
+      write_raw(project .. "/.rules.json", vim.json.encode({ rulesets = { "one.md" } }))
+
+      local done = run("ruleset.lua", { "catalog", "--check", "--project=" .. project })
+
+      assert.are.equal(1, done.code, done.stdout .. done.stderr)
+      assert.is_truthy(done.stdout:find("ruleset one.md (the project .rules.json) is not a folder", 1, true))
+    end)
+
+    case("check: a ruleset that is no folder fails, and says which and where it was named", function()
+      local vault = make_vault()
+      list(vault, { "rulesets/lua", "rulesets/gone" })
+
+      local done = run("ruleset.lua", { "check" }, { RULES_VAULT = vault })
+
+      assert.are.equal(1, done.code, done.stdout .. done.stderr)
+      assert.is_truthy(done.stdout:find("ruleset rulesets/gone (the .rules.json of the vault) is not a folder", 1, true))
+      assert.is_truthy(done.stdout:find("FAILED", 1, true))
+    end)
+
+    case("check: when every configured ruleset is gone it fails, it is not 'nothing configured'", function()
+      local vault = make_vault()
+      list(vault, { "rulesets/gone" })
+
+      local done = run("ruleset.lua", { "check" }, { RULES_VAULT = vault })
+
+      assert.are.equal(1, done.code, done.stdout .. done.stderr)
+      assert.is_truthy(done.stdout:find("is not a folder", 1, true))
+    end)
+
+    case("check --vault=D checks every ruleset the vault offers, and warns about the folders its file leaves out", function()
+      local vault = make_vault()
+      vim.fn.mkdir(vault .. "/rulesets/draft", "p")
+
+      local all = run("ruleset.lua", { "check", "--vault=" .. vault })
+      assert.are.equal(0, all.code, all.stdout .. all.stderr)
+      assert.is_truthy(all.stdout:find("3 ruleset(s)", 1, true)) -- lua, native and the empty draft
+      assert.is_nil(all.stdout:find("warning", 1, true))
+
+      list(vault, { "rulesets/lua", "rulesets/native" })
+      local narrowed = run("ruleset.lua", { "check", "--vault=" .. vault })
+      assert.are.equal(0, narrowed.code, narrowed.stdout .. narrowed.stderr)
+      assert.is_truthy(narrowed.stdout:find("2 ruleset(s)", 1, true))
+      assert.is_truthy(narrowed.stdout:find("warning: rulesets/draft is not listed in the .rules.json of the vault", 1, true))
+    end)
+
+    case("check --vault=D takes the vault's own offer even when a project file names other rulesets", function()
+      local vault = make_vault()
+      local project = tmp_dir()
+      write_raw(project .. "/.rules.json", vim.json.encode({ rulesets = { "elsewhere" } }))
+
+      local done = run("ruleset.lua", { "check", "--vault=" .. vault, "--project=" .. project })
+
+      assert.are.equal(0, done.code, done.stdout .. done.stderr)
+      assert.is_truthy(done.stdout:find("2 ruleset(s)", 1, true))
+    end)
+
+    case("check --vault=D with a broken vault file fails, it does not check 'everything'", function()
+      local vault = make_vault()
+      write_raw(vault .. "/.rules.json", "{ nope")
+
+      local done = run("ruleset.lua", { "check", "--vault=" .. vault })
+
+      assert.are_not.equal(0, done.code)
+      assert.is_truthy((done.stderr .. done.stdout):find("not valid JSON", 1, true))
+    end)
+
+    describe("a stale $RULES_VAULT", function()
+      local stale
+      before_each(function()
+        stale = tmp_dir() .. "/gone-vault"
+      end)
+
+      case("does not break a call that names its ruleset folder (rules.lua --ruleset)", function()
+        local _, lua = make_vault()
+
+        local done = run("rules.lua", { "call", "snapshot", "--ruleset=" .. lua }, { RULES_VAULT = stale })
+
+        assert.are.equal(0, done.code, done.stdout .. done.stderr)
+        assert.are.equal(2, vim.json.decode(done.stdout).counts.rules)
+      end)
+
+      case("does not break catalog, check and migrate with a folder", function()
+        local _, lua = make_vault()
+        local env = { RULES_VAULT = stale }
+
+        local catalog = run("ruleset.lua", { "catalog", "--check", lua }, env)
+        local check = run("ruleset.lua", { "check", lua }, env)
+        local migrate = run("ruleset.lua", { "migrate", lua }, env)
+
+        assert.are.equal(0, catalog.code, catalog.stdout .. catalog.stderr)
+        assert.are.equal(0, check.code, check.stdout .. check.stderr)
+        assert.are_not.equal(2, migrate.code, migrate.stdout .. migrate.stderr)
+        assert.is_nil(migrate.stderr:find("needs a vault", 1, true))
+      end)
+
+      case("loses against an explicit --vault=D in check", function()
+        local vault = make_vault()
+
+        local done = run("ruleset.lua", { "check", "--vault=" .. vault }, { RULES_VAULT = stale })
+
+        assert.are.equal(0, done.code, done.stdout .. done.stderr)
+        assert.is_truthy(done.stdout:find("2 ruleset(s)", 1, true))
+      end)
+
+      case("is still an error where the vault is needed: no folder named, or @vault/<name>", function()
+        local env = { RULES_VAULT = stale }
+
+        local none = run("ruleset.lua", { "catalog", "--check" }, env)
+        local named = run("ruleset.lua", { "catalog", "--check", "@vault/lua" }, env)
+        local rules_named = run("rules.lua", { "call", "snapshot", "--ruleset=@vault/lua" }, env)
+
+        assert.are.equal(2, none.code)
+        assert.is_truthy(none.stderr:find("$RULES_VAULT", 1, true))
+        assert.is_truthy(none.stderr:find("not a folder", 1, true))
+        assert.are.equal(2, named.code)
+        assert.is_truthy(named.stderr:find("not a folder", 1, true))
+        assert.are.equal(1, rules_named.code)
+        assert.is_truthy(rules_named.stdout:find("not a folder", 1, true))
+      end)
+    end)
+
+    case("the editor: :Rules catalog without a path reports a ruleset that is gone", function()
+      local vault = make_vault()
+      list(vault, { "rulesets/lua", "rulesets/gone" })
+      config.setup({ vault = vault })
+
+      local results, errors, code = require("rules").catalog()
+
+      assert.are.equal(1, code)
+      assert.are.same({ "ruleset rulesets/gone (the .rules.json of the vault) is not a folder" }, errors)
+      assert.are.equal(0, #results) -- the lua ruleset has no layouts
+    end)
+  end)
+
   describe("the editor", function()
     it("tells once, not on every command, that nothing is configured", function()
       local rules = require("rules")
-      config.setup({})
+      config.setup({}) -- a new setup() forgets what was told
 
       local first = capture(function()
         rules.load_rules(tmp_dir())
@@ -598,12 +865,10 @@ describe("rules.vault", function()
         rules.load_rules(tmp_dir())
       end)
 
-      -- other specs of this process may have told it already; what matters is that it is never told twice
-      assert.is_true(#first + #second <= 1)
-      for _, m in ipairs(first) do
-        assert.is_truthy(m.text:find("no ruleset is configured", 1, true))
-        assert.is_truthy(m.text:find("$RULES_VAULT", 1, true))
-      end
+      assert.are.equal(1, #first)
+      assert.is_truthy(first[1].text:find("no ruleset is configured", 1, true))
+      assert.is_truthy(first[1].text:find("$RULES_VAULT", 1, true))
+      assert.are.equal(0, #second)
     end)
 
     it("loads the rules of the vault for :Rules check", function()

@@ -22,9 +22,6 @@ function M.setup(opts)
   require("rules.bindings.usrcmds").setup()
 end
 
----Whether the "nothing is configured" hint was shown: once per session, not on every command.
-local hinted = false
-
 --- The settings of the project at `root` (`rules.settings`): `setup()` over the project's `.rules.json` over the vault,
 --- its warnings shown once. A file that cannot be used comes back as the error text, never as empty settings.
 ---@param root string|nil  defaults to the working directory
@@ -47,8 +44,7 @@ local function load(root)
     return nil, settings_err, res
   end
   local hint = settings.nothing_configured(res)
-  if hint and not hinted then
-    hinted = true
+  if hint and settings.first_hint() then
     notify.info(hint)
   end
   local rules, errors = loader.load(res.rulesets)
@@ -241,7 +237,8 @@ end
 
 --- Build the reading documents ("catalogs") of a ruleset in the one-file-per-rule form from its
 --- layouts (`docs/RULESET-FORMAT.md`), or with `check` only say which are out of date (CI).
---- Without `path` every directory in `setup({ rulesets })` is built. Headless/CI use: no
+--- Without `path` every configured ruleset is built (`rules.settings`); one that is not a folder (renamed, or a
+--- file) is an error in `errors`, never skipped. Headless/CI use: no
 --- notification, no quit -- `(results, errors, exit_code)`, the exit code is `1` when a document is
 --- stale (check), a layout cannot be filled or has an output it must not write (a layout, a rule file,
 --- another layout's output, a place outside the ruleset, a file nobody generated), or the ruleset has
@@ -255,7 +252,7 @@ end
 function M.catalog(path, opts)
   opts = opts or {}
   local catalog = require("rules.engine.catalog")
-  local roots = {}
+  local roots, missing = {}, {}
   if path then
     local resolved, resolve_err = settings.resolve_entry(path, { project = vim.fn.getcwd() })
     if not resolved then
@@ -267,13 +264,20 @@ function M.catalog(path, opts)
     if settings_err then
       return {}, { settings_err }, 1
     end
-    for _, ruleset in ipairs(res.rulesets) do
-      if vim.fn.isdirectory(require("lib.nvim.cross.fs.expand_path")(ruleset)) == 1 then
-        roots[#roots + 1] = ruleset
+    for _, entry in ipairs(res.entries) do
+      if vim.fn.isdirectory(require("lib.nvim.cross.fs.expand_path")(entry.path)) == 1 then
+        roots[#roots + 1] = entry.path
+      else
+        -- a configured ruleset that is gone is said, never dropped: the catalogs of the others would look complete
+        missing[#missing + 1] = settings.not_a_folder_text(entry)
       end
     end
   end
   local results, errors, code = {}, {}, 0
+  for _, text in ipairs(missing) do
+    errors[#errors + 1] = text
+    code = 1
+  end
   for _, root in ipairs(roots) do
     local built, load_errors = catalog.build(root, opts)
     for _, result in ipairs(built) do

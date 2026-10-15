@@ -14,7 +14,9 @@
 ---
 --- The vault is found, in this order, from `vault` of the call, `setup({ vault })`, `$RULES_VAULT`, then `vault` in the
 --- project file. Nothing else: a path is never guessed. Without a vault nothing is wrong -- it is optional -- and
---- `@vault/<name>` in `rulesets` is an error that says so.
+--- `@vault/<name>` in `rulesets` is an error that says so. A vault that is named but not usable (no folder, a
+--- `.rules.json` that cannot be read) is a problem only where the result depends on the vault: a call that names its
+--- rulesets itself does not break over a stale `$RULES_VAULT` (`opts.need_vault` asks for the vault anyway).
 ---
 --- A file that is there but cannot be used (not JSON, wrong shape, a vault that is no folder) is a PROBLEM: the caller must
 --- stop and say it, a broken file never becomes "no settings". Things that are odd but harmless (an unknown key, an
@@ -61,6 +63,20 @@ M.VAULT_WHERE = {
 ---@field text string      no path of this machine
 ---@field file string|nil  the file it is about (shown to the user, never in a document)
 ---@field detail string|nil  the rest, with paths of this machine (shown to the user only)
+---@field vault boolean|nil   it is about the vault (its folder, its file, its list): `rules.vault` tells it
+
+---@class Rules.Settings.Opts
+---@field rulesets? string[]
+---@field gates? table<string, string[]>
+---@field agent? table
+---@field vault? string
+---@field project? string
+---@field need_vault? boolean
+
+---@class Rules.Settings.Entry
+---@field path string      as in `rulesets`
+---@field name string      the entry as it was written (`@vault/lua`), the folder name for a discovered one: no path
+---@field origin "call"|"setup"|"project"|"vault"  the place that named it
 
 ---@class Rules.Settings.Vault
 ---@field root string       the folder, absolute, `/`-separated
@@ -68,12 +84,16 @@ M.VAULT_WHERE = {
 ---@field exists boolean    whether it is a folder
 ---@field rulesets string[] every folder under `<root>/rulesets/`, sorted (empty when it does not exist)
 ---@field loaded string[]|nil  the rulesets the vault itself offers: the `rulesets` of its own `.rules.json`, else `rulesets`
+---   (none when that file cannot be used)
+---@field file_problem boolean  its own `.rules.json` cannot be used
 
 ---@class Rules.Settings
 ---@field rulesets string[]
 ---@field gates table<string, string[]>
 ---@field agent Rules.AgentOpts
 ---@field lua_predicates boolean
+---@field entries Rules.Settings.Entry[]  `rulesets`, one per path, with the place that named it
+---@field vault_needed boolean whether this result depends on the vault (see the module header)
 ---@field vault Rules.Settings.Vault|nil
 ---@field project Rules.Config.File|nil     the project file, when a project was given
 ---@field vault_file Rules.Config.File|nil  the file of the vault, when there is a vault
@@ -88,8 +108,9 @@ M.VAULT_WHERE = {
 ---@param text string
 ---@param file string|nil
 ---@param detail string|nil
-local function note(list, who, text, file, detail)
-  list[#list + 1] = { who = who, text = text, file = file, detail = detail }
+---@param about_vault boolean|nil
+local function note(list, who, text, file, detail, about_vault)
+  list[#list + 1] = { who = who, text = text, file = file, detail = detail, vault = about_vault or nil }
 end
 
 ---@param n Rules.Settings.Note
@@ -102,27 +123,56 @@ function M.format(n, portable)
   return ("%s: %s%s"):format(n.file or n.who, n.text, n.detail or "")
 end
 
+---@param list Rules.Settings.Note[]
+---@param portable boolean|nil
+---@param only_vault boolean
+---@return string|nil
+local function text_of(list, portable, only_vault)
+  local lines = {}
+  for _, n in ipairs(list) do
+    if n.vault or not only_vault then
+      lines[#lines + 1] = M.format(n, portable)
+    end
+  end
+  return #lines > 0 and table.concat(lines, "\n") or nil
+end
+
 ---All problems as one text, `nil` when there are none.
 ---@param res Rules.Settings
 ---@param portable boolean|nil
 ---@return string|nil
 function M.error_text(res, portable)
-  if #res.problems == 0 then
-    return nil
-  end
-  local lines = {}
-  for _, n in ipairs(res.problems) do
-    lines[#lines + 1] = M.format(n, portable)
-  end
-  return table.concat(lines, "\n")
+  return text_of(res.problems, portable, false)
+end
+
+---The problems that are about the vault (its folder, its `.rules.json`, its list) as one text, `nil` when there are none.
+---@param res Rules.Settings
+---@param portable boolean|nil
+---@return string|nil
+function M.vault_error_text(res, portable)
+  return text_of(res.problems, portable, true)
 end
 
 ---@type table<string, true>
 local warned = {}
 
----Forget which warnings were shown (a new `setup()`, and specs).
+---Whether the "nothing is configured" hint was shown: once per session, not on every command.
+local hinted = false
+
+---Forget which warnings and hints were shown (a new `setup()`, and specs).
 function M.reset()
   warned = {}
+  hinted = false
+end
+
+---Whether this is the first time the "nothing is configured" hint is due (it then counts as shown).
+---@return boolean
+function M.first_hint()
+  if hinted then
+    return false
+  end
+  hinted = true
+  return true
 end
 
 ---Show the warnings of a result, each once per session however often the settings are resolved. Not the problems:
@@ -244,17 +294,18 @@ end
 ---@param res Rules.Settings
 ---@param read Rules.Config.File
 ---@param who string
-local function file_notes(res, read, who)
+---@param about_vault boolean|nil
+local function file_notes(res, read, who, about_vault)
   for _, problem in ipairs(read.problems) do
     local text = problem.key == "" and problem.message or ("%s %s"):format(problem.key, problem.message)
-    note(res.problems, who, text, read.path)
+    note(res.problems, who, text, read.path, nil, about_vault)
   end
   if #read.unknown > 0 then
     local names = {}
     for _, entry in ipairs(read.unknown) do
       names[#names + 1] = schema.unknown_text(entry)
     end
-    note(res.warnings, who, "unknown key(s) ignored: " .. table.concat(names, ", "), read.path)
+    note(res.warnings, who, "unknown key(s) ignored: " .. table.concat(names, ", "), read.path, nil, about_vault)
   end
 end
 
@@ -284,45 +335,99 @@ end
 
 ---The `rulesets` of one layer as paths: `@vault/<name>` becomes `<vault>/rulesets/<name>`, a relative entry of a file
 ---starts at the folder of that file, an entry of `setup()` or a call is left as it is (the loader expands it).
+---Which entry is meant, for a message that must carry no path: `@vault/<name>` and a relative entry as written, a path
+---of this machine by its last segment.
+---@param entry string
+---@return string
+local function entry_name(entry)
+  if machine_path(entry) then
+    local last = vim.fs.basename((entry:gsub("[/\\]+$", "")))
+    return last ~= "" and last or entry
+  end
+  return entry
+end
+
 ---@param res Rules.Settings
 ---@param layer Rules.Settings.Layer
 ---@param entries string[]
----@return string[]
+---@return string[] paths
+---@return string[] names  the entries as written, no path of this machine: one per path
 local function expand_entries(res, layer, entries)
-  local out = {}
+  local out, names = {}, {}
   local vault_ready = res.vault ~= nil and res.vault.exists
+  ---@param path string
+  ---@param entry string
+  local function add(path, entry)
+    out[#out + 1] = path
+    names[#names + 1] = entry_name(entry)
+  end
   for _, entry in ipairs(entries) do
     if entry == "@vault" or entry:sub(1, #M.VAULT_PREFIX) == M.VAULT_PREFIX then
+      res.vault_needed = true
       local name = entry:sub(#M.VAULT_PREFIX + 1)
       if entry == "@vault" or not valid_vault_name(name) then
         local text = ('rulesets entry %q: write "@vault/<name>", a folder name under the vault\'s %s/'):format(
           entry,
           M.VAULT_SUBDIR
         )
-        note(res.problems, layer.who, text, layer.file)
+        note(res.problems, layer.who, text, layer.file, nil, layer.name == "vault")
+      elseif res.vault ~= nil and not vault_ready then
+        -- the vault is named but is no folder: that is the problem, said once, by the vault itself
+        res.vault_needed = true
       elseif not vault_ready then
         local text = ("rulesets entry %q needs a vault, and none is found: %s"):format(entry, M.NO_VAULT_HINT)
         note(res.problems, layer.who, text, layer.file)
       else
-        out[#out + 1] = res.vault.root .. "/" .. M.VAULT_SUBDIR .. "/" .. name
+        add(res.vault.root .. "/" .. M.VAULT_SUBDIR .. "/" .. name, entry)
       end
     elseif layer.is_file then
       local own = machine_path(entry)
+      local path = own and entry or (layer.base .. "/" .. entry)
       if own then
         local text = 'a rulesets entry is a path of this machine; use a path relative to the file, or "@vault/<name>"'
-        note(res.warnings, layer.who, text, layer.file, (': "%s"'):format(entry))
+        note(res.warnings, layer.who, text, layer.file, (': "%s"'):format(entry), layer.name == "vault")
       end
-      out[#out + 1] = own and entry or (layer.base .. "/" .. entry)
+      add(path, entry)
     else
-      out[#out + 1] = entry
+      add(entry, entry)
     end
   end
-  return out
+  return out, names
+end
+
+---Where a ruleset was named, as the user would say it (no path of this machine).
+---@type table<string, string>
+M.ORIGIN_WHERE = {
+  call = "named on the command line",
+  setup = "setup({ rulesets })",
+  project = "the project .rules.json",
+  vault = "the .rules.json of the vault",
+}
+
+---What is wrong with a configured ruleset that is not a folder (a folder that was renamed, a path that is a file): the entry
+---and where it was named, no path of this machine.
+---@param entry Rules.Settings.Entry
+---@return string
+function M.not_a_folder_text(entry)
+  return ("ruleset %s (%s) is not a folder"):format(entry.name, M.ORIGIN_WHERE[entry.origin] or entry.origin)
+end
+
+---Record where each ruleset of `paths` came from.
+---@param res Rules.Settings
+---@param origin "call"|"setup"|"project"|"vault"
+---@param paths string[]
+---@param names string[]
+local function add_entries(res, origin, paths, names)
+  for i, path in ipairs(paths) do
+    res.entries[#res.entries + 1] = { path = path, name = names[i], origin = origin }
+  end
 end
 
 ---Resolve the settings.
----@param opts? { rulesets?: string[], gates?: table<string, string[]>, agent?: table, vault?: string, project?: string }
----  `project`: the root being checked; its `.rules.json` is read. Everything else is the `call` layer.
+---@param opts? Rules.Settings.Opts
+---  `project`: the root being checked; its `.rules.json` is read. Everything else is the `call` layer. `need_vault`: the
+---  caller works on the vault itself (`:RulesVault`, health), so a vault that cannot be used is a problem even when
+---  the rulesets are named elsewhere.
 ---@return Rules.Settings
 function M.resolve(opts)
   opts = opts or {}
@@ -330,10 +435,12 @@ function M.resolve(opts)
   ---@type Rules.Settings
   local res = {
     rulesets = {},
+    entries = {},
     gates = {},
     agent = vim.deepcopy(DEFAULTS.agent),
     lua_predicates = config.get().lua_predicates,
     vault = nil,
+    vault_needed = opts.need_vault == true,
     project = nil,
     vault_file = nil,
     origin = { rulesets = "default", gates = {}, agent = {} },
@@ -361,6 +468,9 @@ function M.resolve(opts)
   -- a refused file contributes nothing (and is reported as a problem)
   local project_cfg = res.project and #res.project.problems == 0 and res.project or nil
 
+  -- what is wrong with the vault itself is kept apart: it is a problem only where the result depends on the vault
+  ---@type { problems: Rules.Settings.Note[], warnings: Rules.Settings.Note[], vault: Rules.Settings.Vault|nil }
+  local vault_notes = { problems = {}, warnings = {}, vault = nil }
   local raw, source, base = vault_candidate(call, setup, project_cfg)
   if raw and source then
     local root = absolute(raw, base)
@@ -379,21 +489,24 @@ function M.resolve(opts)
     if exists then
       folders, has_dir = discover(root)
     else
-      note(res.problems, M.VAULT_WHERE[source], "the vault is not a folder", nil, ": " .. root)
+      note(vault_notes.problems, M.VAULT_WHERE[source], "the vault is not a folder", nil, ": " .. root, true)
     end
-    res.vault = { root = root, source = source, exists = exists, rulesets = folders }
+    res.vault = { root = root, source = source, exists = exists, rulesets = folders, file_problem = false }
+    vault_notes.vault = res.vault
     if exists and not has_dir then
       note(
-        res.warnings,
+        vault_notes.warnings,
         M.VAULT_WHERE[source],
         ("the vault has no %s/ folder: no rulesets are found in it"):format(M.VAULT_SUBDIR),
         nil,
-        ": " .. root
+        ": " .. root,
+        true
       )
     end
     if exists then
       res.vault_file = file_mod.read(root, "vault")
-      file_notes(res, res.vault_file, "vault " .. file_mod.NAME)
+      file_notes(vault_notes, res.vault_file, "vault " .. file_mod.NAME, true)
+      res.vault.file_problem = #res.vault_file.problems > 0
     end
   end
   local vault_cfg = res.vault_file and #res.vault_file.problems == 0 and res.vault_file or nil
@@ -422,28 +535,48 @@ function M.resolve(opts)
   }
   assert(#layers == #M.RANK, "RANK and the layers must list the same places")
 
-  -- rulesets: the highest layer that names them; a vault without a list of its own offers every folder under rulesets/
+  -- what the vault itself offers: the list of its own file when it has one, else every folder under rulesets/; nothing
+  -- when that file cannot be used (a broken list never turns into "every folder")
   local vault_ready = res.vault ~= nil and res.vault.exists
-  for _, layer in ipairs(layers) do
-    local entries = layer.values.rulesets
-    if entries == nil and layer.name == "vault" and vault_ready then
-      res.origin.rulesets = "vault (every folder under " .. M.VAULT_SUBDIR .. "/)"
-      res.rulesets = vim.deepcopy(res.vault.rulesets)
-      break
-    end
-    if entries ~= nil then
-      res.origin.rulesets = layer.name
-      res.rulesets = expand_entries(res, layer, entries)
-      break
+  local loaded_names = {}
+  if vault_ready and res.vault then
+    local listed = layers[4].values.rulesets
+    if res.vault.file_problem then
+      res.vault.loaded = {}
+    elseif listed then
+      res.vault.loaded, loaded_names = expand_entries(vault_notes, layers[4], listed)
+    else
+      res.vault.loaded = vim.deepcopy(res.vault.rulesets)
+      for _, folder in ipairs(res.vault.loaded) do
+        loaded_names[#loaded_names + 1] = vim.fs.basename(folder)
+      end
     end
   end
 
-  -- what the vault itself offers: the list of its own file when it has one, else every folder under rulesets/
-  if vault_ready and res.vault then
-    local listed = layers[4].values.rulesets
-    local scratch = { problems = {}, warnings = {}, vault = res.vault }
-    ---@diagnostic disable-next-line: param-type-mismatch
-    res.vault.loaded = listed and expand_entries(scratch, layers[4], listed) or vim.deepcopy(res.vault.rulesets)
+  -- rulesets: the highest layer that names them; a vault without a list of its own offers every folder under rulesets/
+  for _, layer in ipairs(layers) do
+    local entries = layer.values.rulesets
+    if layer.name == "vault" and res.vault then
+      -- nobody above named the rulesets, so they come from the vault
+      res.vault_needed = true
+      if vault_ready then
+        res.origin.rulesets = layer.values.rulesets and "vault"
+          or (
+            "vault ("
+            .. (res.vault.file_problem and "its file cannot be used" or "every folder under " .. M.VAULT_SUBDIR .. "/")
+            .. ")"
+          )
+        res.rulesets = vim.deepcopy(res.vault.loaded)
+        add_entries(res, "vault", res.rulesets, loaded_names)
+        break
+      end
+    elseif entries ~= nil then
+      res.origin.rulesets = layer.name
+      local paths, names = expand_entries(res, layer, entries)
+      res.rulesets = paths
+      add_entries(res, layer.name, paths, names)
+      break
+    end
   end
 
   -- gates and agent: from the lowest layer up, so a higher layer replaces the entries it names
@@ -467,6 +600,20 @@ function M.resolve(opts)
         end
       end
     end
+  end
+
+  -- the vault's own notes count where the result depends on the vault; a stale vault that nothing here needs is a warning
+  if res.vault_needed then
+    vim.list_extend(res.problems, vault_notes.problems)
+    vim.list_extend(res.warnings, vault_notes.warnings)
+  elseif res.vault and #vault_notes.problems > 0 then
+    note(
+      res.warnings,
+      M.VAULT_WHERE[res.vault.source],
+      "the vault is not usable; it is not needed here, the rulesets are named by the call or by setup()",
+      nil,
+      ": " .. res.vault.root
+    )
   end
 
   return res

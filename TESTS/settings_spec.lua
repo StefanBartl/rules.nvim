@@ -304,6 +304,35 @@ describe("rules.settings", function()
       assert.are.equal(vim.log.levels.ERROR, shown[#shown].level)
     end)
 
+    it("opening the file of a rule says why it cannot, when the settings of the working directory are broken", function()
+      local project = tmp_dir()
+      write_raw(project .. "/.rules.json", "{ nope")
+      config.setup({ rulesets = { tmp_dir() } })
+      local previous = vim.fn.getcwd()
+      vim.fn.chdir(project)
+
+      local ok, messages = pcall(capture, function()
+        require("rules.ui.cmd").open_rule("DEP-01")
+      end)
+      vim.fn.chdir(previous)
+
+      assert(ok, messages)
+      assert.are.equal(1, #messages) -- not silence
+      assert.are.equal(vim.log.levels.ERROR, messages[1].level)
+      assert.is_truthy(messages[1].text:find("could not open DEP-01", 1, true))
+      assert.is_truthy(messages[1].text:find(".rules.json", 1, true))
+    end)
+
+    it("opening the file of a rule that does not exist stays quiet: the form has just made it", function()
+      config.setup({ rulesets = { tmp_dir() } })
+
+      local messages = capture(function()
+        require("rules.ui.cmd").open_rule("NOPE-99")
+      end)
+
+      assert.are.same({}, messages)
+    end)
+
     it("the contract answers an error document that names the file kind but no path of this machine", function()
       local project = tmp_dir()
       write_raw(project .. "/.rules.json", "{ nope")

@@ -46,17 +46,23 @@ end
 ---@return Rules.Settings
 local function resolve(opts)
   opts = opts or {}
-  return settings.resolve({ project = opts.project or vim.fn.getcwd(), vault = opts.vault })
+  -- the vault itself is the subject: a vault that cannot be used is a problem here, whatever else names the rulesets
+  return settings.resolve({ project = opts.project or vim.fn.getcwd(), vault = opts.vault, need_vault = true })
 end
 
 ---The vault folder, or `nil` and the reason: nothing is configured (a normal state), what is configured is not a folder,
----or a file that names the vault cannot be used.
+---a file that names the vault cannot be used, or the vault's own `.rules.json` cannot be used (its list of rulesets would
+---be guessed, so the vault is refused instead).
 ---@param opts Rules.Vault.Opts|nil
 ---@return string|nil root  absolute, `/`-separated
 ---@return string|nil message
 function M.root(opts)
   local res = resolve(opts)
   if res.vault and res.vault.exists then
+    local broken = settings.vault_error_text(res, false)
+    if broken then
+      return nil, broken
+    end
     return res.vault.root, nil
   end
   local problem = settings.error_text(res, false)
@@ -66,24 +72,33 @@ function M.root(opts)
   return nil, M.NONE .. ": " .. settings.NO_VAULT_HINT
 end
 
----Where the vault was named: `"call"`, `"setup"`, `"env"` ($RULES_VAULT) or `"project"`; `nil` without a vault.
+---Where the vault was named: `"call"`, `"setup"`, `"env"` ($RULES_VAULT) or `"project"`; `nil` without a vault. The second
+---value is the problem of the vault when it has one (the same text `root` gives), `nil` otherwise.
 ---@param opts Rules.Vault.Opts|nil
 ---@return "call"|"setup"|"env"|"project"|nil
+---@return string|nil problem
 function M.source(opts)
   local res = resolve(opts)
-  return res.vault and res.vault.source or nil
+  return res.vault and res.vault.source or nil, settings.vault_error_text(res, false)
 end
 
 ---The rulesets the vault offers, as folders: the list in its own `.rules.json` when it has one, otherwise every folder
----under `<vault>/rulesets/` (sorted by name). Empty without a vault.
+---under `<vault>/rulesets/` (sorted by name). Empty without a vault, and empty with the problem as the second value when the
+---vault cannot be used (a `.rules.json` that is broken, an entry of its list that is refused): never the folders that
+---the file may have meant to leave out.
 ---@param opts Rules.Vault.Opts|nil
 ---@return string[]
+---@return string|nil problem
 function M.rulesets(opts)
   local res = resolve(opts)
-  if res.vault and res.vault.exists then
-    return vim.deepcopy(res.vault.loaded or res.vault.rulesets)
+  local broken = settings.vault_error_text(res, false)
+  if broken then
+    return {}, broken
   end
-  return {}
+  if res.vault and res.vault.exists then
+    return vim.deepcopy(res.vault.loaded or res.vault.rulesets), nil
+  end
+  return {}, nil
 end
 
 ---@class Rules.Vault.GitState
