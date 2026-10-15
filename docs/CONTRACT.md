@@ -114,19 +114,46 @@ is true only if all entries are. `dry_run` checks everything and writes nothing.
 A **place** is `after` or `before` (an id that stands in a layout; the layout
 is the one that holds it, or the one named by `layout`), `section` (a heading
 text) with `layout` (the `output` path of the layout, `regeln/DEP.md`) and
-optionally `first`, or `top` with `layout` (the start of the layout: before
-the first rule that stands above every heading, else under the frontmatter).
+optionally `first` and `nth`, or `top` with `layout` (the start of the layout:
+before the first rule that stands above every heading, else under the
+frontmatter). Two more fields refine a place and are what `retire` and `move`
+answer with (`inverse`): `nth` (a whole number from 1, with `section` only: the
+n-th heading of that text, when several have it; the first by default) and `gap`
+(`{ "above": n, "below": m }`, 0 to 100 each: the blank lines that stood directly
+above and below the token, which the token is then put back between, exactly).
 
 - **Where in a section.** A section is a heading up to the next heading of the
-  same or a higher level (a `#` line inside a fenced block is no heading). With
-  rules in it, the token goes behind the last of them, or in front of the first
-  one with `first`. A section **without a rule yet** has an introduction (the
-  text under the heading, up to the next heading of any level); that is not a
-  rule, so the token goes behind it, for the end and for `first` alike, with one
-  blank line in front of the token and one behind it (blank lines the author left
-  in front of the next heading stay there). In the last section of a layout the
+  same or a higher level. With rules in it, the token goes behind the last of
+  them (those of its subsections included), or in front of the first one of its
+  own text, the lines before its first subheading, with `first`. A section
+  **without a rule of its own** has an introduction (the text under the heading,
+  up to the next heading of any level); that is not a rule, so the token goes
+  behind it, for the end and for `first` alike (for `first` also when only a
+  subsection holds rules), with one blank line in front of the token and one
+  behind it (blank lines the author left in front of the next heading, or at the
+  end of the layout, stay behind the token). In the last section of a layout the
   token goes at the very end. The headings and the introductions keep their
   order and are never touched.
+- **What is a heading or a token.** A line outside the frontmatter, outside a
+  fenced code block (three or more backticks or tildes, up to three spaces of
+  indentation, closed by the same character at least as long; never closed: to the
+  end) and outside an HTML comment (`<!--` to `-->`, over several lines). A `#` or
+  `{{rule ID}}` line inside one is no heading and no token for a place, for
+  finding or for taking out. The generator fills every whole-line token, also
+  one in a fence or a comment; the editor refuses to put an id a second time
+  that stands there.
+- **Undoing.** Taking a token out takes a blank line left doubled by it, and the
+  blank line before a token at the very end of the layout, with it, so `new`
+  followed by its `inverse` leaves the layout as it was (one exception: into a
+  section whose heading follows its introduction with no blank line in between,
+  `new` writes a blank line behind the token that taking it out leaves). `retire`
+  records where the token stood (`after` the rule above it in its section, else
+  `section` + `first`, else `before` the rule below it, else the end of its
+  section, else `top`; `nth` where the heading is not the first of its text; `gap`
+  where the way `new` puts a token in would not write the blank lines it had), so
+  `reinstate` gives the layout back byte for byte. Where the token stood between
+  two pieces of an introduction, the place is the end of that introduction (in the
+  same section).
 - **The divider.** A rule file ends with a blank line, `---` and a blank line;
   the generator copies the lines of a rule file as they are, so this is what
   keeps the rules of a document apart. `new` writes it itself: a `text` that
