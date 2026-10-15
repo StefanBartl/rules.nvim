@@ -4,14 +4,15 @@
 --   nvim --headless -u NONE -i NONE -n -l scripts/ruleset.lua check [OPTIONS] [<ruleset-folder>]
 --   nvim --headless -u NONE -i NONE -n -l scripts/ruleset.lua migrate [--write] [--rules-dir=D] [--layouts-dir=D] [OPTIONS] <dir>
 --
--- OPTIONS  --vault=D --project=D
+-- OPTIONS  --vault=D --project=D --trust=D (repeatable)
 --
 -- The folder may be `@vault/<name>`, a ruleset of the rules-vault (`--vault=D`, else `$RULES_VAULT`, else `vault` in the
 -- `.rules.json` of `--project=D` / `$RULES_PROJECT`). `catalog` without a folder builds every ruleset the settings
 -- name: the project file, else the vault's own list, else every folder under `<vault>/rulesets/` (`rules.settings`). A
 -- configured ruleset that is not a folder (a folder renamed, a path that is a file) is a problem, never dropped
 -- silently. A folder named here wins over a stale `$RULES_VAULT`: the vault is only needed for `@vault/<name>` and for the
--- rulesets that nobody names.
+-- rulesets that nobody names. `--trust=D` (repeatable, also `$RULES_TRUST`) trusts the rulesets under D: no command here
+-- runs a check, the flag is the same as for `scripts/rules.lua`.
 --
 -- catalog   builds the reading documents from the layouts; with --check it writes nothing and exits 1
 --           when a document is out of date (for CI, like `tasks index --check`).
@@ -71,25 +72,26 @@ vim.opt.rtp:append(lib)
 
 local function usage()
   io.stderr:write(
-    "usage: ruleset.lua catalog [--check] [--vault=D] [--project=D] [<folder>] | "
-      .. "check [--vault=D] [--project=D] [<folder>] | "
-      .. "migrate [--write] [--rules-dir=D] [--layouts-dir=D] [--vault=D] [--project=D] <folder>\n"
+    "usage: ruleset.lua catalog [--check] [--vault=D] [--project=D] [--trust=D] [<folder>] | "
+      .. "check [--vault=D] [--project=D] [--trust=D] [<folder>] | "
+      .. "migrate [--write] [--rules-dir=D] [--layouts-dir=D] [--vault=D] [--project=D] [--trust=D] <folder>\n"
   )
   os.exit(2)
 end
 
---- The flags each command knows: "bool" takes no value, "value" needs one.
+--- The flags each command knows: "bool" takes no value, "value" needs one, "multi" needs one and may be given again.
 --- Anything else is wrong usage: a typo such as `--chek` must not run the command without the flag (that would write
 --- the documents `--check` is there to check).
 local FLAGS = {
-  catalog = { check = "bool", vault = "value", project = "value" },
-  check = { vault = "value", project = "value" },
+  catalog = { check = "bool", vault = "value", project = "value", trust = "multi" },
+  check = { vault = "value", project = "value", trust = "multi" },
   migrate = {
     write = "bool",
     ["rules-dir"] = "value",
     ["layouts-dir"] = "value",
     vault = "value",
     project = "value",
+    trust = "multi",
   },
 }
 
@@ -107,10 +109,16 @@ for i = 2, #arg do
       key = a:match("^%-%-([^=]+)$")
     end
     local kind = key and known[key]
-    if not kind or (kind == "bool" and value ~= nil) or (kind == "value" and (value == nil or value == "")) then
+    local takes_value = kind == "value" or kind == "multi"
+    if not kind or (kind == "bool" and value ~= nil) or (takes_value and (value == nil or value == "")) then
       usage()
     end
-    flags[key] = value or true
+    if kind == "multi" then
+      flags[key] = flags[key] or {}
+      table.insert(flags[key], value)
+    else
+      flags[key] = value or true
+    end
   else
     positional[#positional + 1] = a
   end
@@ -122,7 +130,7 @@ end
 -- the folders to work on: the one given (`@vault/<name>` through the vault), or for `catalog` and `check` every
 -- ruleset the settings name
 local settings = require("rules.settings")
-local settings_opts = { vault = flags.vault, project = flags.project or vim.env.RULES_PROJECT }
+local settings_opts = { vault = flags.vault, project = flags.project or vim.env.RULES_PROJECT, trust = flags.trust }
 local expand_path = require("lib.nvim.cross.fs.expand_path")
 local roots = {}
 -- findings about the configured rulesets themselves (a folder that is not there): the run goes on, then fails
@@ -204,7 +212,7 @@ if command == "check" then
   end
   -- all rulesets together, through the snapshot document: a duplicate id across two rulesets is only seen this way.
   -- `vault` goes along: an explicit vault wins over $RULES_VAULT, and a stale $RULES_VAULT breaks nothing here
-  local text, failure = require("rules.api").call("snapshot", nil, { rulesets = roots, vault = flags.vault })
+  local text, failure = require("rules.api").call("snapshot", nil, { rulesets = roots, vault = flags.vault, trust = flags.trust })
   local ok, doc = pcall(vim.json.decode, text)
   if failure ~= nil or not ok or type(doc) ~= "table" or doc.kind ~= "rules.snapshot" then
     io.stdout:write("FAILED: the rulesets could not be read: " .. tostring(text):sub(1, 400) .. "\n")

@@ -24,6 +24,19 @@
 --- text, with the file's path for the user (health, notifications) or without any path of this machine (`portable`: the
 --- documents of `rules-export/1`).
 ---
+--- TRUST. A `lua_predicate` check is code, and a ruleset can be somebody else's: a `.rules.json` in a repository that
+--- is cloned from elsewhere may name rulesets (`rulesets`) and a vault (`vault`). Every ruleset of a result is therefore
+--- tracked with where it came from (`entries`: `call`, `setup`, `project`, `vault`) and whether it is trusted:
+---
+---   trusted      what the user named himself: the rulesets of a call (the command line of a headless tool),
+---                of `setup({ rulesets })`, and the rulesets of a vault named by a call, `setup({ vault })` or
+---                `$RULES_VAULT`; and whatever lies under a path of `trust` (`setup({ trust })`, `--trust`, `$RULES_TRUST`)
+---   not trusted  every ruleset a project `.rules.json` names (a relative path, `..`, an absolute path, `@vault/<name>`
+---                alike), and the rulesets of a vault that a project `.rules.json` names
+---
+--- `trust_check` answers for a rule file by its real path (a link out of a trusted folder is not trusted).
+--- The engine runs a `lua_predicate` only for a trusted file; the other check types do not care.
+---
 --- Not its job: loading the rules (`rules.engine.loader`), the public vault API (`rules.vault`).
 
 local schema = require("rules.config.schema")
@@ -45,6 +58,12 @@ M.VAULT_SUBDIR = "rulesets"
 
 ---The environment variable that names the vault.
 M.ENV_VAULT = "RULES_VAULT"
+
+---The environment variable that lists the folders to trust (the same as `trust`; `;` or `:` separated).
+M.ENV_TRUST = "RULES_TRUST"
+
+---What a `lua_predicate` of a ruleset that is not trusted reports: not a pass, not a silent skip. No path of this machine.
+M.UNTRUSTED = "not run: ruleset is not trusted (grant it: setup({ trust = { <folder> } }), --trust, or $" .. M.ENV_TRUST .. ")"
 
 ---How to get a vault, for a message that says there is none.
 M.NO_VAULT_HINT = "setup({ vault = ... }), $" .. M.ENV_VAULT .. ", or vault in the project .rules.json"
@@ -71,12 +90,15 @@ M.VAULT_WHERE = {
 ---@field agent? table
 ---@field vault? string
 ---@field project? string
+---@field trust? string[]
 ---@field need_vault? boolean
 
 ---@class Rules.Settings.Entry
 ---@field path string      as in `rulesets`
 ---@field name string      the entry as it was written (`@vault/lua`), the folder name for a discovered one: no path
 ---@field origin "call"|"setup"|"project"|"vault"  the place that named it
+---@field trusted boolean  whether its `lua_predicate` checks may run
+---@field why string|nil   when it is not trusted: who named it
 
 ---@class Rules.Settings.Vault
 ---@field root string       the folder, absolute, `/`-separated
@@ -92,7 +114,8 @@ M.VAULT_WHERE = {
 ---@field gates table<string, string[]>
 ---@field agent Rules.AgentOpts
 ---@field lua_predicates boolean
----@field entries Rules.Settings.Entry[]  `rulesets`, one per path, with the place that named it
+---@field entries Rules.Settings.Entry[]  `rulesets`, one per path, with where it came from and whether it is trusted
+---@field trust string[]       the folders the user trusts (`trust`, `--trust`, $RULES_TRUST), absolute
 ---@field vault_needed boolean whether this result depends on the vault (see the module header)
 ---@field vault Rules.Settings.Vault|nil
 ---@field project Rules.Config.File|nil     the project file, when a project was given
@@ -229,6 +252,33 @@ end
 local function is_dir(path)
   local stat = (vim.uv or vim.loop).fs_stat(path)
   return stat ~= nil and stat.type == "directory"
+end
+
+---Paths that differ only in case are one folder on Windows and (by default) on macOS.
+local CASE_BLIND = vim.fn.has("win32") == 1 or vim.fn.has("mac") == 1
+
+---A path as a key to compare by: the real path (a link, a Windows short name, `/var` against `/private/var`), one
+---spelling of the separators, no trailing slash, one case where the file system folds it.
+---@param path string
+---@return string
+local function path_key(path)
+  local key = trim_slash(require("lib.nvim.fs.normkey")(path))
+  if CASE_BLIND then
+    key = key:find("[\128-\255]") and vim.fn.tolower(key) or key:lower()
+  end
+  return key
+end
+
+---Whether the key `inner` is `outer` or lies under it.
+---@param inner string
+---@param outer string
+---@return boolean
+local function key_within(inner, outer)
+  if inner == outer then
+    return true
+  end
+  local prefix = outer:sub(-1) == "/" and outer or (outer .. "/")
+  return inner:sub(1, #prefix) == prefix
 end
 
 ---Every folder under `<vault>/rulesets/`, sorted by name (hidden ones, `.git` and the like, are not rulesets).
@@ -385,7 +435,14 @@ local function expand_entries(res, layer, entries)
       local path = own and entry or (layer.base .. "/" .. entry)
       if own then
         local text = 'a rulesets entry is a path of this machine; use a path relative to the file, or "@vault/<name>"'
+        if layer.name == "project" then
+          text = text .. " (outside the project its lua_predicate checks do not run, see trust)"
+        end
         note(res.warnings, layer.who, text, layer.file, (': "%s"'):format(entry), layer.name == "vault")
+      elseif layer.name == "project" and not key_within(path_key(absolute(path)), path_key(layer.base)) then
+        local text = "a rulesets entry leaves the project folder; it is used, but its lua_predicate checks do not run,"
+          .. " see trust"
+        note(res.warnings, layer.who, text, layer.file, (': "%s"'):format(entry))
       end
       add(path, entry)
     else
@@ -393,6 +450,25 @@ local function expand_entries(res, layer, entries)
     end
   end
   return out, names
+end
+
+---The folders the user trusts: `trust` of a call and of `setup()`, and `$RULES_TRUST`; absolute.
+---@param call table
+---@param setup table
+---@return string[]
+local function trust_paths(call, setup)
+  local raw = {}
+  vim.list_extend(raw, call.trust or {})
+  vim.list_extend(raw, setup.trust or {})
+  local env = vim.env[M.ENV_TRUST]
+  if env and env ~= "" then
+    vim.list_extend(raw, require("rules.env").split_paths(env))
+  end
+  local out = {}
+  for _, path in ipairs(raw) do
+    out[#out + 1] = absolute(path)
+  end
+  return out
 end
 
 ---Where a ruleset was named, as the user would say it (no path of this machine).
@@ -412,14 +488,74 @@ function M.not_a_folder_text(entry)
   return ("ruleset %s (%s) is not a folder"):format(entry.name, M.ORIGIN_WHERE[entry.origin] or entry.origin)
 end
 
----Record where each ruleset of `paths` came from.
+---Whether a ruleset is trusted, and if not, who named it.
+---@param res Rules.Settings
+---@param origin "call"|"setup"|"project"|"vault"
+---@param path string
+---@return boolean trusted
+---@return string|nil why
+local function judge(res, origin, path)
+  if origin == "call" or origin == "setup" then
+    return true, nil
+  end
+  if origin == "vault" and res.vault and res.vault.source ~= "project" then
+    return true, nil
+  end
+  local key = path_key(absolute(path))
+  for _, trusted in ipairs(res.trust) do
+    if key_within(key, path_key(trusted)) then
+      return true, nil
+    end
+  end
+  if origin == "vault" then
+    return false, "in a vault that the project .rules.json names"
+  end
+  return false, "named by the project .rules.json"
+end
+
+---Record where each ruleset of `paths` came from and whether it is trusted.
 ---@param res Rules.Settings
 ---@param origin "call"|"setup"|"project"|"vault"
 ---@param paths string[]
 ---@param names string[]
 local function add_entries(res, origin, paths, names)
   for i, path in ipairs(paths) do
-    res.entries[#res.entries + 1] = { path = path, name = names[i], origin = origin }
+    local trusted, why = judge(res, origin, path)
+    res.entries[#res.entries + 1] = { path = path, name = names[i], origin = origin, trusted = trusted, why = why }
+  end
+end
+
+---Whether a rule file may run its `lua_predicate` checks: it lies (by real path) under a trusted ruleset of `res`.
+---The answer for one file is kept, a run asks once per rule.
+---@param res Rules.Settings
+---@return fun(file: string): boolean
+function M.trust_check(res)
+  local roots = {}
+  for _, entry in ipairs(res.entries or {}) do
+    if entry.trusted then
+      roots[#roots + 1] = path_key(absolute(entry.path))
+    end
+  end
+  ---@type table<string, boolean>
+  local memo = {}
+  return function(file)
+    if type(file) ~= "string" or file == "" then
+      return false
+    end
+    local known = memo[file]
+    if known ~= nil then
+      return known
+    end
+    local key = path_key(file)
+    local answer = false
+    for _, root in ipairs(roots) do
+      if key_within(key, root) then
+        answer = true
+        break
+      end
+    end
+    memo[file] = answer
+    return answer
   end
 end
 
@@ -436,6 +572,7 @@ function M.resolve(opts)
   local res = {
     rulesets = {},
     entries = {},
+    trust = {},
     gates = {},
     agent = vim.deepcopy(DEFAULTS.agent),
     lua_predicates = config.get().lua_predicates,
@@ -454,12 +591,14 @@ function M.resolve(opts)
     gates = opts.gates,
     agent = opts.agent,
     vault = opts.vault,
+    trust = opts.trust,
   }, "call")
   for _, problem in ipairs(call_checked.problems) do
     note(res.problems, "options", ("%s %s"):format(problem.key, problem.message))
   end
   local call = call_checked.clean
   local setup = config.explicit()
+  res.trust = trust_paths(call, setup)
 
   if opts.project and opts.project ~= "" then
     res.project = file_mod.read(absolute(opts.project), "project")
@@ -474,15 +613,26 @@ function M.resolve(opts)
   local raw, source, base = vault_candidate(call, setup, project_cfg)
   if raw and source then
     local root = absolute(raw, base)
-    if source == "project" and machine_path(raw) then
+    if source == "project" then
       note(
         res.warnings,
         "project " .. file_mod.NAME,
-        "vault is a path of this machine; a file in a repository should not carry one"
-          .. " (set $RULES_VAULT or setup({ vault = ... }), or write a path relative to the file)",
-        res.project and res.project.path,
-        (': "%s"'):format(raw)
+        "vault: a project file names the vault; it is used, but the rulesets of a vault that a project file names"
+          .. " are not trusted (their lua_predicate checks do not run); name it in setup({ vault = ... }) or $"
+          .. M.ENV_VAULT
+          .. " to trust it",
+        res.project and res.project.path
       )
+      if machine_path(raw) then
+        note(
+          res.warnings,
+          "project " .. file_mod.NAME,
+          "vault is a path of this machine; a file in a repository should not carry one"
+            .. " (set $RULES_VAULT or setup({ vault = ... }), or write a path relative to the file)",
+          res.project and res.project.path,
+          (': "%s"'):format(raw)
+        )
+      end
     end
     local exists = is_dir(root)
     local folders, has_dir = {}, false

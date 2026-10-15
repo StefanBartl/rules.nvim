@@ -158,6 +158,13 @@ function M.check()
     info(settings.nothing_configured(res) or "no rulesets configured")
   else
     info(("rulesets come from: %s"):format(res.origin.rulesets))
+    for _, entry in ipairs(res.entries) do
+      if not entry.trusted then
+        warn(("ruleset %s is not trusted (%s): its lua_predicate checks do not run"):format(entry.name, entry.why or "?"), {
+          "Trust it with setup({ trust = { <folder> } }) if you know the rules",
+        })
+      end
+    end
     if next(res.origin.gates) then
       info("gates: " .. origins(res.origin.gates))
     end

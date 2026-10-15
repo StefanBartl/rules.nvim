@@ -41,8 +41,8 @@ end
 ---@param spec Rules.Check.LuaPredicate
 ---@param root string
 ---@param _ctx table|nil  unused; the shared cache is `grep`'s
----@param opts { lua_predicates?: boolean }|nil  `lua_predicates = false` refuses to run
----   a predicate; absent means trusted, as before
+---@param opts { lua_predicates?: boolean, refusal?: string }|nil  `lua_predicates = false` refuses to run
+---   a predicate (the error says `refusal`, else that `lua_predicates` is off); absent means trusted, as before
 ---@return "pass"|"fail"|"error" status
 ---@return Rules.Finding[] findings
 function M.run(spec, root, _ctx, opts)
@@ -51,7 +51,8 @@ function M.run(spec, root, _ctx, opts)
   end
 
   if opts and opts.lua_predicates == false then
-    return "error", { { file = root, line = 1, text = "predicate not trusted (lua_predicates is off)" } }
+    local why = opts.refusal or "predicate not trusted (lua_predicates is off)"
+    return "error", { { file = root, line = 1, text = why } }
   end
   sandbox.rebind(spec.fn)
 

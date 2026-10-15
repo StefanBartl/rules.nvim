@@ -9,6 +9,8 @@
 --          --gate=<name>=<FAM,FAM> a gate (repeatable); default `$RULES_GATES`, merged over the project/vault files
 --          --vault=<dir>           the rules-vault; default `$RULES_VAULT`, then `vault` in the project's .rules.json
 --          --project=<dir>         the root whose `.rules.json` is read; default `$RULES_PROJECT`, else no project file
+--          --trust=<dir>           a folder whose rulesets are trusted (repeatable; also `$RULES_TRUST`): the rulesets a project
+--                                  file names are not (their lua_predicate checks do not run); docs/CONFIG.md "A word on trust"
 --
 -- call   one method of the contract (`hello`, `snapshot`, `list`, `rule`, `next_id`, `sources`, `ops`); the document goes
 --        to stdout. `--params` is the JSON of the method's parameters (`-` reads it from stdin).
@@ -57,7 +59,7 @@ vim.opt.rtp:append(vim.fn.escape(lib, ","))
 local function usage()
   io.stderr:write(
     "usage: rules.lua call <method> [--params=<json>|-] | list --format=json [--family=F] [--severity=S] "
-      .. "[--limit=N] [--offset=N]   (options: --ruleset=PATH --gate=NAME=FAM,FAM --vault=DIR --project=DIR)\n"
+      .. "[--limit=N] [--offset=N]   (options: --ruleset=PATH --gate=NAME=FAM,FAM --vault=DIR --project=DIR --trust=DIR)\n"
   )
   os.exit(2)
 end
@@ -78,8 +80,9 @@ local KNOWN = {
   gate = "value",
   vault = "value",
   project = "value",
+  trust = "value",
 }
-local flags, rulesets, gates, positional = {}, {}, {}, {}
+local flags, rulesets, gates, trust, positional = {}, {}, {}, {}, {}
 for i = 2, #_G.arg do
   local a = _G.arg[i]
   if a:sub(1, 2) == "--" then
@@ -91,6 +94,8 @@ for i = 2, #_G.arg do
       rulesets[#rulesets + 1] = value
     elseif key == "gate" then
       gates[#gates + 1] = value
+    elseif key == "trust" then
+      trust[#trust + 1] = value
     else
       flags[key] = value
     end
@@ -108,6 +113,9 @@ if #gates > 0 then
   opts.gates = env.parse_gates(table.concat(gates, ";"))
 end
 opts.vault = flags.vault
+if #trust > 0 then
+  opts.trust = trust
+end
 if flags.project then
   opts.project = flags.project
 end

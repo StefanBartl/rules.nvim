@@ -20,10 +20,11 @@ local M = {}
 --- with a `nil` value, so `?` is the accurate form, not `string|nil`
 
 ---@class Rules.RunOpts
----@field lua_predicates? boolean|fun(rule: Rules.ParsedRule): boolean  whether a `lua_predicate`
+---@field lua_predicates? boolean|fun(rule: Rules.ParsedRule): boolean, string|nil  whether a `lua_predicate`
 ---   may run: `false` reports it as an error instead, a function decides per rule (the
----   desktop host asks its trust store, keyed on the rule's `source_file`). Absent means
----   trusted -- inside one's own Neovim, pointed at one's own rulesets, that is the design
+---   desktop host asks its trust store, keyed on the rule's `source_file`; `rules` itself asks which ruleset
+---   the file belongs to, `rules.settings`) and may give the reason as a second value, which is what the
+---   error says. Absent means trusted -- a caller that passes no policy runs its own rulesets in its own Neovim
 
 --- Whether `rule`'s predicate may run under `opts`.
 ---
@@ -34,20 +35,24 @@ local M = {}
 --- family run, which reports one broken rule as `error` and carries on.
 ---@param opts Rules.RunOpts|nil
 ---@param rule Rules.ParsedRule
----@return boolean
+---@return boolean allowed
+---@return string|nil reason  what the error says when it is not allowed (default: lua_predicates is off)
 local function predicates_allowed(opts, rule)
   if not (rule.check and rule.check.type == "lua_predicate") then
-    return true
+    return true, nil
   end
   local policy = opts and opts.lua_predicates
   if policy == nil then
-    return true
+    return true, nil
   end
   if type(policy) == "function" then
-    local ok, allowed = pcall(policy, rule)
-    return ok and allowed == true
+    local ok, allowed, reason = pcall(policy, rule)
+    if ok and allowed == true then
+      return true, nil
+    end
+    return false, ok and type(reason) == "string" and reason or nil
   end
-  return policy == true
+  return policy == true, nil
 end
 
 --- The family of a rule id: its leading letters, e.g. "DEP" for "DEP-01".
@@ -74,7 +79,8 @@ function M.check_family(rules, family_prefix, root, waivers, opts)
   local ctx = {}
   for _, rule in ipairs(rules) do
     if M.family_of(rule.id) == family_prefix then
-      local status, findings = checks.run(rule.check, root, ctx, { lua_predicates = predicates_allowed(opts, rule) })
+      local allowed, refusal = predicates_allowed(opts, rule)
+      local status, findings = checks.run(rule.check, root, ctx, { lua_predicates = allowed, refusal = refusal })
       local reason = waivers[rule.id]
       if reason and (status == "fail" or status == "error") then
         results[#results + 1] = { rule = rule, status = "waived", findings = findings, waiver_reason = reason }

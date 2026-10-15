@@ -80,6 +80,7 @@ M.doc = d
 ---@field gates? table<string, string[]>  default: see `rules.settings`
 ---@field vault? string                 the rules-vault; default `setup({ vault })`, `$RULES_VAULT`, then the project file
 ---@field project? string               the root whose `.rules.json` is read; no project, no project file
+---@field trust? string[]              folders whose rulesets are trusted (`setup({ trust })`, `--trust`): see `rules.settings`
 
 ---Paths that differ only in case are one folder on Windows and (by default) on macOS.
 local CASE_INSENSITIVE = vim.fn.has("win32") == 1 or vim.fn.has("mac") == 1
@@ -95,6 +96,7 @@ local function settings_of(opts)
     gates = opts and opts.gates,
     vault = opts and opts.vault,
     project = opts and opts.project,
+    trust = opts and opts.trust,
   })
   settings.notify(res)
   return res
