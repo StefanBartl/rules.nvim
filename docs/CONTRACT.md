@@ -106,7 +106,7 @@ is true only if all entries are. `dry_run` checks everything and writes nothing.
 | Operation | Fields | What it does |
 | --- | --- | --- |
 | `new` | `family` (1 to 12 uppercase letters `A-Z`; anything else is `invalid_argument: family must be 1 to 12 uppercase letters A-Z (e.g. DEP)`), `title`, `severity`, `text`?, `check`?, `agent`?, a place?, `ruleset`? | Creates `<ruleset>/_rules/<FAMILY>/<ID>.md` with the next free id (loaded and retired ids count) under the ruleset's lock. With a place the rule also goes into a layout. `text` is stored as given: the engine neither wraps nor joins lines (a client that wants lines of 78 columns wraps before it asks; `:Rules new` and its form send the text as typed). The file ends with the divider `---` between blank lines, as the rule files of the shipped rulesets do (see "The divider" below). `inverse`: `retire`. The entry may carry `warnings` (see below). |
-| `set` | `id`, `patch` { `severity`?, `title`?, `text`?, `check`?, `agent`? }, `if_match`? | Changes parts of the rule's file by editing lines: everything else (other prose, line endings, the final newline, a `check` or `agent` the patch does not name) stays byte for byte; a block whose fields share a line is written again from its table. `null` for `check` or `agent` removes it. `inverse`: `set` with the values before. |
+| `set` | `id`, `patch` { `severity`?, `title`?, `text`?, `check`?, `agent`? }, `if_match`? | Changes parts of the rule's file by editing lines: everything else (other prose, line endings, the final newline, a `check` or `agent` the patch does not name) stays byte for byte; a block whose fields share a line, or whose fields start with the separator (comma-first style), is written again from its table, and so is a block that gives the key twice when the key is removed (when it is set, the last one, which is the one that counts, is replaced). `null` for `check` or `agent` removes it. `inverse`: `set` with the values before. |
 | `retire` | `id`, `replaced_by`?, `reason`?, `if_match`? | Moves the file to `_retired/` (the id stays taken) and takes the rule out of every layout that holds it. `inverse`: `reinstate` with `places`, one entry for each layout the rule stood in. |
 | `reinstate` | `id`, a place? or `places`? | Brings a retired rule back to the file it came from. `places` (`{ "regeln/DEP.md": { "after": "DEP-01" } }`, keyed by the `output` of the layout, goes alone) puts it back into each of those layouts. `inverse`: `retire`. |
 | `move` | `id`, a place | Moves the `{{rule ID}}` line of the rule within a layout or to another one; the rule's file is not touched. `inverse`: `move` back. |
@@ -160,7 +160,13 @@ above and below the token, which the token is then put back between, exactly).
   ends with `---` (with or without blank lines after it) is not given a second
   one, any other text gets it, and so does a rule without a text. A caller does
   not have to know the convention, and the divider is no part of the `text`
-  that reads back. The generator does not add dividers: the rulesets differ
+  that reads back. A divider line at the end of the text (`---`, `***`, `___`) that
+  stands right under a line of text gets a blank line in front of it, else the
+  line above would be a heading (`foo` over `---`). CR LF line ends in a `text` are
+  line ends (a lone CR is still a control character and refused): the file is
+  written with LF, or with the CR LF of the file that is changed, never both. A
+  `set` of `text` to nothing leaves one blank line in front of the divider, the
+  file of a rule made without a text. The generator does not add dividers: the rulesets differ
   (some documents have none), and a generated document must stay byte for byte
   what the rule files and the layout say.
 - **Warnings.** An entry of `new` (also in a `dry_run`) may carry `warnings`, a list of texts: things to know that did not

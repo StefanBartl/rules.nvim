@@ -221,8 +221,10 @@ writes a ruleset in the one-file-per-rule form ([RULESET-FORMAT.md](RULESET-FORM
   line of the file, the other field of the block with its key order and layout
   included, as it was. The exceptions are said, never silent: a block with a
   comment or a Lua function is refused for `check=`/`agent=` (edit it by hand),
-  and a block whose fields share a line (`check = { ... }, agent = { ... },`) is
-  written again from its table, the keys in order of their names.
+  and a block whose fields share a line (`check = { ... }, agent = { ... },`) or
+  start with the separator (`, agent = { ... }`) is written again from its
+  table, the keys in order of their names (so is a block that gives the key
+  twice when the key is removed; when it is set, the last one is replaced).
 - **`--dry`** is the door's `dry_run`: everything is checked and told, nothing is
   written, no buffer is touched. `set --dry` shows the change as a diff.
 - **`retire` asks first** (`No` is the button the dialog starts on; `--yes`
