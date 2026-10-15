@@ -470,6 +470,25 @@ describe("rules.settings", function()
       assert.is_truthy(settings.format(res.warnings[1], false):find("does not name another vault", 1, true))
     end)
 
+    it("does not let a project file or a vault file set keys: that is setup() only", function()
+      local vault, project = make_vault(), tmp_dir()
+      write_json(vault .. "/.rules.json", { keys = { form = { submit = "<C-g>" } } })
+      project_file(project, { keys = { form = { close = false } } })
+      config.setup({ vault = vault })
+
+      local res = settings.resolve({ project = project })
+
+      -- one warning for each file, naming the key and why it is not taken
+      assert.are.equal(2, #res.warnings)
+      for _, warning in ipairs(res.warnings) do
+        local text = settings.format(warning, false)
+        assert.is_truthy(text:find("keys", 1, true))
+        assert.is_truthy(text:find("setup() option only", 1, true))
+      end
+      assert.are.equal("<C-s>", config.get().keys.form.submit)
+      assert.are.equal("q", config.get().keys.form.close)
+    end)
+
     it("drops only the bad field of agent, not the block: deny survives a bad batch_size (ERR-22)", function()
       local messages = capture(function()
         config.setup({

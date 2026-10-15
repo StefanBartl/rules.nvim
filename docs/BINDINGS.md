@@ -316,14 +316,29 @@ made (id, severity, title, file, place) with `Back to the form` as the answer
 the dialog starts on; only `Create the rule` writes, closes the form and opens
 the new file. Nothing typed is lost on a refusal.
 
-Keys of the form (buffer-local, `g?` lists them):
+Keys of the form (buffer-local, `g?` lists the keys in force). These are the
+defaults; `setup({ keys = { form = { ... } } })` changes every one of them:
 
-| Key | Does |
-| --- | --- |
-| `<Space>`, `<CR>` | tick or untick the severity under the cursor (one tick), anywhere else the key is what it always is |
-| `<C-s>` (normal and insert) | check, dry run, ask, write |
-| `q`, `<C-q>` | cancel; asks first when something was typed |
-| `g?` | help |
+| Action | Key | Does |
+| --- | --- | --- |
+| `toggle`, `accept` | `<Space>`, `<CR>` | tick or untick the severity under the cursor (one tick), anywhere else the key is what it always is |
+| `submit` | `<C-s>` (normal and insert) | check, dry run, ask, write |
+| `close`, `cancel` | `q`, `<C-q>` (`cancel` also in insert mode) | cancel; asks first when something was typed |
+| `help` | `g?` | help |
+
+```lua
+require("rules").setup({
+  keys = { form = { submit = "<C-g>", toggle = { "<Space>", "x" }, help = false } },
+})
+```
+
+An action takes a key, a list of keys (every one is bound) or `false` (no key
+for it); an action that is not named keeps its default. The hint under the
+title of the form and `g?` show the keys that are really bound (`-` for an
+action with none). Unknown actions (`keys.form.sumbit (did you mean
+submit?)`), values of the wrong type and two actions on one key are warned about
+at `setup()`, never ignored silently; `keys` is a `setup()` option only (in a
+`.rules.json` it is an unknown key). See [CONFIG.md](CONFIG.md#the-keys-of-the-form).
 
 `:Rules check`/`gate`/`stats`'s readable-buffer report reuses a still-open
 report window (any tab) instead of opening a fresh tab on every call — a

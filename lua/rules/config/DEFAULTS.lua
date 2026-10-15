@@ -21,6 +21,14 @@
 ---@field deny string[]  globs of paths that are never put into a request
 ---@field scopes table<string, Rules.AgentScope>  per family: where its rules look; no scope means not sent
 
+---The keys of the form of `:Rules new` (buffer-local, in its own buffer only). An action takes a key, a list of keys or
+---`false` (no key). `toggle` and `accept` tick or untick the severity under the cursor (anywhere else the key does what it
+---always does); `submit` works in normal and insert mode, `close` and `cancel` cancel (`cancel` in both modes too).
+---@alias Rules.Keys.Form table<"toggle"|"accept"|"submit"|"close"|"cancel"|"help", string|string[]|false>
+
+---@class Rules.KeysConfig
+---@field form Rules.Keys.Form
+
 ---@class Rules.Opts
 ---@field rulesets string[]  files or directories to load fenced `rule` blocks from; `@vault/<name>` names a ruleset of the vault
 ---@field gates table<string, string[]>  named groups of family prefixes, e.g. `{ release = {"REL"} }`; see `:Rules gate`
@@ -33,6 +41,7 @@
 ---   `.rules.json` named them; compared by real path. Rulesets of `setup({ rulesets })` and of the vault named by
 ---   `setup({ vault })` or `$RULES_VAULT` are trusted without an entry here
 ---@field agent Rules.AgentOpts  how an agent run is planned (the same block as in `.rules.json`)
+---@field keys Rules.KeysConfig  the keys of the `:Rules new` form; `setup()` only (a file must not bind your keys)
 
 ---@type Rules.Opts
 return {
@@ -48,5 +57,15 @@ return {
     max_context_bytes = 60000,
     deny = {},
     scopes = {},
+  },
+  keys = {
+    form = {
+      toggle = "<Space>",
+      accept = "<CR>",
+      submit = "<C-s>",
+      close = "q",
+      cancel = "<C-q>",
+      help = "g?",
+    },
   },
 }
