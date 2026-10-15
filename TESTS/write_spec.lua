@@ -151,6 +151,44 @@ describe("rules.write", function()
     assert.is_truthy(text:find("unsaved changes", 1, true))
   end)
 
+  it("looks after the buffer of the waivers file of the project, which lies outside every ruleset", function()
+    local project = vim.fn.tempname() .. "/project"
+    vim.fn.mkdir(project, "p")
+    local file = project .. "/.rules-waivers.json"
+    write_raw(file, '{"DEP-02": "keep"}\n')
+    local waiver_opts = vim.tbl_extend("force", opts, { project = project, today = "2030-01-01" })
+    local buf = open(file)
+
+    local waive = { { op = "waive", id = "DEP-01", reason = "r", expires = "2031-02-03" } }
+    local result = write.run(waive, { contract = waiver_opts })
+    assert.is_true(result.ok, vim.inspect(result.entries))
+    assert.are.equal(1, #result.buffers.reloaded)
+    assert.are.equal(vim.fs.normalize(vim.uv.fs_realpath(file)), vim.fs.normalize(vim.uv.fs_realpath(result.buffers.reloaded[1])))
+    assert.is_truthy(text_of(buf):find('"DEP-01"', 1, true))
+    assert.is_truthy(
+      joined(write.messages(result, waive)):find("waived DEP-01 through 2031-02-03 in .rules-waivers.json", 1, true)
+    )
+
+    -- unsaved changes: a conflict, and the buffer is left as it is
+    vim.api.nvim_buf_set_lines(buf, 0, -1, false, { "my edit" })
+    local renew = { { op = "renew", id = "DEP-01", no_expiry = true } }
+    result = write.run(renew, { contract = waiver_opts })
+    assert.is_true(result.ok, vim.inspect(result.entries))
+    assert.are.equal(1, #result.buffers.conflicts)
+    assert.are.same({ "my edit" }, vim.api.nvim_buf_get_lines(buf, 0, -1, false))
+    local text = joined(write.messages(result, renew))
+    assert.is_truthy(text:find("renewed the waiver of DEP-01 (no expiry) in .rules-waivers.json", 1, true))
+    assert.is_truthy(text:find("unsaved changes", 1, true))
+
+    -- a dry run touches nothing and tells the file that would be written
+    local remove = { { op = "remove", id = "DEP-01" } }
+    result = write.run(remove, { contract = waiver_opts, dry = true })
+    assert.is_nil(result.buffers)
+    assert.is_truthy(
+      joined(write.messages(result, remove)):find("would remove the waiver of DEP-01 from .rules-waivers.json", 1, true)
+    )
+  end)
+
   it("reloads the generated document when the move rewrites it", function()
     local generated = root .. "/regeln/DEP.md"
     local first = write.run({ { op = "move", id = "DEP-02", section = "Core", layout = "regeln/DEP.md" } }, { contract = opts })
