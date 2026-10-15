@@ -7,7 +7,7 @@
 --- One rule is one file (`<ruleset>/_rules/<FAMILY>/<ID>.md`), so a rule is changed, created or retired without
 --- touching another rule's text; where it stands in a generated document is the layout's business (`{{rule ID}}`).
 ---
----  - `new` { family, title, severity, text?, check?, agent?, after? | before? | (layout, section, first?), ruleset? }
+---  - `new` { family, title, severity, text?, check?, agent?, after? | before? | (layout, section, first?, nth?), ruleset? }
 ---    creates the file with the next free id (loaded and retired ids count: an id is never given twice) under the
 ---    ruleset's lock, and puts the rule in a layout when a place is given. `inverse`: `retire`. The entry may carry
 ---    `warnings` (a list of texts): the vault is behind its upstream, so another machine may make the same id.
@@ -20,7 +20,7 @@
 ---    `inverse`: `reinstate` with `places` (every layout that held the rule).
 ---  - `reinstate` { id, place? | places? } brings a retired rule back, to where it came from. `places` is
 ---    `{ [layout output] = place }`. `inverse`: `retire`.
----  - `move` { id, after? | before? | (layout, section, first?) } moves the `{{rule ID}}` line of a rule, within a
+---  - `move` { id, after? | before? | (layout, section, first?, nth?) } moves the `{{rule ID}}` line of a rule, within a
 ---    layout or to another one; the rule's file is not touched. `inverse`: `move` back.
 ---
 --- A rule that lives in a document with many rules (`etag_scope = "file"`) is not written: migrate it first
@@ -334,17 +334,53 @@ local PLACE_FIELDS = {
   layout = "string",
   first = "boolean",
   top = "boolean",
+  nth = "integer",
+  gap = "object",
 }
+
+local GAP_MAX = 100
+
+---Whether `value` is a good value for the place field `key` (the door checks the type of a field of an operation; an
+---entry of `places` is checked here).
+---@param key string
+---@param value any
+---@return boolean
+local function place_field_ok(key, value)
+  local kind = PLACE_FIELDS[key]
+  if kind == "string" or kind == "boolean" then
+    return type(value) == kind and (key ~= "top" or value == true)
+  elseif kind == "integer" then
+    return type(value) == "number" and value == math.floor(value) and value >= 1 and value <= 999999
+  elseif kind == "object" then
+    return type(value) == "table" and (next(value) == nil or not vim.islist(value))
+  end
+  return false
+end
+
+---Why a `gap` is no `{ above = n, below = m }` (blank lines, 0 to GAP_MAX each).
+---@param gap table
+---@return string|nil why
+local function gap_error(gap)
+  for key, value in pairs(gap) do
+    if key ~= "above" and key ~= "below" then
+      return "gap has above and below, not " .. tostring(key):sub(1, 40)
+    end
+    if type(value) ~= "number" or value ~= math.floor(value) or value < 0 or value > GAP_MAX then
+      return ("gap.%s must be a whole number from 0 to %d"):format(key, GAP_MAX)
+    end
+  end
+  return nil
+end
 
 ---The place of a placement request: where in which layout.
 ---@param op table
----@return table|nil where   { after?, before?, section?, first?, layout?, top? }
+---@return table|nil where   { after?, before?, section?, first?, nth?, layout?, top?, gap? }
 ---@return string|nil why
 local function placement(op)
   local n = (op.after and 1 or 0) + (op.before and 1 or 0) + (op.section and 1 or 0) + (op.top and 1 or 0)
   if n == 0 then
-    if op.layout ~= nil or op.first ~= nil then
-      return nil, "layout and first need a section"
+    if op.layout ~= nil or op.first ~= nil or op.nth ~= nil or op.gap ~= nil then
+      return nil, "layout, first, nth and gap need a place"
     end
     return nil, nil
   end
@@ -354,16 +390,24 @@ local function placement(op)
   if (op.section or op.top) and not op.layout then
     return nil, "section and top need the layout (its output path) that holds them"
   end
-  if (op.after or op.before or op.top) and (op.first ~= nil) then
-    return nil, "first goes with a section"
+  if (op.after or op.before or op.top) and (op.first ~= nil or op.nth ~= nil) then
+    return nil, "first and nth go with a section"
+  end
+  if op.gap ~= nil then
+    local why = gap_error(op.gap)
+    if why then
+      return nil, why
+    end
   end
   return {
     after = op.after,
     before = op.before,
     section = op.section,
     first = op.first,
+    nth = op.nth,
     layout = op.layout,
     top = op.top,
+    gap = op.gap,
   },
     nil
 end
@@ -378,8 +422,17 @@ local function placements(op)
     local where, why = placement(op)
     return where and { where } or {}, why
   end
-  if op.after or op.before or op.section or op.layout ~= nil or op.first ~= nil or op.top ~= nil then
-    return nil, "places goes alone, without after, before, section, layout, first or top"
+  if
+    op.after
+    or op.before
+    or op.section
+    or op.layout ~= nil
+    or op.first ~= nil
+    or op.top ~= nil
+    or op.nth ~= nil
+    or op.gap ~= nil
+  then
+    return nil, "places goes alone, without after, before, section, layout, first, nth, gap or top"
   end
   local outputs = vim.tbl_keys(op.places)
   table.sort(outputs)
@@ -390,8 +443,8 @@ local function placements(op)
       return nil, "every entry of places must be an object"
     end
     for key, value in pairs(one) do
-      if not (PLACE_FIELDS[key] and key ~= "layout" and type(value) == PLACE_FIELDS[key] and (key ~= "top" or value == true)) then
-        return nil, "an entry of places has after, before, section, first or top, not " .. tostring(key):sub(1, 40)
+      if not (PLACE_FIELDS[key] and key ~= "layout" and place_field_ok(key, value)) then
+        return nil, "an entry of places has after, before, section, first, nth, gap or top, not " .. tostring(key):sub(1, 40)
       end
     end
     local where, why = placement(vim.tbl_extend("force", one, { layout = output }))
@@ -476,23 +529,19 @@ local function place_all(ctx, tx, root, op, wheres)
   return json.object(op.places ~= nil and { layouts = json.array(outs) } or { layout = outs[1] }), nil
 end
 
----Where the token of `id` stands now, as a `place` that brings it back: `{ layout, after }`, `{ layout, before }` or
----`{ layout, section, first }` or `{ layout, top }` (above every heading, nothing above it); `nil` when the layout
----does not hold it.
+---Where the token of `id` stands now, as a `place` that brings it back byte for byte (`layout_edit.where`): `{ layout,
+---after }`, `{ layout, before }`, `{ layout, section, first?, nth? }` or `{ layout, top }`, with `gap` (the blank lines
+---around it) where `place` would not write them on its own; `nil` when the layout does not hold it.
 ---@param layout Rules.Layout
 ---@param id string
 ---@return table|nil
 local function old_place(layout, id)
-  local at = layout_edit.locate(layout.text, id)
-  if not at then
+  local where = layout_edit.where(layout.text, id)
+  if not where then
     return nil
   end
-  if at.prev then
-    return { layout = layout.output, after = at.prev }
-  elseif at.section then
-    return { layout = layout.output, section = at.section, first = true }
-  end
-  return { layout = layout.output, top = true }
+  where.layout = layout.output
+  return where
 end
 
 ---The rule file of an id and what is known of it.
@@ -1229,9 +1278,12 @@ local function do_move(op, ctx)
         id = op.id,
         layout = old.layout,
         after = old.after,
+        before = old.before,
         section = old.section,
         first = old.first,
+        nth = old.nth,
         top = old.top,
+        gap = old.gap and json.object(old.gap) or nil,
       })
     end
     return entry
