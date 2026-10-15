@@ -82,6 +82,29 @@ local function register_argtypes()
     end,
   })
 
+  -- the ids `:Rules renew` and `unwaive` can work on: the rules that have a waiver in the project (its waivers file)
+  argtypes.register("RULES_WAIVED_ID", {
+    desc = "Exact id of a rule with a waiver in the project, e.g. DEP-06",
+    validate = function(raw)
+      return true, raw, nil
+    end,
+    complete = function(arg_lead, _, cmd_line)
+      return argtypes.prefix(candidates.waived_ids(cmd_line), arg_lead)
+    end,
+  })
+
+  -- the `--project=` of a waiver verb: a folder, not checked here (the door says when it is none, or outside the working
+  -- directory) and not expanded (a `%` or a `$` in a folder name stays as typed)
+  argtypes.register("RULES_PROJECT_DIR", {
+    desc = "Folder of the project, inside the working directory",
+    validate = function(raw)
+      return true, raw, nil
+    end,
+    complete = function(arg_lead)
+      return candidates.project_dirs(arg_lead)
+    end,
+  })
+
   argtypes.register("RULES_LAYOUT", {
     desc = "Output path of a layout, e.g. regeln/DEP.md",
     validate = function(raw)
@@ -268,11 +291,11 @@ function M.setup()
       end,
     },
   }
-  -- new, set, retire, move, list: the thin layer over `rules-ops/1` (`rules.ui.routes`)
+  -- new, set, retire, reinstate, move, list, waive, renew, unwaive: the thin layer over `rules-ops/1` (`rules.ui.routes`)
   vim.list_extend(routes, require("rules.ui.routes").routes())
 
   composer.verb("Rules", {
-    desc = "rules.nvim: check rules against a repo, make, change, retire and move them",
+    desc = "rules.nvim: check rules against a repo, make, change, retire and move them, waive findings",
     routes = routes,
   })
 

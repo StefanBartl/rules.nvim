@@ -422,6 +422,10 @@ local function ask_then_run(ctx, op, spec)
   end)
 end
 
+-- shared with the handlers of the waivers (`rules.ui.waiver_cmd`): one way to run an operation and one way to ask first
+M.run = run
+M.ask_then_run = ask_then_run
+
 ---`:Rules retire <ID> [--by=<ID>] [reason=...] [--yes] [--dry]`
 ---@param ctx table
 function M.retire(ctx)

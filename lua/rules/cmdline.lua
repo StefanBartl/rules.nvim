@@ -26,6 +26,10 @@ M.SET_KEYS = { "severity", "title", "text", "check", "agent" }
 ---The keys `:Rules new` takes after the title.
 M.NEW_KEYS = { "severity", "text", "ruleset" }
 
+---The keys `:Rules waive` takes; `:Rules renew` takes `reason` and `expires`.
+M.WAIVE_KEYS = { "reason", "expires", "paths" }
+M.RENEW_KEYS = { "reason", "expires" }
+
 ---A word of the command line: the text as typed, and the blanks typed before it. A value that goes over several words
 ---is put together again from these, so a run of blanks or a backslash in it comes out as typed.
 ---@class Rules.Word
@@ -230,6 +234,33 @@ function M.patch(values)
     return nil, "nothing to set (expected key=value ...)"
   end
   return patch, nil
+end
+
+---The `paths` of a `waive` operation from the text of `paths=`: the places are separated by commas, a comma inside
+---braces belongs to a glob (`docs/**/*.{md,txt}` is one place), and the blanks around a comma are no part of a place (a
+---blank inside one is: `my dir/x.lua`). Nothing is checked: an empty place (`a,,b`), a backslash or an absolute path are
+---what the door answers. Nothing after the `=` is no places at all, which the door refuses (leave `paths=` out for every
+---path).
+---@param text string
+---@return string[] paths
+function M.paths(text)
+  local out, depth, start = {}, 0, 1
+  for i = 1, #text do
+    local ch = text:sub(i, i)
+    if ch == "{" then
+      depth = depth + 1
+    elseif ch == "}" then
+      depth = math.max(depth - 1, 0)
+    elseif ch == "," and depth == 0 then
+      out[#out + 1] = vim.trim(text:sub(start, i - 1))
+      start = i + 1
+    end
+  end
+  out[#out + 1] = vim.trim(text:sub(start))
+  if #out == 1 and out[1] == "" then
+    return {}
+  end
+  return out
 end
 
 ---`<layout>#<section>` (the `output` path of a layout and a heading text) or `<layout>` alone (the top of it) as the
