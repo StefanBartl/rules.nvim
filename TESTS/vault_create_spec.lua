@@ -319,6 +319,230 @@ describe(":RulesVault create", function()
       assert.is_true(told("unexpected argument: extra words", vim.log.levels.ERROR))
       assert.is_true(nothing_made())
     end)
+
+    describe("a folder word that ends with a path separator (Tab completion on Windows: sub\\)", function()
+      local saved_sep
+
+      before_each(function()
+        saved_sep = cmd.BACKSLASH_SEPARATOR
+        cmd.BACKSLASH_SEPARATOR = true
+        vim.fn.mkdir(base .. "/sub", "p")
+      end)
+
+      after_each(function()
+        cmd.BACKSLASH_SEPARATOR = saved_sep
+      end)
+
+      it("is the folder, and the blank after it starts the next word, when that folder is there", function()
+        run("RulesVault create " .. base .. "/sub\\ lua --yes")
+        assert.is_true(exists(base .. "/sub/rulesets/lua/_rules/.gitkeep"))
+        assert.is_true(exists(base .. "/sub/.rules.json"))
+        assert.is_false(exists(base .. "/sub lua"))
+      end)
+
+      it("takes a flag that the blank glued to the folder as a flag, and a blank at the end as nothing", function()
+        run("RulesVault create " .. base .. "/sub\\ --yes")
+        assert.is_true(exists(base .. "/sub/.rules.json"))
+        assert.is_false(exists(base .. "/sub --yes"))
+        notes = {}
+        vim.fn.mkdir(base .. "/sub2", "p")
+        run("RulesVault create " .. base .. "/sub2\\  --yes")
+        assert.is_true(exists(base .. "/sub2/.rules.json"))
+      end)
+
+      it("stays an escaped blank when the folder before it is not there: a folder with a blank in its name", function()
+        run("RulesVault create " .. base .. "/new\\ vault --yes")
+        assert.is_true(exists(base .. "/new vault/.rules.json"))
+        assert.is_true(exists(base .. "/new vault/rulesets/default/_rules/.gitkeep"))
+      end)
+
+      it("stays an escaped blank when the folder with the blank is there", function()
+        vim.fn.mkdir(base .. "/sub lua", "p")
+        run("RulesVault create " .. base .. "/sub\\ lua --yes")
+        assert.is_true(exists(base .. "/sub lua/.rules.json"))
+        assert.is_false(exists(base .. "/sub/.rules.json"))
+      end)
+
+      it("is the folder for an escaped blank before a normal character on a system where a backslash is no separator", function()
+        cmd.BACKSLASH_SEPARATOR = false
+        run("RulesVault create " .. base .. "/sub\\ lua --yes")
+        assert.is_true(exists(base .. "/sub lua/.rules.json"))
+        assert.is_false(exists(base .. "/sub/.rules.json"))
+      end)
+
+      it("reads the blank after an escaped one the same way: a folder with a blank, then the name", function()
+        vim.fn.mkdir(base .. "/my vault", "p")
+        run("RulesVault create " .. base .. "/my\\ vault\\ lua --yes")
+        assert.is_true(exists(base .. "/my vault/rulesets/lua/_rules/.gitkeep"))
+      end)
+    end)
+  end)
+
+  describe("into a vault that has rulesets already", function()
+    ---@return string[]
+    local function found_names()
+      vim.env.RULES_VAULT = root
+      settings.reset()
+      local folders = vault_api.rulesets({ project = tmp_dir() })
+      return vim.tbl_map(function(path)
+        return vim.fs.basename(path)
+      end, folders)
+    end
+
+    local function existing()
+      write_raw(root .. "/rulesets/lua/_rules/.gitkeep", "")
+      write_raw(root .. "/rulesets/native/_rules/.gitkeep", "")
+    end
+
+    it("makes no .rules.json that lists only the new ruleset: every ruleset is still found", function()
+      existing()
+      ui(true)
+      run("RulesVault create " .. in_command(root) .. " fresh")
+      local question = asked[1].question
+      assert.is_truthy(question:find(".rules.json is NOT made", 1, true))
+      assert.is_truthy(question:find("lua, native", 1, true))
+      assert.is_nil(question:find("+ .rules.json", 1, true))
+      assert.is_false(exists(root .. "/.rules.json"))
+      assert.is_true(exists(root .. "/rulesets/fresh/_rules/.gitkeep"))
+      assert.are.same({ "fresh", "lua", "native" }, found_names())
+      assert.is_true(told(".rules.json was not made"))
+    end)
+
+    it("still makes the .rules.json of a vault that has no other ruleset, with the new one in it", function()
+      write_raw(root .. "/rulesets/fresh/_rules/.gitkeep", "")
+      run("RulesVault create " .. in_command(root) .. " fresh --yes")
+      assert.are.same({ "rulesets/fresh" }, vim.json.decode(read_raw(root .. "/.rules.json")).rulesets)
+    end)
+
+    it("keeps a .rules.json that does not list the new ruleset, and says in the plan and the result what to add", function()
+      existing()
+      local text = '{"rulesets": ["rulesets/lua", "rulesets/native"], "gates": {}}\n'
+      write_raw(root .. "/.rules.json", text)
+      ui(true)
+      run("RulesVault create " .. in_command(root) .. " fresh")
+      assert.are.equal(text, read_raw(root .. "/.rules.json"))
+      local question = asked[1].question
+      assert.is_truthy(question:find("does not list rulesets/fresh", 1, true))
+      assert.is_truthy(question:find('add "rulesets/fresh"', 1, true))
+      assert.is_true(told("does not list rulesets/fresh", vim.log.levels.WARN))
+      assert.is_true(told('add "rulesets/fresh" to the "rulesets" list'))
+      -- and that is the truth: the list hides the new ruleset
+      assert.are.same({ "lua", "native" }, found_names())
+    end)
+
+    it("says nothing of it when the list names the new ruleset, in whatever spelling, or has no list", function()
+      for _, text in ipairs({
+        '{"rulesets": ["./rulesets/fresh/", "rulesets/lua"]}',
+        '{"rulesets": ["@vault/fresh"]}',
+        '{"gates": {}}',
+      }) do
+        local r = tmp_dir() .. "/vault"
+        write_raw(r .. "/rulesets/lua/_rules/.gitkeep", "")
+        write_raw(r .. "/.rules.json", text)
+        notes = {}
+        run("RulesVault create " .. in_command(r) .. " fresh --yes")
+        assert.is_false(told("does not list"), text)
+        assert.is_false(told("could not be read"), text)
+        assert.are.equal(text, read_raw(r .. "/.rules.json"))
+      end
+    end)
+
+    it("keeps a .rules.json that cannot be read, and says to check it", function()
+      existing()
+      write_raw(root .. "/.rules.json", "{ not json")
+      run("RulesVault create " .. in_command(root) .. " fresh --yes")
+      assert.are.equal("{ not json", read_raw(root .. "/.rules.json"))
+      assert.is_true(told("could not be read", vim.log.levels.WARN))
+      assert.is_true(told("rulesets/fresh"))
+    end)
+  end)
+
+  describe("writes nowhere but below the folder", function()
+    ---A folder link (a junction on Windows, which needs no privilege), or nil when none can be made here.
+    ---@param target string
+    ---@param at string
+    ---@return boolean
+    local function link(target, at)
+      vim.fn.mkdir(vim.fs.dirname(at), "p")
+      local ok = (vim.uv or vim.loop).fs_symlink(target, at, { dir = true, junction = true })
+      return ok == true
+    end
+
+    ---@return string[]
+    local function entries(dir)
+      return vim.fn.readdir(dir)
+    end
+
+    for _, where in ipairs({ ".github", ".github/workflows", "rulesets", "rulesets/default", "rulesets/default/_rules" }) do
+      it(("refuses a link at '%s' that leads out, and writes nothing at all"):format(where), function()
+        local outside = tmp_dir() .. "/outside"
+        vim.fn.mkdir(outside, "p")
+        if not link(outside, root .. "/" .. where) then
+          pending("no folder link can be made here")
+          return
+        end
+        run("RulesVault create " .. in_command(root) .. " --yes")
+        assert.is_true(told("leads out of the vault folder", vim.log.levels.ERROR))
+        assert.is_true(told(where))
+        assert.are.same({}, entries(outside))
+        assert.is_false(exists(root .. "/README.md"))
+        assert.is_false(exists(root .. "/.rules.json"))
+        assert.is_false(told("ONE STEP IS LEFT"))
+      end)
+    end
+
+    it("refuses it in the plan, before the question is asked", function()
+      local outside = tmp_dir() .. "/outside"
+      vim.fn.mkdir(outside, "p")
+      if not link(outside, root .. "/rulesets") then
+        pending("no folder link can be made here")
+        return
+      end
+      ui(true)
+      run("RulesVault create " .. in_command(root))
+      assert.are.same({}, asked)
+      assert.is_true(told("leads out of the vault folder", vim.log.levels.ERROR))
+    end)
+
+    it("refuses a link that leads nowhere", function()
+      local gone = tmp_dir() .. "/gone"
+      vim.fn.mkdir(gone, "p")
+      if not link(gone, root .. "/rulesets") then
+        pending("no folder link can be made here")
+        return
+      end
+      vim.fn.delete(gone, "d")
+      run("RulesVault create " .. in_command(root) .. " --yes")
+      assert.is_true(told("rulesets", vim.log.levels.ERROR))
+      assert.is_false(exists(root .. "/README.md"))
+    end)
+
+    it("takes a link that stays inside the folder", function()
+      vim.fn.mkdir(root .. "/store", "p")
+      if not link(root .. "/store", root .. "/rulesets") then
+        pending("no folder link can be made here")
+        return
+      end
+      run("RulesVault create " .. in_command(root) .. " --yes")
+      assert.is_false(told("leads out"))
+      assert.is_true(exists(root .. "/store/default/_rules/.gitkeep"))
+    end)
+
+    it("is checked again at the write: a link that appears after the plan", function()
+      local outside = tmp_dir() .. "/outside"
+      vim.fn.mkdir(outside, "p")
+      vim.fn.mkdir(root, "p")
+      local plan = assert(scaffold.plan({ root = root, name = "default" }))
+      if not link(outside, root .. "/.github") then
+        pending("no folder link can be made here")
+        return
+      end
+      local res, err = scaffold.create(plan)
+      assert.is_nil(res)
+      assert.is_truthy(err:find("leads out of the vault folder", 1, true))
+      assert.are.same({}, entries(outside))
+      assert.is_false(exists(root .. "/README.md"))
+    end)
   end)
 
   describe("after it is made", function()
@@ -542,6 +766,67 @@ describe(":RulesVault create", function()
       scaffold.template_path = base .. "/no-such-template.yml"
       run("RulesVault create " .. in_command(root) .. " --yes")
       assert.is_true(told("the workflow template is missing", vim.log.levels.ERROR))
+      assert.is_true(nothing_made())
+    end)
+
+    it("a file where a folder is needed, at any component, and makes no half scaffold", function()
+      ui(true)
+      for _, where in ipairs({ ".github", ".github/workflows", "rulesets", "rulesets/default", "rulesets/default/_rules" }) do
+        local r = tmp_dir() .. "/vault"
+        write_raw(r .. "/" .. where, "i am a file")
+        notes, asked = {}, {}
+        run("RulesVault create " .. in_command(r))
+        assert.is_true(told("is a file, not a folder", vim.log.levels.ERROR), where)
+        assert.is_true(told(where), where)
+        assert.are.same({}, asked, where)
+        assert.is_false(exists(r .. "/README.md"), where)
+        assert.is_false(exists(r .. "/.rules.json"), where)
+        assert.is_false(exists(r .. "/.gitignore"), where)
+        run("RulesVault create " .. in_command(r) .. " --yes")
+        assert.is_false(exists(r .. "/README.md"), where)
+        assert.are.equal("i am a file", read_raw(r .. "/" .. where), where)
+      end
+    end)
+
+    it("a folder below a file", function()
+      write_raw(base .. "/a-file", "x")
+      run("RulesVault create " .. in_command(base .. "/a-file/inner/vault") .. " --yes")
+      assert.is_true(told("is a file, not a folder", vim.log.levels.ERROR))
+      assert.is_false(exists(base .. "/a-file/inner"))
+    end)
+
+    it("a name too long for a file system, in the ruleset name and in the folder", function()
+      ui(true)
+      local long = ("a"):rep(300)
+      run("RulesVault create " .. in_command(root) .. " " .. long)
+      assert.is_true(told("is too long", vim.log.levels.ERROR))
+      assert.are.same({}, asked)
+      assert.is_true(nothing_made())
+
+      notes = {}
+      run("RulesVault create " .. in_command(base .. "/" .. long) .. " --yes")
+      assert.is_true(told("is too long", vim.log.levels.ERROR))
+      assert.is_false(exists(base .. "/" .. long))
+      assert.is_false(told("ONE STEP IS LEFT"))
+
+      -- the limit is 255 bytes a name: 255 fit, 256 do not (only the plan is made here, no path limit)
+      local saved_limit = scaffold.PATH_LIMIT
+      scaffold.PATH_LIMIT = nil
+      local fits = scaffold.plan({ root = root, name = ("a"):rep(255) })
+      local over, err = scaffold.plan({ root = root, name = ("a"):rep(256) })
+      scaffold.PATH_LIMIT = saved_limit
+      assert.is_truthy(fits)
+      assert.is_nil(over)
+      assert.is_truthy(err:find("256 bytes", 1, true))
+    end)
+
+    it("a path longer than the system takes", function()
+      local saved_limit = scaffold.PATH_LIMIT
+      scaffold.PATH_LIMIT = #root + 20
+      local ok, err = pcall(run, "RulesVault create " .. in_command(root) .. " --yes")
+      scaffold.PATH_LIMIT = saved_limit
+      assert(ok, err)
+      assert.is_true(told("path is too long", vim.log.levels.ERROR))
       assert.is_true(nothing_made())
     end)
   end)

@@ -429,6 +429,83 @@ local function typed_path(word)
   return (word:gsub("\\ ", " "))
 end
 
+---Whether a backslash is a path separator here (Windows). The specs set it to test both readings.
+---@type boolean
+M.BACKSLASH_SEPARATOR = vim.fn.has("win32") == 1
+
+---Whether a typed folder word names a folder that is there.
+---@param typed string
+---@return boolean
+local function is_folder(typed)
+  if vim.trim(typed) == "" then
+    return false
+  end
+  local ok, expanded = pcall(require("lib.nvim.cross.fs.expand_path"), vim.trim(typed))
+  local stat = ok and (vim.uv or vim.loop).fs_stat(expanded) or nil
+  return stat ~= nil and stat.type == "directory"
+end
+
+---Where the last `\ ` (a backslash before a blank, as the command line writes a blank in a word) starts in a word as
+---typed, or nil. A pair of backslashes is no escape: `\\ ` is a backslash and then a blank between two words.
+---@param text string
+---@return integer|nil
+local function last_escaped_blank(text)
+  local at, i = nil, 1
+  while i <= #text do
+    if text:sub(i, i) == "\\" and text:sub(i + 1, i + 1) ~= "" then
+      if text:sub(i + 1, i + 1) == " " then
+        at = i
+      end
+      i = i + 2
+    else
+      i = i + 1
+    end
+  end
+  return at
+end
+
+---Tab completion of a folder on Windows ends the word with the separator (`sub\`), and the blank typed after it for the next
+---word (`create sub\ lua`) reads as an escaped blank: one folder, `sub lua`. A backslash is a separator there and the
+---folder before it is there while the folder with the blank is not: that is the separator, and `lua` is the next word. In
+---every other case the line is read as typed: `\ ` is a blank in the name (`my\ vault`), also where both folders are there,
+---and on a system where a backslash is no separator.
+---What follows the blank is a word of its own, or nothing (`create sub\ ` and then the end), or a flag that the blank
+---glued to the folder (`create sub\ --yes`): that one is returned as a flag.
+---@param words Rules.Word[]
+---@param flags table  the flags of the line
+---@return Rules.Word[] words
+---@return table flags
+local function split_folder_word(words, flags)
+  local first = words[1]
+  if not (M.BACKSLASH_SEPARATOR and first) then
+    return words, flags
+  end
+  local at = last_escaped_blank(first.text)
+  if not at then
+    return words, flags
+  end
+  local folder = first.text:sub(1, at - 1)
+  if folder:match("^%a:$") or is_folder(typed_path(first.text)) or not is_folder(typed_path(folder)) then
+    return words, flags
+  end
+  local out = { { text = folder, sep = first.sep } }
+  local rest = first.text:sub(at + 2)
+  local flag = rest:match("^%-%-(%a+)$")
+  local known = false
+  for _, spec in ipairs(require("rules.ui.vault_routes").FLAGS.create) do
+    known = known or (spec.bool and spec.name == flag)
+  end
+  if known then
+    flags = vim.tbl_extend("force", flags, { [flag] = true })
+  elseif rest ~= "" then
+    out[#out + 1] = { text = rest, sep = " " }
+  end
+  for i = 2, #words do
+    out[#out + 1] = words[i]
+  end
+  return out, flags
+end
+
 ---`:RulesVault create [<dir>] [<name>] [--git] [--yes] [--force]`
 ---
 ---Says first what will happen and what is left to the user (confirmation; `--yes` skips it), makes the folder and the
@@ -442,6 +519,8 @@ function M.create(ctx)
     notify.error(tostring(werr))
     return
   end
+  local flags
+  words, flags = split_folder_word(words, ctx.flags or {})
   if #words > 2 then
     local extra = {}
     for i = 3, #words do
@@ -450,7 +529,6 @@ function M.create(ctx)
     notify.error("unexpected argument: " .. table.concat(extra, " "))
     return
   end
-  local flags = ctx.flags or {}
   local dir = words[1] and typed_path(words[1].text) or (ctx.args and ctx.args.dir)
   local name = words[2] and words[2].text or (ctx.args and ctx.args.name)
 

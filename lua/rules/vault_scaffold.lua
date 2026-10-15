@@ -16,6 +16,15 @@
 --- (it is reported as kept). `git init` happens only when asked for, and nothing here ever adds a remote, pushes, or
 --- reaches GitHub.
 ---
+--- A ruleset made in a vault that has rulesets already must not hide them: `.rules.json` lists rulesets, and a vault
+--- without that file offers every folder under `rulesets/`. So the file is made only when the new ruleset is the only one;
+--- with others around none is made (they are all found without it), and a `.rules.json` that is there and does not list
+--- the new ruleset stays as it is, with the plan and the result saying what to add.
+---
+--- Nothing is written before the whole layout is checked: a file where a folder is needed, a name or a path too long
+--- for the file system, and a link (symlink, junction) on the way that leads out of the vault folder each stop the
+--- command before the first file is made. Not even the folder.
+---
 --- Not its job: the question, notifications and the clipboard (`rules.ui.vault_cmd`).
 
 local M = {}
@@ -76,6 +85,14 @@ local GITATTRIBUTES = "* text=auto eol=lf\n"
 ---The names Windows keeps for devices: a folder of that name cannot be used there, with or without an extension.
 local DEVICE_NAMES = { CON = true, PRN = true, AUX = true, NUL = true }
 
+---The longest name a file system takes for one file or folder, in bytes.
+M.NAME_LIMIT = 255
+
+---The longest path, in bytes, that is made here. Windows: the 260 of `MAX_PATH` less the terminating byte (a program without
+---the long path manifest, and Neovim is one, cannot open more even when the system allows long paths). `nil`: no limit.
+---@type integer|nil
+M.PATH_LIMIT = vim.fn.has("win32") == 1 and 259 or (vim.fn.has("mac") == 1 and 1023 or 4095)
+
 ---Whether `name` may be the folder of a ruleset: letters, digits, `.`, `_` and `-`; it starts with a letter or digit,
 ---does not end with a dot, and is no Windows device name.
 ---@param name any
@@ -109,6 +126,112 @@ end
 local function is_empty_dir(dir)
   local handle = (vim.uv or vim.loop).fs_scandir(dir)
   return handle == nil or (vim.uv or vim.loop).fs_scandir_next(handle) == nil
+end
+
+---Whether `path` lies in `dir` (both real paths; the case counts only where the file system ignores it).
+---@param path string
+---@param dir string
+---@return boolean
+local function contained(path, dir)
+  local fold = require("rules.vault_ops").fold
+  local a = fold((vim.fs.normalize(path):gsub("(.)/+$", "%1")))
+  local b = fold((vim.fs.normalize(dir):gsub("(.)/+$", "%1")))
+  return a == b or a:sub(1, #b + 1) == b .. "/"
+end
+
+---The beginning of a long name, for a message.
+---@param name string
+---@return string
+local function shorten(name)
+  return #name > 40 and (name:sub(1, 40) .. "...") or name
+end
+
+---A name of a file or folder that the file system would refuse for its length.
+---@param path string  `/`-separated
+---@return string|nil err
+local function long_name(path)
+  for _, part in ipairs(vim.split(path, "/", { plain = true })) do
+    if #part > M.NAME_LIMIT then
+      return ("a name is too long: %d bytes, a file name holds %d (%s)"):format(#part, M.NAME_LIMIT, shorten(part))
+    end
+  end
+  return nil
+end
+
+---Check the layout of everything `create` would write, reading the disk and writing nothing. Returns the first thing that
+---stands in the way, as a sentence naming it:
+---  - a name of more than `NAME_LIMIT` bytes, a path of more than `PATH_LIMIT`
+---  - a file where a folder is needed (any folder on the way, also above the vault folder)
+---  - a link on the way (symlink or junction) that leads out of the vault folder, or leads nowhere
+---@param root string
+---@param rels string[]  the files to make, relative to the vault folder
+---@return string|nil err
+function M.check_layout(root, rels)
+  local uv = vim.uv or vim.loop
+  local limit = M.PATH_LIMIT
+  local err = long_name(root)
+  for _, rel in ipairs(rels) do
+    err = err or long_name(rel)
+  end
+  if err then
+    return err
+  end
+  if limit then
+    for _, rel in ipairs(rels) do
+      local length = #root + 1 + #rel
+      if length > limit then
+        return ("a path is too long: %d bytes (%s), this system takes %d"):format(length, shorten(rel), limit)
+      end
+    end
+  end
+  -- above the vault folder: the nearest folder that is there must be a folder
+  local probe = root
+  while not lstat(probe) do
+    local parent = vim.fs.dirname(probe)
+    if parent == probe or parent == "" or parent == "." then
+      return nil
+    end
+    probe = parent
+  end
+  local top = uv.fs_stat(probe)
+  if not top or top.type ~= "directory" then
+    return ("%s is a file, not a folder: the vault cannot be made below it"):format(probe)
+  end
+  if probe ~= root then
+    return nil
+  end
+  local root_real = uv.fs_realpath(root)
+  if not root_real then
+    return ("%s cannot be resolved"):format(root)
+  end
+  local seen = {}
+  for _, rel in ipairs(rels) do
+    local parts = vim.split(rel, "/", { plain = true })
+    local acc = {}
+    for i = 1, #parts - 1 do
+      acc[#acc + 1] = parts[i]
+      local sub = table.concat(acc, "/")
+      if not seen[sub] then
+        seen[sub] = true
+        local path = root .. "/" .. sub
+        if not lstat(path) then
+          break
+        end
+        local real = uv.fs_realpath(path)
+        if not real then
+          return ("%s is a link that leads nowhere: nothing is written"):format(sub)
+        end
+        if not contained(real, root_real) then
+          return ("%s leads out of the vault folder (to %s): nothing is written through a link"):format(sub, real)
+        end
+        local stat = uv.fs_stat(path)
+        if not stat or stat.type ~= "directory" then
+          return ("%s is a file, not a folder: %s cannot be made below it"):format(sub, rel)
+        end
+      end
+    end
+  end
+  return nil
 end
 
 ---The folder and ruleset name of `create`, checked before anything is asked or made.
@@ -171,6 +294,64 @@ M.template_path = nil
 ---@field items Rules.Vault.PlanItem[]
 ---@field git "no"|"init"|"already"|"inside"  `no`: not asked for; `already`: it is a repository; `inside`: in another one
 ---@field git_top string|nil
+---@field rules_json Rules.Vault.RulesJson
+
+---What happens to the `.rules.json`.
+---@class Rules.Vault.RulesJson
+---@field mode "make"|"kept"|"omitted"  `omitted`: the vault has rulesets already, a file listing one would hide them
+---@field listing "listed"|"unlisted"|"unreadable"|nil  for `kept`: whether the file offers the new ruleset
+---@field others string[]  for `omitted`: the rulesets that are there
+
+---The rulesets under `rulesets/` other than `name` (what a `.rules.json` listing only `name` would hide).
+---@param root string
+---@param name string
+---@return string[]
+local function other_rulesets(root, name)
+  local fold = require("rules.vault_ops").fold
+  local out = {}
+  for _, folder in ipairs((require("rules.settings").discover_rulesets(root))) do
+    local base = vim.fs.basename(folder)
+    if fold(base) ~= fold(name) then
+      out[#out + 1] = base
+    end
+  end
+  return out
+end
+
+---Whether the `.rules.json` that is there offers the ruleset `name`: it lists it (in any spelling of the path or as
+---`@vault/<name>`), or it has no list at all, so every folder under `rulesets/` is found.
+---@param root string
+---@param name string
+---@return "listed"|"unlisted"|"unreadable"
+local function listing(root, name)
+  local text = require("lib.nvim.fs.read")(root .. "/.rules.json")
+  if not text then
+    return "unreadable"
+  end
+  local ok, decoded = pcall(vim.json.decode, text)
+  if not ok or type(decoded) ~= "table" then
+    return "unreadable"
+  end
+  local list = decoded.rulesets
+  if list == nil or list == vim.NIL then
+    return "listed"
+  end
+  if type(list) ~= "table" then
+    return "unreadable"
+  end
+  local fold = require("rules.vault_ops").fold
+  local want = fold(vim.fs.normalize(root .. "/rulesets/" .. name))
+  for _, entry in ipairs(list) do
+    if type(entry) == "string" then
+      local absolute = entry:match("^/") or entry:match("^%a:")
+      local path = vim.fs.normalize(absolute and entry or (root .. "/" .. entry))
+      if entry == "@vault/" .. name or fold(path) == want then
+        return "listed"
+      end
+    end
+  end
+  return "unlisted"
+end
 
 ---What `--git` would do in a folder: `init`, `already` (the folder is a repository of its own), or `inside` (it lies in
 ---another repository, which `git init` must not nest a second one in). A folder that is not there yet is judged by the
@@ -223,6 +404,26 @@ function M.plan(target, opts)
     { rel = ("rulesets/%s/_rules/.gitkeep"):format(name), kind = "keep", content = "" },
     { rel = ("rulesets/%s/_layouts/.gitkeep"):format(name), kind = "keep", content = "" },
   }
+  ---@type Rules.Vault.RulesJson
+  local rules = { mode = "make", others = {} }
+  if lstat(root .. "/.rules.json") then
+    rules.mode, rules.listing = "kept", listing(root, name)
+  else
+    rules.others = other_rulesets(root, name)
+    if #rules.others > 0 then
+      -- a file that listed only the new ruleset would hide these from `:RulesVault` and the check
+      rules.mode = "omitted"
+      table.remove(items, 2)
+    end
+  end
+  local rels = {}
+  for _, item in ipairs(items) do
+    rels[#rels + 1] = item.rel
+  end
+  local layout_err = M.check_layout(root, rels)
+  if layout_err then
+    return nil, layout_err
+  end
   for _, item in ipairs(items) do
     local path = root .. "/" .. item.rel
     if lstat(path) then
@@ -235,7 +436,7 @@ function M.plan(target, opts)
       item.state = "make"
     end
   end
-  local plan = { root = root, name = name, existed = lstat(root) ~= nil, items = items, git = "no" }
+  local plan = { root = root, name = name, existed = lstat(root) ~= nil, items = items, git = "no", rules_json = rules }
   if opts and opts.git then
     plan.git, plan.git_top = M.git_plan(root)
   end
@@ -253,6 +454,35 @@ local function rels(plan, state)
     end
   end
   return out
+end
+
+---What the plan says about the `.rules.json`, when it is more than "made" or "kept": the file that is not made because
+---the vault has rulesets already, and the file that stays and does not offer the new ruleset.
+---@param plan Rules.Vault.Plan
+---@param done? boolean  the files are made: past tense (the plan says what is going to happen)
+---@return string[]
+function M.rules_json_notes(plan, done)
+  local rules = plan.rules_json
+  if rules.mode == "omitted" then
+    return {
+      (
+        ".rules.json %s: the vault has rulesets already (%s), so every folder under rulesets/ is found"
+        .. " without it, the new one included"
+      ):format(done and "was not made" or "is NOT made", table.concat(rules.others, ", ")),
+    }
+  elseif rules.mode == "kept" and rules.listing == "unlisted" then
+    return {
+      (
+        '!! .rules.json stays as it is and does not list rulesets/%s: add "rulesets/%s" to the "rulesets" list in it,'
+        .. " or rules.nvim will not find the new ruleset"
+      ):format(plan.name, plan.name),
+    }
+  elseif rules.mode == "kept" and rules.listing == "unreadable" then
+    return {
+      ("!! .rules.json stays as it is and could not be read: check that it lists rulesets/%s"):format(plan.name),
+    }
+  end
+  return {}
 end
 
 ---What `create` is about to do and what is left to the user, in the order it happens. The last step is the one that is
@@ -277,6 +507,9 @@ function M.plan_text(plan)
   end
   for _, rel in ipairs(kept) do
     lines[#lines + 1] = "       = " .. rel .. "   (there already, stays as it is)"
+  end
+  for _, note in ipairs(M.rules_json_notes(plan)) do
+    lines[#lines + 1] = "       " .. note
   end
   if plan.git == "init" then
     lines[#lines + 1] = "  3. git init in the folder (--git). No remote is added, nothing is pushed or published."
@@ -303,6 +536,7 @@ end
 ---@field existed boolean
 ---@field made string[]   the paths made, relative to the vault
 ---@field kept string[]   the paths that were there and stay
+---@field notes string[]  what is left to look at in the `.rules.json` (see `rules_json_notes`)
 ---@field git string      what happened to git: a sentence
 
 ---Make what the plan lists, file by file, each only if it is still missing at the moment it is made (an exclusive create:
@@ -316,6 +550,15 @@ function M.create(plan)
   local mkdirp = require("lib.nvim.fs.mkdirp")
   local made, kept = {}, {}
   local existed = plan.existed
+  -- the plan was made some time ago: a link or a file that came since must not be written through or over
+  local files = {}
+  for _, item in ipairs(plan.items) do
+    files[#files + 1] = item.rel
+  end
+  local layout_err = M.check_layout(plan.root, files)
+  if layout_err then
+    return nil, layout_err
+  end
   if not existed then
     local ok, err = mkdirp(plan.root)
     if not ok then
@@ -342,7 +585,14 @@ function M.create(plan)
     end
   end
   ---@type Rules.Vault.Created
-  local result = { root = plan.root, existed = existed, made = made, kept = kept, git = "not asked for (--git)" }
+  local result = {
+    root = plan.root,
+    existed = existed,
+    made = made,
+    kept = kept,
+    notes = M.rules_json_notes(plan, true),
+    git = "not asked for (--git)",
+  }
   if plan.git == "init" then
     local git = require("lib.nvim.git").run({ "init" }, { dir = plan.root, timeout_ms = 15000 })
     if git.code == 0 then
@@ -370,6 +620,7 @@ function M.created_message(res, copied)
   if #res.kept > 0 then
     lines[#lines + 1] = "kept as they were: " .. table.concat(res.kept, ", ")
   end
+  vim.list_extend(lines, res.notes or {})
   vim.list_extend(lines, {
     "git: " .. res.git,
     "",

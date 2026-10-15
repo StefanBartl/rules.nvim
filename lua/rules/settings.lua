@@ -316,6 +316,11 @@ local function discover(root)
   return out, true
 end
 
+---The folders `discover` finds, for a caller that must see the same rulesets (`rules.vault_scaffold` asks what a new
+---ruleset would join).
+---@type fun(root: string): string[], boolean
+M.discover_rulesets = discover
+
 ---The name after `@vault/`, when it is one that cannot leave `<vault>/rulesets/`.
 ---@param name string
 ---@return boolean
