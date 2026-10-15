@@ -70,8 +70,11 @@ longer than 100 bytes, the family has no id left and the item has no `next`.
 
 `snapshot.retired` lists the rules that were retired (`id`, `family`,
 `source`, and `replaced_by`, `retired` (the date) and `reason` when given). They
-are files under `<ruleset>/_retired/<FAMILY>/<ID>.md`: the loader does not read
-that folder, so a retired rule is never run and never in a gate.
+are files under `<ruleset>/_retired/<FAMILY>/<ID>.md`: the loader does not run
+that folder, so a retired rule is never run and never in a gate. It does read the
+ids there: a live rule with the id of a retired one is a `duplicate rule id` entry
+of `load_errors`, and `next_id` counts the same files (the id of the file name, and
+that of the frontmatter when it is another one).
 
 ### `load_errors`
 

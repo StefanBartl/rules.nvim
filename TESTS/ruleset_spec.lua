@@ -195,6 +195,160 @@ describe("scripts/ruleset.lua @spawn", function()
       assert.are.equal(2, result.code)
       assert.matches("no ruleset folder is configured", result.stderr, 1, true)
     end)
+
+    describe("the ids of the retired rules", function()
+      ---@param root string
+      ---@param file string  below the ruleset
+      ---@param id string
+      local function put(root, file, id)
+        write(
+          root .. "/" .. file,
+          doc({ "---", "id: " .. id, "severity: critical", "family: AAA", "---", "", "#### `" .. id .. "`", "", "Text." })
+        )
+      end
+
+      ---No path of this machine in what the check prints: it goes into a CI log and a document that is committed.
+      ---@param out string
+      ---@param vault string
+      local function assert_portable(out, vault)
+        for _, path in ipairs({ vault, vim.uv.fs_realpath(vault) or vault, vim.fn.fnamemodify(vault, ":p") }) do
+          assert.is_nil(out:find(vim.fs.normalize(path), 1, true), out)
+        end
+      end
+
+      it("a live rule next to a retired one with its id fails the check, in one ruleset", function()
+        -- two machines: one made AAA-05 and retired it, the other (no pull in between) made it again; git merged it
+        local vault = tmp_dir()
+        local root = vault .. "/rulesets/one"
+        put(root, "_rules/AAA/AAA-05.md", "AAA-05")
+        put(root, "_retired/AAA/AAA-05.md", "AAA-05")
+        local result = run("check", "--vault=" .. vault)
+        assert.are.equal(1, result.code, result.stdout .. result.stderr)
+        assert.matches(
+          "duplicate rule id AAA-05: one/_rules/AAA/AAA-05.md:7 and one/_retired/AAA/AAA-05.md",
+          result.stdout,
+          1,
+          true
+        )
+        assert.matches("FAILED: 1 load error(s)", result.stdout, 1, true)
+        assert.matches("1 rule(s) in 1 file(s)", result.stdout, 1, true)
+        assert_portable(result.stdout, vault)
+      end)
+
+      it("and across the rulesets of the vault, which neither shows alone", function()
+        local vault = tmp_dir()
+        put(vault .. "/rulesets/one", "_rules/AAA/AAA-05.md", "AAA-05")
+        put(vault .. "/rulesets/other", "_retired/AAA/AAA-05.md", "AAA-05")
+        assert.are.equal(0, run("check", "--vault=" .. vault, vault .. "/rulesets/one").code)
+        assert.are.equal(0, run("check", "--vault=" .. vault, vault .. "/rulesets/other").code)
+        local result = run("check", "--vault=" .. vault)
+        assert.are.equal(1, result.code, result.stdout .. result.stderr)
+        assert.matches(
+          "duplicate rule id AAA-05: one/_rules/AAA/AAA-05.md:7 and other/_retired/AAA/AAA-05.md",
+          result.stdout,
+          1,
+          true
+        )
+        assert_portable(result.stdout, vault)
+      end)
+
+      it("a retired rule on its own passes, and so does the next id after it", function()
+        local vault = tmp_dir()
+        put(vault .. "/rulesets/one", "_rules/AAA/AAA-06.md", "AAA-06")
+        put(vault .. "/rulesets/one", "_retired/AAA/AAA-05.md", "AAA-05")
+        local result = run("check", "--vault=" .. vault)
+        assert.are.equal(0, result.code, result.stdout .. result.stderr)
+      end)
+
+      it("a retired file that does not read fails the check", function()
+        local vault = tmp_dir()
+        put(vault .. "/rulesets/one", "_rules/AAA/AAA-06.md", "AAA-06")
+        write(vault .. "/rulesets/one/_retired/AAA/AAA-05.md", "")
+        local result = run("check", "--vault=" .. vault)
+        assert.are.equal(1, result.code, result.stdout .. result.stderr)
+        assert.matches("one/_retired/AAA/AAA-05.md: a retired rule needs a frontmatter", result.stdout, 1, true)
+        assert_portable(result.stdout, vault)
+      end)
+    end)
+
+    describe("a file under _rules/ that yields no rule", function()
+      ---@return string vault
+      local function vault_with(name, text)
+        local vault = tmp_dir()
+        rule(vault .. "/rulesets/one", "DEP-01")
+        write(vault .. "/rulesets/one/_rules/" .. name, text)
+        return vault
+      end
+
+      for label, text in pairs({
+        ["an empty file"] = "",
+        ["a file without a frontmatter"] = "#### `DEP-02`\n\nText.\n",
+        ["a file that starts with merge-conflict markers"] = "<<<<<<< HEAD\n---\nid: DEP-02\n=======\n>>>>>>> x\n",
+        ["a frontmatter without an id"] = "---\nfamily: DEP\n---\n\n#### `DEP-02`\n",
+      }) do
+        it(label .. " fails the check and the catalog check, and is named", function()
+          local vault = vault_with("DEP/DEP-02.md", text)
+          local result = run("check", "--vault=" .. vault)
+          assert.are.equal(1, result.code, result.stdout .. result.stderr)
+          assert.matches("one/_rules/DEP/DEP-02.md", result.stdout, 1, true)
+          assert.matches("FAILED: 1 load error(s)", result.stdout, 1, true)
+          local catalog = run("catalog", "--check", vault .. "/rulesets/one")
+          assert.are.equal(1, catalog.code, catalog.stdout .. catalog.stderr)
+          assert.matches("DEP-02.md", catalog.stdout, 1, true)
+        end)
+      end
+
+      it("is no fault for the files that are no rule files: .gitkeep and README.md", function()
+        local vault = vault_with("DEP/.gitkeep", "")
+        write(vault .. "/rulesets/one/_rules/README.md", "# the rules\n")
+        local result = run("check", "--vault=" .. vault)
+        assert.are.equal(0, result.code, result.stdout .. result.stderr)
+      end)
+    end)
+  end)
+
+  describe("roundtrip", function()
+    local roundtrip =
+      assert(vim.api.nvim_get_runtime_file("scripts/roundtrip.lua", false)[1], "scripts/roundtrip.lua is not on the runtimepath")
+
+    ---@param ... string
+    ---@return { code: integer, stdout: string, stderr: string }
+    local function round(...)
+      local cmd = { vim.v.progpath, "--headless", "-u", "NONE", "-i", "NONE", "-n", "-l", roundtrip, ... }
+      local done = vim.system(cmd, { text = true, env = { LIB_NVIM_DIR = lib_dir } }):wait(60000)
+      -- `print` of a headless nvim goes to stderr
+      return { code = done.code, stdout = (done.stdout or "") .. (done.stderr or ""), stderr = "" }
+    end
+
+    it("is green for a ruleset in order", function()
+      local result = round(ruleset())
+      assert.are.equal(0, result.code, result.stdout .. result.stderr)
+      assert.matches("rule files: 1, refused: 0, failed: 0", result.stdout, 1, true)
+    end)
+
+    for label, text in pairs({
+      ["an empty file"] = "",
+      ["a file without a frontmatter"] = "#### `DEP-02`\n\nText.\n",
+      ["a file that starts with merge-conflict markers"] = "<<<<<<< HEAD\n=======\n>>>>>>> x\n",
+    }) do
+      it("fails for " .. label .. " under _rules/, and names the file", function()
+        local root = ruleset()
+        write(root .. "/_rules/DEP/DEP-02.md", text)
+        local result = round(root)
+        assert.are.equal(1, result.code, result.stdout .. result.stderr)
+        assert.matches("FAILED: load error: ", result.stdout, 1, true)
+        assert.matches("DEP-02.md", result.stdout, 1, true)
+        assert.matches("failed: 1", result.stdout, 1, true)
+      end)
+    end
+
+    it("fails for a live rule next to a retired one with its id", function()
+      local root = ruleset()
+      write(root .. "/_retired/DEP/DEP-01.md", read(root .. "/_rules/DEP/DEP-01.md"))
+      local result = round(root)
+      assert.are.equal(1, result.code, result.stdout .. result.stderr)
+      assert.matches("duplicate rule id DEP-01", result.stdout, 1, true)
+    end)
   end)
 
   it("takes the folder flags of migrate with a value", function()

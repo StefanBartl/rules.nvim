@@ -238,6 +238,36 @@ describe("rules.api", function()
     assert.are.equal("invalid_argument", bad)
   end)
 
+  it("next_id and the load errors agree on which ids are taken, retired ones included", function()
+    local function text(id)
+      return ("---\nid: %s\nseverity: critical\nfamily: AAA\n---\n\n#### `%s`\n\nText.\n"):format(id, id)
+    end
+    local root = tmp_dir() .. "/fixture/Checklists"
+    write_raw(root .. "/_rules/AAA/AAA-05.md", text("AAA-05"))
+    -- the two machines: a retired AAA-05 beside the live one; the next id is AAA-06 and the check says "taken"
+    write_raw(root .. "/_retired/AAA/AAA-05.md", text("AAA-05"))
+    local view = assert(contract.view({ rulesets = { root } }))
+    assert.are.equal("AAA-06", contract.next_free(view, "AAA"))
+    assert.are.equal(1, #view.load_errors, vim.inspect(view.load_errors))
+    assert.matches("duplicate rule id AAA-05", view.load_errors[1], 1, true)
+    assert.matches("Checklists/_retired/AAA/AAA-05.md (retired)", view.load_errors[1], 1, true)
+    assert.is_nil(view.load_errors[1]:find(root, 1, true), "no path of this machine in a document")
+    assert.are.same(
+      { "AAA-05" },
+      vim.tbl_map(function(entry)
+        return entry.id
+      end, view.retired)
+    )
+
+    -- a retired file that says another id than its name takes both: the next id passes both
+    local other = tmp_dir() .. "/fixture/Checklists"
+    write_raw(other .. "/_retired/AAA/AAA-02.md", text("AAA-09"))
+    local view2 = assert(contract.view({ rulesets = { other } }))
+    assert.are.equal("AAA-10", contract.next_free(view2, "AAA"))
+    assert.are.equal(1, #view2.load_errors, vim.inspect(view2.load_errors))
+    assert.matches("named for AAA-02 but its frontmatter says `id: AAA-09`", view2.load_errors[1], 1, true)
+  end)
+
   it("next_id takes an id of any length: the next one is exact, `highest` is held at 2^53 - 1", function()
     local root = tmp_dir() .. "/fixture/Checklists"
     for _, id in ipairs({ "BIG-99999999999999999", "HUGE-123456789012345678901", "HUGE-007" }) do

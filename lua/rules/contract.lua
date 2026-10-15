@@ -302,29 +302,28 @@ end
 ---@field rev string
 
 ---The rules that were retired: `<ruleset>/_retired/<FAMILY>/<ID>.md` (`rules-ops/1` `retire`). The loader does not
----read that folder, so a retired rule is never run; its id stays taken.
+---run them, so a retired rule is never run; its id stays taken, and the loader (`rules.engine.loader`, which the check
+---uses too) and `next_free` read the same files for that: a file that names another id in its frontmatter than in its
+---name takes both.
 ---@param paths string[]
 ---@param names table<string, string>
 ---@return table[]
 local function retired_of(paths, names)
-  local fswalk = require("rules.engine.fswalk")
   local out = {}
   for _, root in ipairs(paths) do
-    local folder = root .. "/_retired"
-    if vim.fn.isdirectory(folder) == 1 then
-      for _, file in ipairs(fswalk.files(folder)) do
-        local id = file:match("([^/]+)%.md$")
-        if id then
-          local entry = { id = id, family = parser.family_of(id), source = display_path({ root }, names, file) }
-          local bytes = read_bytes(file) or ""
-          local head = bytes:match("^%-%-%-\r?\n(.-)\r?\n%-%-%-")
-          for key, value in (head or ""):gmatch("([%w_]+):%s*([^\r\n]*)") do
-            if key == "replaced_by" or key == "retired" or key == "reason" then
-              entry[key] = value
-            end
-          end
-          out[#out + 1] = entry
+    for _, found in ipairs(loader.retired(root)) do
+      local source = display_path({ root }, names, found.file)
+      local entry = { id = found.id, family = parser.family_of(found.id), source = source }
+      local bytes = read_bytes(found.file) or ""
+      local head = bytes:match("^%-%-%-\r?\n(.-)\r?\n%-%-%-")
+      for key, value in (head or ""):gmatch("([%w_]+):%s*([^\r\n]*)") do
+        if key == "replaced_by" or key == "retired" or key == "reason" then
+          entry[key] = value
         end
+      end
+      out[#out + 1] = entry
+      if found.meta_id then
+        out[#out + 1] = { id = found.meta_id, family = parser.family_of(found.meta_id), source = source }
       end
     end
   end
