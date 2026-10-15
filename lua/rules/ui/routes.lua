@@ -80,7 +80,7 @@ function M.routes()
           name = "family",
           type = "RULES_FAMILY",
           optional = true,
-          desc = "Family of the new rule, uppercase letters such as DEP (none: open the form)",
+          desc = "Family of the new rule, uppercase letters such as DEP or one the ruleset has (none: open the form)",
         },
       },
       kv = {

@@ -433,6 +433,20 @@ describe(":Rules new, set, retire, move, list", function()
       assert.are.same({ "DEP-01", "DEP-02" }, made_ids())
     end)
 
+    it("takes a family the ruleset has in its own spelling (Lint-01), without a question", function()
+      write_raw(root .. "/_rules/Lint/Lint-01.md", rule_file("Lint-01", "recommended", "mixed", "Mixed case."))
+      contract.clear_cache()
+      require("rules.ui.candidates").reset()
+      run("Rules new Lint Another severity=critical")
+      assert.are.same({}, asked)
+      assert.is_truthy(read_raw(root .. "/_rules/Lint/Lint-02.md"))
+      assert.is_true(told("created Lint-02"))
+      -- another spelling of it is a new family, and has to be in capitals
+      notes = {}
+      run("Rules new lint Another severity=critical")
+      assert.is_true(told("invalid_argument: family must be 1 to 12 uppercase letters A-Z"))
+    end)
+
     it("asks first about a family no rule has yet, and makes the rule on Yes", function()
       answer = 2
       run("Rules new NEWF Brand new severity=critical")

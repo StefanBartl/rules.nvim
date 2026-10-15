@@ -169,17 +169,18 @@ end
 ---Check a parsed form. What it needs is a family, a title and one severity; the place has to be readable. A request
 ---that passes is one `new` operation for the door.
 ---@param parsed Rules.FormParsed
+---@param known? fun(family: string): boolean  whether a family is in the ruleset already (taken as it is spelled)
 ---@return table|nil op  `{ op = "new", family, title, severity, text?, ruleset?, <place> }`
 ---@return string[] errors
-function M.validate(parsed)
+function M.validate(parsed, known)
   local ops = require("rules.ops")
   local errors = {}
 
   local family = vim.trim(parsed.family)
   if family == "" then
     errors[#errors + 1] = "Family is required (uppercase letters, e.g. DEP)"
-  elseif ops.family_error(family) then
-    errors[#errors + 1] = "Family " .. ops.family_error(family)
+  elseif ops.family_error(family, known) then
+    errors[#errors + 1] = "Family " .. ops.family_error(family, known)
   end
 
   local title = vim.trim(parsed.title)

@@ -10,7 +10,7 @@
 | `:Rules stats` | — | `--format=json` (optional) | Structural overview of every loaded rule: per-family totals, automated-vs-manual split, severity breakdown. No check runs — pure catalog metadata |
 | `:Rules catalog` | `[path]` (default: every folder in the settings' `rulesets`, or of the vault; `@vault/<name>` names one) | `--check` (optional) | For a ruleset in the one-file-per-rule form: builds the reading documents from their layouts ([RULESET-FORMAT.md](RULESET-FORMAT.md#layouts-and-catalogs)). A document is written only when its content changed. `--check` writes nothing and warns about every document that is out of date — for CI use `scripts/ruleset.lua catalog --check <folder>` (exit code 1 when one is). Names the rules that are in no layout |
 | `:Rules messages` | — | — | Opens this plugin's notify history (toast + `:messages` log, via `lib.nvim.notify.popup`) |
-| `:Rules new` | `[<FAMILY> [title...]]` | `severity=`, `text=`, `ruleset=`, `--to=`, `--after=`, `--before=`, `--first`, `--yes`, `--dry` | Makes a rule at the next free id of the family (1 to 12 uppercase letters `A-Z`). With the family, a title and `severity=` the rule is made and opened (a family no rule has yet is asked about first, `--yes` skips the question); with less, the [form](#the-form) opens, filled in with what was given. See [Making, changing, retiring and moving rules](#making-changing-retiring-and-moving-rules) |
+| `:Rules new` | `[<FAMILY> [title...]]` | `severity=`, `text=`, `ruleset=`, `--to=`, `--after=`, `--before=`, `--first`, `--yes`, `--dry` | Makes a rule at the next free id of the family (1 to 12 uppercase letters `A-Z`, or a family the ruleset has, spelled as there). With the family, a title and `severity=` the rule is made and opened (a family no rule has yet is asked about first, `--yes` skips the question); with less, the [form](#the-form) opens, filled in with what was given. See [Making, changing, retiring and moving rules](#making-changing-retiring-and-moving-rules) |
 | `:Rules set` | `<id>` | `severity=`, `title=`, `text=`, `check=`, `agent=`, `--dry` | Changes parts of a rule's file; every line it was not asked to change stays byte for byte (see [what `set` leaves alone](#making-changing-retiring-and-moving-rules)) |
 | `:Rules retire` | `<id>` | `--by=<id>`, `reason=`, `--yes`, `--dry` | Moves a rule's file to `_retired/` and out of every layout; the id stays taken. Asks first |
 | `:Rules move` | `<id>` | `--to=<file>#<section>`, `--after=<id>`, `--before=<id>`, `--first`, `--dry` | Moves the rule's `{{rule ID}}` line within its layout or into another; the rule's own file is not touched |
@@ -176,13 +176,17 @@ writes a ruleset in the one-file-per-rule form ([RULESET-FORMAT.md](RULESET-FORM
   severity=critical`). The words after the family of `new` and before the first
   `key=` are the title. `check=` and `agent=` take a JSON object, or nothing to
   remove the key (`null` in the patch); `text=` with nothing is an empty text.
-- **The family** of `new` is 1 to 12 uppercase letters `A-Z` (`DEP`, `LUA`): the
-  door refuses `Fix`, `dep`, `DEP2` or a longer one with one message
-  (`invalid_argument: family must be 1 to 12 uppercase letters A-Z (e.g. DEP)`),
-  and the command and the form say the same before they ask anything. That keeps
-  a mistyped title (`:Rules new Fix the bug severity=critical` reads `Fix` as the
-  family) from making a family, and `dep` from being a second family beside `DEP`
-  where the file system does not tell the two folders apart. A family that no rule
+- **The family** of `new` is 1 to 12 uppercase letters `A-Z` (`DEP`, `LUA`), or a
+  family the ruleset has already, exactly as it is spelled there (a ruleset may
+  have `Dep-01` or `lint-04`: the format allows letters of any case, and `new` goes on
+  numbering them). The door refuses `Fix`, `dep`, `DEP2` or a longer one, when the
+  ruleset has no family of exactly that spelling, with one message
+  (`invalid_argument: family must be 1 to 12 uppercase letters A-Z (e.g. DEP), or a
+  family the ruleset has, spelled as there`), and the command and the form say the
+  same before they ask anything. That keeps a mistyped title
+  (`:Rules new Fix the bug severity=critical` reads `Fix` as the family) from making
+  a family, and `dep` from being a second family beside `Dep`, where the file system
+  does not tell the two folders apart. A family that no rule
   has yet, loaded or retired, is a **new family**: the command asks before it
   makes the first rule (`--yes` skips the question, `--dry` asks nothing, a session
   without a screen needs `--yes`), and the question of the form shows it

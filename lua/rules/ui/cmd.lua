@@ -295,7 +295,7 @@ function M.new(ctx)
   end
   local title = cmdline.join(bound.lead)
   -- the door's own answer, said before anything else: a mistyped title is not a family (`Fix the bug` reads `Fix`)
-  local why = family and require("rules.ops").family_error(family)
+  local why = family and require("rules.ops").family_error(family, require("rules.ui.candidates").family_known)
   if why then
     notify.error(("invalid_argument: family %s"):format(why))
     return

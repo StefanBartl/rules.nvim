@@ -85,7 +85,7 @@ end
 function M.read(buf)
   local lines = form.strip_errors(buf_lines(buf))
   set_lines(buf, lines)
-  local op, errors = form.validate(form.parse(lines))
+  local op, errors = form.validate(form.parse(lines), require("rules.ui.candidates").family_known)
   if not op then
     M.show_errors(buf, errors)
     return nil
