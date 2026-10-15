@@ -208,10 +208,15 @@ writes a ruleset in the one-file-per-rule form ([RULESET-FORMAT.md](RULESET-FORM
   line cannot hold a newline.
 - **A word with two dashes is a flag, also in a value.** `text=run with --dry
   now` is a dry run, and an unknown `--word` is refused (`unknown flag`). A
-  bare `--` ends the flags: everything after it is text, `--dry` included
-  (`:Rules set DEP-01 text=run with -- --dry now` sets `run with --dry now`).
-  The flags go before the `--`; the `--` itself is not part of the text, a
-  second `--` is.
+  bare `--` **ends the flags** only where it is meant to: right behind the first
+  word (the family or the id), or in front of a word that starts with a dash.
+  Everything after it is text, `--dry` included, and the `--` itself is not part of
+  the text (`:Rules set DEP-01 -- text=run with --dry now` and `:Rules set DEP-01
+  text=run with -- --dry now` both set `run with --dry now`); a second `--` is.
+  Anywhere else a `--` is a word of the text, kept as typed, and the flags go on:
+  `:Rules set DEP-01 text=Use this -- not that --dry` sets (as a dry run) `Use this --
+  not that`, as does `check={"type":"grep","pattern":"a -- b"}` for the pattern
+  `a -- b`. No character of a value is dropped without this rule saying so.
 - **A place** is one of `--to=<file>#<section>` (`<file>` is the `output` path
   of a layout, `<section>` the text of a heading; `--first` puts the rule at the
   start of the section instead of its end; in a section with no rule yet both
