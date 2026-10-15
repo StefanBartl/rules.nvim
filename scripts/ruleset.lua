@@ -1,7 +1,7 @@
 -- scripts/ruleset.lua -- the headless tools for a ruleset in the one-file-per-rule form.
 --
 --   nvim --headless -u NONE -i NONE -n -l scripts/ruleset.lua catalog [--check] [OPTIONS] [<ruleset-folder>]
---   nvim --headless -u NONE -i NONE -n -l scripts/ruleset.lua check [OPTIONS] [<ruleset-folder>]
+--   nvim --headless -u NONE -i NONE -n -l scripts/ruleset.lua check [--waivers [--today=YYYY-MM-DD]] [OPTIONS] [<ruleset-folder>]
 --   nvim --headless -u NONE -i NONE -n -l scripts/ruleset.lua migrate [--write] [--rules-dir=D] [--layouts-dir=D] [OPTIONS] <dir>
 --
 -- OPTIONS  --vault=D --project=D --trust=D (repeatable)
@@ -24,6 +24,10 @@
 --           under rulesets/) and warns about the folders under rulesets/ that the vault file leaves out.
 --           Writes nothing; this is the "loads without errors" step of the CI of a rules-vault
 --           (templates/rules-vault-ci.yml).
+--           With `--waivers` it also reads the `.rules-waivers.json` of the project (`--project=D` or $RULES_PROJECT is
+--           required) and exits 1 when that file cannot be used or a waiver in it has EXPIRED (its `expires` day is
+--           before today; docs/BINDINGS.md "Waivers"). A waiver for an id no ruleset has is a note, not a failure.
+--           `--today=YYYY-MM-DD` judges the expiry as of that day (a reproducible run); default: today's date.
 -- migrate   turns the documents with ```rule blocks into one file per rule plus layouts. Without --write it
 --           only converts in memory and says what it would do and whether the result reads back byte for
 --           byte (apart from the table of contents, which is counted). With --write it writes the files and
@@ -75,7 +79,7 @@ vim.opt.rtp:append(lib)
 local function usage()
   io.stderr:write(
     "usage: ruleset.lua catalog [--check] [--vault=D] [--project=D] [--trust=D] [<folder>] | "
-      .. "check [--vault=D] [--project=D] [--trust=D] [<folder>] | "
+      .. "check [--waivers [--today=YYYY-MM-DD]] [--vault=D] [--project=D] [--trust=D] [<folder>] | "
       .. "migrate [--write] [--rules-dir=D] [--layouts-dir=D] [--vault=D] [--project=D] [--trust=D] <folder>\n"
   )
   os.exit(2)
@@ -86,7 +90,7 @@ end
 --- the documents `--check` is there to check).
 local FLAGS = {
   catalog = { check = "bool", vault = "value", project = "value", trust = "multi" },
-  check = { vault = "value", project = "value", trust = "multi" },
+  check = { vault = "value", project = "value", trust = "multi", waivers = "bool", today = "value" },
   migrate = {
     write = "bool",
     ["rules-dir"] = "value",
@@ -126,6 +130,15 @@ for i = 2, #arg do
   end
 end
 if #positional > 1 or (#positional == 0 and command ~= "catalog" and command ~= "check") then
+  usage()
+end
+-- `--waivers` judges the `.rules-waivers.json` of a project, so it needs one; `--today` only means something with it
+local waivers_project = flags.project or vim.env.RULES_PROJECT
+if flags.waivers and (not waivers_project or waivers_project == "") then
+  io.stderr:write("error: --waivers checks the waivers of a project: give --project=D (or set $RULES_PROJECT)\n")
+  os.exit(2)
+end
+if flags.today and not flags.waivers then
   usage()
 end
 
@@ -240,6 +253,36 @@ if command == "check" then
   if code ~= 0 then
     io.stdout:write("FAILED: a configured ruleset is not a folder\n")
     os.exit(code)
+  end
+  if flags.waivers then
+    -- the waivers of the project (`rules.waivers`): a file that cannot be used or a waiver that ran out fails the run
+    local wtext, wfailure = require("rules.api").call("waivers", nil, {
+      rulesets = roots,
+      vault = flags.vault,
+      trust = flags.trust,
+      project = waivers_project,
+      today = type(flags.today) == "string" and flags.today or nil,
+    })
+    local wok, wdoc = pcall(vim.json.decode, wtext)
+    if wfailure ~= nil or not wok or type(wdoc) ~= "table" or wdoc.kind ~= "rules.waivers" then
+      local message = wok and type(wdoc) == "table" and wdoc.message or tostring(wtext):sub(1, 400)
+      io.stdout:write("FAILED: the waivers could not be read: " .. tostring(message) .. "\n")
+      os.exit(1)
+    end
+    local expired = 0
+    for _, item in ipairs(wdoc.items) do
+      if item.expired then
+        expired = expired + 1
+        io.stdout:write(("  expired waiver: %s ran out on %s (%s)\n"):format(item.id, item.expires, item.reason))
+      elseif not item.known then
+        io.stdout:write(("  note: the waiver for %s matches no loaded rule\n"):format(item.id))
+      end
+    end
+    io.stdout:write(("%d waiver(s) as of %s, %d expired\n"):format(wdoc.counts.total, wdoc.today, expired))
+    if expired > 0 then
+      io.stdout:write(("FAILED: %d expired waiver(s): renew or remove them\n"):format(expired))
+      os.exit(1)
+    end
   end
   io.stdout:write("ok: every ruleset loads without errors\n")
   os.exit(0)

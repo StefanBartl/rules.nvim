@@ -10,6 +10,7 @@
     { "$ref": "#/$defs/rule" },
     { "$ref": "#/$defs/next_id" },
     { "$ref": "#/$defs/sources" },
+    { "$ref": "#/$defs/waivers" },
     { "$ref": "#/$defs/result" },
     { "$ref": "#/$defs/error" }
   ],
@@ -239,6 +240,39 @@
         }
       ]
     },
+    "waiver": {
+      "type": "object",
+      "required": ["id", "reason", "expired", "known"],
+      "properties": {
+        "id": { "type": "string" },
+        "reason": { "type": "string", "maxLength": 500 },
+        "expires": { "type": "string", "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}$", "description": "a real calendar date; the waiver is valid through that day. Absent: no expiry" },
+        "paths": { "type": "array", "minItems": 1, "maxItems": 50, "items": { "type": "string" }, "description": "files, folders or globs relative to the project root, with /. Absent: every path" },
+        "expired": { "type": "boolean", "description": "expires is before `today` of the document: the waiver suppresses nothing" },
+        "known": { "type": "boolean", "description": "a loaded rule has this id; false: the waiver protects nothing (the rule was retired or renamed)" }
+      }
+    },
+    "waivers": {
+      "title": "rules.waivers: the waivers of a project (its .rules-waivers.json), each with whether it is expired and whether its rule is loaded.",
+      "allOf": [
+        { "$ref": "#/$defs/head" },
+        {
+          "type": "object",
+          "required": ["kind", "today", "etag", "exists", "counts", "items", "rev", "digest"],
+          "properties": {
+            "kind": { "const": "rules.waivers" },
+            "today": { "type": "string", "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}$", "description": "the day expiry was judged against (the day of the machine, or the `today` the engine was given)" },
+            "etag": { "type": "string", "pattern": "^sha256:[0-9a-f]{16}$", "description": "the version of the waivers FILE; a project without one has the etag of an empty file. What `if_match` of waive, renew and remove compares against" },
+            "exists": { "type": "boolean", "description": "false when the project has no waivers file" },
+            "counts": {
+              "type": "object",
+              "properties": { "total": { "type": "integer" }, "expired": { "type": "integer" }, "unknown": { "type": "integer" } }
+            },
+            "items": { "type": "array", "items": { "$ref": "#/$defs/waiver" }, "description": "in id order" }
+          }
+        }
+      ]
+    },
     "result": {
       "title": "rules.result: the answer of the write door (rules-ops/1), one entry per operation.",
       "allOf": [
@@ -258,23 +292,23 @@
                 "required": ["n", "op", "ok", "changed_ids"],
                 "properties": {
                   "n": { "type": "integer", "minimum": 1 },
-                  "op": { "enum": ["new", "set", "retire", "reinstate", "move"] },
+                  "op": { "enum": ["new", "set", "retire", "reinstate", "move", "waive", "renew", "remove"] },
                   "ok": { "type": "boolean" },
                   "id": { "type": "string" },
-                  "outcome": { "type": "string", "description": "created, changed, unchanged, retired, reinstated, moved, would_*, conflict, failed" },
+                  "outcome": { "type": "string", "description": "created, changed, unchanged, retired, reinstated, moved, waived, renewed, removed, would_*, conflict, failed" },
                   "etag_before": { "type": "string" },
                   "etag_after": { "type": "string" },
                   "changed_ids": { "type": "array", "items": { "type": "string" } },
-                  "before": { "type": "object", "description": "set: the values the patch replaced, in the shape of a patch" },
+                  "before": { "type": "object", "description": "set: the values the patch replaced, in the shape of a patch; renew: the expiry (and reason) it replaced, as the fields of a renew; remove: the waiver that was dropped (reason, expires, paths)" },
                   "inverse": { "type": "object", "description": "the operation that undoes this one" },
                   "placed": { "type": "object", "properties": { "layout": { "type": "string" } } },
-                  "warnings": { "type": "array", "items": { "type": "string" }, "description": "new: things to know that did not stop the operation (the rules-vault is behind its upstream, so another machine may make the same id); absent when there are none" },
-                  "diff": { "type": "object", "description": "dry run of set: the file text before and after" },
+                  "warnings": { "type": "array", "items": { "type": "string" }, "description": "things to know that did not stop the operation; absent when there are none. new: the rules-vault is behind its upstream, so another machine may make the same id. waive, renew: expires is before today, so the waiver is expired from the start" },
+                  "diff": { "type": "object", "description": "dry run of set, waive, renew, remove: the file text before and after" },
                   "catalog": { "type": "object", "description": "the documents made again after the write", "properties": { "written": { "type": "integer" }, "errors": { "type": "integer" } } },
                   "error": {
                     "type": "object",
                     "properties": {
-                      "code": { "type": "string", "description": "invalid_argument, not_found, conflict (details: expected, actual), locked, io, rollback_incomplete (details: not_restored), internal" },
+                      "code": { "type": "string", "description": "invalid_argument, not_found, conflict (details: expected, actual), locked, forbidden (the waivers file is a link), payload_too_large, io, rollback_incomplete (details: not_restored), internal" },
                       "message": { "type": "string" },
                       "retryable": { "type": "boolean" },
                       "details": { "type": "object" }
