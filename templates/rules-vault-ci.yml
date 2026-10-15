@@ -1,16 +1,26 @@
 # CI of a rules-vault, made by `:RulesVault create` (template: templates/rules-vault-ci.yml of rules.nvim).
 #
-# Read only: nothing here changes a file or talks to anything but GitHub. Four steps, each of which turns the run red:
-#   1. the files are checked out with one line ending (`.gitattributes` has `eol=lf`, which `:RulesVault create` makes)
-#   2. the reading documents of every ruleset are up to date with the layouts and rule files (`catalog --check`)
-#   3. all rulesets load together without errors: a duplicate rule id (also two rule files of two machines that made
-#      the same id), an invalid severity, a rule file that does not read (`ruleset.lua check`, the snapshot document)
-#   4. writing keeps every rule file byte for byte (`roundtrip.lua`)
+# Read only: nothing here changes a file or talks to anything but GitHub. Four steps, each of which turns the run red.
+# What each one covers, exactly:
+#   1. line endings: no CR in any `.md` file below `rulesets/` of the checkout (what the files are, not what
+#      `.gitattributes` says: `:RulesVault create` makes `* text=auto eol=lf`, which is what keeps a Windows checkout LF)
+#   2. reading documents: for EVERY folder below `rulesets/` (a glob), the generated documents are up to date with the
+#      layouts and rule files (`catalog --check`); that ruleset on its own also has to load without errors (a rule file
+#      that does not read, a live and a retired rule with one id in it)
+#   3. loading: the rulesets the vault OFFERS, all together (`ruleset.lua check --vault=.`): the list in the `.rules.json`
+#      of the vault, else every folder below `rulesets/`. A listed folder that is gone is an error. A folder below
+#      `rulesets/` that the list leaves out is only warned about here (steps 2 and 4 still cover it, alone). Red on
+#      a load error: a duplicate rule id, also across two rulesets and also between a live and a retired rule (two
+#      machines made the same id), an invalid severity, a file under `_rules/` that is no rule (empty, merge-conflict
+#      markers, no frontmatter), a retired file that does not read. The one thing only this step sees is a clash
+#      between two rulesets
+#   4. round trip: for EVERY folder below `rulesets/` (a glob), writing keeps every rule file byte for byte
+#      (`roundtrip.lua`); each folder alone has to load without errors here as well
 # No `jq`, no other tool than Neovim and bash: the same four commands run on a laptop, from the vault folder, with
 # the path of rules.nvim in place of `.deps/rules.nvim`.
 #
-# Ubuntu and Windows (bash on both). The files are compared byte for byte, so a checkout that turns line endings into
-# CRLF would turn every step red: that is what step 1 and `.gitattributes` are for.
+# Ubuntu and Windows (bash on both). Rule files are written and compared as they lie on disk, so the vault keeps one
+# line ending (LF); a Windows checkout with `core.autocrlf` would turn the files into CRLF, and step 1 looks for that.
 #
 # rules.nvim and lib.nvim are checked out below `.deps/`. If rules.nvim is not readable with the token of this
 # repository (a private fork), give the `actions/checkout` of rules.nvim a `token:` of your own (a personal access
@@ -55,10 +65,21 @@ jobs:
           neovim: true
           version: stable
 
-      - name: The files have one line ending (.gitattributes, eol=lf)
+      - name: The checked-out rule files have LF line endings (no CR)
         run: |
           set -euo pipefail
-          grep -q 'eol=lf' .gitattributes || { echo "::error::.gitattributes needs '* text=auto eol=lf'"; exit 1; }
+          # The checkout is what the byte checks read, so the checkout is what is looked at, not the text of
+          # `.gitattributes`: a comment, or a rule for other files, would pass a grep for `eol=lf` and still leave
+          # CRLF here. Counted with `tr`, not `grep`: grep of Git for Windows reads a file as text and drops the CR.
+          crs=$(find rulesets -type f -name '*.md' -print0 | xargs -0 -r cat | tr -cd '\r' | wc -c)
+          if [ "$((crs))" -gt 0 ]; then
+            echo "$((crs)) CR character(s) in the .md files below rulesets/, in:"
+            find rulesets -type f -name '*.md' -print0 | while IFS= read -r -d '' file; do
+              if [ -n "$(tr -cd '\r' < "$file" | head -c 1)" ]; then echo "  $file"; fi
+            done
+            echo "::error::checked out with CRLF line endings: put '* text=auto eol=lf' in .gitattributes and check out again"
+            exit 1
+          fi
 
       - name: The reading documents are up to date (catalog --check, every ruleset)
         run: |
