@@ -78,10 +78,23 @@ local function load_waivers(root)
   return repo_waivers
 end
 
---- Host policy for a run, from `setup()`.
+--- Host policy for a run: `setup({ lua_predicates })`, and a `lua_predicate` runs only in a ruleset that is trusted (what the
+--- user named himself, or put in `trust`; `rules.settings`). The other check types do not ask.
+---@param res Rules.Settings
 ---@return Rules.RunOpts
-local function run_opts()
-  return { lua_predicates = config.get().lua_predicates }
+local function run_opts(res)
+  if not config.get().lua_predicates then
+    return { lua_predicates = false }
+  end
+  local trusted = settings.trust_check(res)
+  return {
+    lua_predicates = function(rule)
+      if trusted(rule.source_file) then
+        return true
+      end
+      return false, settings.UNTRUSTED
+    end,
+  }
 end
 
 --- Shared by `check_family`/`check_family_json`: load rules and this root's
@@ -97,14 +110,14 @@ end
 ---@return string|nil err  the settings of the project cannot be used
 local function run_family(family_prefix, path)
   local root = path or vim.fn.getcwd()
-  local rules, err = load(root)
+  local rules, err, res = load(root)
   if not rules then
     return nil, err
   end
   if #gate.unknown_families(rules, { family_prefix }) > 0 then
     notify.warn(("--family=%q matches no loaded rule -- typo in the prefix, or not loaded/migrated yet"):format(family_prefix))
   end
-  return runner.check_family(rules, family_prefix, root, load_waivers(root), run_opts()), nil
+  return runner.check_family(rules, family_prefix, root, load_waivers(root), run_opts(res)), nil
 end
 
 --- Shared by `run_gate`/`run_gate_json`.
@@ -127,7 +140,7 @@ local function run_gate_results(gate_name, path, diff_ref)
     return nil, ("unknown gate %q (%s)"):format(gate_name, hint)
   end
 
-  local rules, load_err = load(root)
+  local rules, load_err, loaded_res = load(root)
   if not rules then
     return nil, load_err
   end
@@ -136,7 +149,7 @@ local function run_gate_results(gate_name, path, diff_ref)
       ("gate %q: family %q matches no loaded rule -- typo in gates config, or not migrated yet"):format(gate_name, family)
     )
   end
-  local results = gate.run(rules, families, root, load_waivers(root), run_opts())
+  local results = gate.run(rules, families, root, load_waivers(root), run_opts(loaded_res or res))
 
   if diff_ref then
     local changed, err = gate.diff_files(root, diff_ref)

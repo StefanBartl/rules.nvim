@@ -549,7 +549,8 @@ describe("rules.settings", function()
       local res = settings.resolve({ project = base .. "/project" })
 
       assert.are.equal(0, #res.problems)
-      assert.are.equal(0, #res.warnings)
+      assert.are.equal(1, #res.warnings) -- a vault named by a project file: used, but its rulesets are not trusted
+      assert.is_truthy(settings.format(res.warnings[1], true):find("vault: a project file names the vault", 1, true))
       assert.is_true(vim.uv.fs_realpath(res.vault.root) == vim.uv.fs_realpath(base .. "/shared/rules-vault"))
     end)
 
@@ -568,11 +569,12 @@ describe("rules.settings", function()
 
       local res = settings.resolve({ project = project })
 
-      assert.are.equal(1, #res.warnings)
-      local portable = settings.format(res.warnings[1], true)
+      assert.are.equal(2, #res.warnings) -- the key itself (not trusted), and that it is a path of this machine
+      local portable = settings.format(res.warnings[2], true)
       assert.is_truthy(portable:find("path of this machine", 1, true))
       assert.is_nil(portable:find(vault, 1, true)) -- the warning itself carries no path in a document
-      assert.is_truthy(settings.format(res.warnings[1], false):find(vault, 1, true))
+      assert.is_nil(settings.format(res.warnings[1], true):find(vault, 1, true))
+      assert.is_truthy(settings.format(res.warnings[2], false):find(vault, 1, true))
     end)
   end)
 

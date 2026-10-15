@@ -9,6 +9,8 @@
 ---                                     `scopes` (family -> `{ include = { ... } }`)
 ---   vault           string            the folder of the rules-vault (`setup()` and a project file only)
 ---   lua_predicates  boolean           `setup()` only: a file in a repository must not decide what code may run
+---   trust           list of strings   `setup()` and a call only: folders whose rulesets may run `lua_predicate` checks
+---                                     although a project file named them; a file must never grant itself trust
 ---
 --- `check` never raises and never guesses: it returns the part that is valid, every problem with the dotted key it
 --- belongs to, and every key it does not know. What to do with a problem is the caller's: `setup()` drops the key
@@ -30,10 +32,10 @@ local M = {}
 ---(`rules.api`, `scripts/rules.lua`): its keys are checked like the others, an unknown one is not looked for.
 ---@type table<Rules.Config.Scope, string[]>
 M.KEYS = {
-  setup = { "rulesets", "gates", "lua_predicates", "vault", "agent" },
+  setup = { "rulesets", "gates", "lua_predicates", "vault", "agent", "trust" },
   project = { "rulesets", "gates", "agent", "vault" },
   vault = { "rulesets", "gates", "agent" },
-  call = { "rulesets", "gates", "agent", "vault" },
+  call = { "rulesets", "gates", "agent", "vault", "trust" },
 }
 
 ---The keys of the `agent` object.
@@ -44,9 +46,11 @@ M.AGENT_KEYS = { "backends", "models", "batch_size", "max_context_bytes", "deny"
 local ELSEWHERE = {
   project = {
     lua_predicates = "is a setup() option only (a file in a repository must not decide what code may run)",
+    trust = "is a setup() option only (a file in a repository must not grant itself trust)",
   },
   vault = {
     lua_predicates = "is a setup() option only (a file must not decide what code may run)",
+    trust = "is a setup() option only (a file must not grant trust)",
     vault = "belongs in setup() or a project file (a vault does not name another vault)",
   },
 }
@@ -353,6 +357,9 @@ local function check_table(value, scope)
   end
   if allowed.lua_predicates and value.lua_predicates ~= nil then
     clean.lua_predicates = lua_predicates(value.lua_predicates, problems)
+  end
+  if allowed.trust and value.trust ~= nil then
+    clean.trust = string_list(value.trust, "trust", problems)
   end
   return result
 end

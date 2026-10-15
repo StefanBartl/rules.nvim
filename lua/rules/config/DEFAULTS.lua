@@ -25,9 +25,13 @@
 ---@field rulesets string[]  files or directories to load fenced `rule` blocks from; `@vault/<name>` names a ruleset of the vault
 ---@field gates table<string, string[]>  named groups of family prefixes, e.g. `{ release = {"REL"} }`; see `:Rules gate`
 ---@field lua_predicates boolean  whether `lua_predicate` checks may run. Default true: your own rulesets in
----   your own Neovim. Set false to run a ruleset you do not trust -- its predicates then report `error`
+---   your own Neovim. Set false to run a ruleset you do not trust -- its predicates then report `error`. A ruleset that a
+---   project `.rules.json` names is not trusted either, whatever this says (see `trust`)
 ---@field vault string|nil  the folder of the rules-vault (rulesets under `rulesets/`); nil: `$RULES_VAULT`, then the
 ---   `vault` of a project `.rules.json`
+---@field trust string[]  folders (or single files) whose rulesets may run `lua_predicate` checks although a project
+---   `.rules.json` named them; compared by real path. Rulesets of `setup({ rulesets })` and of the vault named by
+---   `setup({ vault })` or `$RULES_VAULT` are trusted without an entry here
 ---@field agent Rules.AgentOpts  how an agent run is planned (the same block as in `.rules.json`)
 
 ---@type Rules.Opts
@@ -36,6 +40,7 @@ return {
   gates = {},
   lua_predicates = true,
   vault = nil,
+  trust = {},
   agent = {
     backends = {},
     models = {},
