@@ -346,9 +346,34 @@ without dividers has rule files without). The generator adds nothing of its own.
 
 **Rules added through the layout.** `rules-ops/1` puts a `{{rule ID}}` line into
 a section by its heading: behind the last rule token of the section, or in front
-of the first one. A section with no rule token has only an introduction, which is
-not a rule, so the new token goes behind it (also for "first"), between one blank
-line before and one after; the introduction stays above the rules.
+of the first one of the section's own text (the lines before its first
+subheading; a token that stands in a subsection is not the first of the
+section). A section with no rule token has only an introduction, which is not a
+rule, so the new token goes behind it (also for "first", and for a section whose
+tokens all stand in subsections), between one blank line before and one after;
+the introduction stays above the rules. Two sections with the same heading are
+told apart by a number (`nth`, the first by default).
+
+**What the editor takes for a heading or a token.** Only a line outside the
+frontmatter, outside a fenced code block and outside an HTML comment. A fence
+opens with three or more backticks or tildes (up to three spaces in front) and
+closes with the same character, at least as many, and nothing else on the line;
+one that is never closed runs to the end. A comment runs from `<!--` to `-->`,
+over any number of lines. So a `#` line or a `{{rule ID}}` line inside either is
+neither a heading to put a rule under nor a rule to find, take out or put next
+to. The generator is simpler: it fills *every* whole-line `{{rule ID}}`, in a
+fence or a comment too, so keep such a line out of a layout (a token that only
+sits in a fence is a rule in the document, but one the editor cannot see; the
+editor refuses to put the same id in a second time).
+
+**Undoing a placement.** Taking a token out leaves no blank line doubled and no
+blank line at the end of the layout that the token was put behind; putting a token
+into an empty last section and taking it out again gives the layout back byte for
+byte. `retire` and `move` answer with where the token stood (the rule above it, or
+the start of its section, or of the layout; a number when the section's heading is
+not the first of its text; and the blank lines directly around it), so putting it
+back restores the layout byte for byte, also where the author set a heading right
+under a token or left no blank line behind it.
 
 **Table of contents.** One line per heading from level 2 on, each a link to its
 anchor, without the title (level 1) and without the heading called "Table of
