@@ -1,5 +1,5 @@
 > **Alpha — small, working surface.** The engine, the four check types,
-> `:Rules check`/`gate`/`show`/`stats`/`new`/`set`/`retire`/`move`/`list`, `:RulesVault`, and waivers are real and tested.
+> `:Rules check`/`gate`/`show`/`stats`/`new`/`set`/`retire`/`reinstate`/`move`/`list`, `:RulesVault`, and waivers are real and tested.
 > Pin a commit if you depend on this.
 
 # rules.nvim
@@ -86,6 +86,8 @@ For a ruleset in the one-file-per-rule form the commands also write:
 and `severity=` a Markdown form opens, checked up front, with a dry-run preview
 before anything is written), `:Rules set <ID> key=value` changes parts of its
 file, `:Rules retire <ID>` moves it to `_retired/` (it asks first), `:Rules
+reinstate <ID> --after=<ID>` brings a retired rule back (asks first; without a place
+it stands in no layout, and the command says so), `:Rules
 move <ID> --to=<file>#<section>` moves it in a layout, `:Rules list` puts the
 rules in the quickfix list. They are a thin layer over the write door of the
 [machine contract](docs/CONTRACT.md) (`rules-ops/1`): the engine is the only
@@ -130,7 +132,7 @@ installing it either.
 ```
 
 `cmd = { "Rules", "RulesVault" }`: the whole surface today is two usercommands, `:Rules` (`check`,
-`gate`, `show`, `stats`, `catalog`, `new`, `set`, `retire`, `move`, `list`) and
+`gate`, `show`, `stats`, `catalog`, `new`, `set`, `retire`, `reinstate`, `move`, `list`) and
 `:RulesVault` (`open`, `clipboard`, `link`, `find`, `grep`, `tree`, `cdx`, `create`), run on
 demand — nothing here needs to run at startup. Without `RulesVault` in `cmd`, lazy.nvim
 does not know the command until `:Rules` has loaded the plugin.

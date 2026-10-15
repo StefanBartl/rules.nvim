@@ -936,6 +936,235 @@ describe(":Rules new, set, retire, move, list", function()
     end)
   end)
 
+  describe("reinstate", function()
+    ---@return boolean
+    local function back()
+      return read_raw(root .. "/_rules/DEP/DEP-01.md") ~= nil
+    end
+
+    ---@return boolean
+    local function still_retired()
+      return read_raw(root .. "/_retired/DEP/DEP-01.md") ~= nil
+    end
+
+    ---@param line string
+    ---@return string[]
+    local function complete(line)
+      return vim.fn.getcompletion(line, "cmdline")
+    end
+
+    before_each(function()
+      -- a session with a screen: the question can be asked
+      vim.api.nvim_list_uis = function()
+        return { {} }
+      end
+      run("Rules retire DEP-01 --yes")
+      assert.is_true(still_retired())
+      asked, notes = {}, {}
+    end)
+
+    it("asks first, with No as the answer the dialog starts on, and does nothing on No", function()
+      answer = 1
+      run("Rules reinstate DEP-01 --after=DEP-02")
+      assert.are.equal(1, #asked)
+      assert.are.same({ "No", "Yes, reinstate" }, asked[1].choices)
+      assert.is_truthy(asked[1].question:find("Reinstate DEP-01?", 1, true))
+      assert.is_truthy(asked[1].question:find("regeln/DEP.md", 1, true))
+      assert.is_true(still_retired())
+      assert.is_false(back())
+      assert.is_true(told("DEP-01 was not reinstated"))
+      -- a question that was dismissed is no answer either
+      answer = nil
+      run("Rules reinstate DEP-01 --after=DEP-02")
+      assert.is_true(still_retired())
+    end)
+
+    it("brings the file back and puts it where the place says, on Yes", function()
+      run("Rules reinstate DEP-01 --after=DEP-02")
+      assert.is_true(back())
+      assert.is_false(still_retired())
+      local layout = layout_text()
+      assert.is_true(index_of(layout, "{{rule DEP-02}}") < index_of(layout, "{{rule DEP-01}}"))
+      assert.is_true(index_of(layout, "{{rule DEP-01}}") < index_of(layout, "## Two Words"))
+      assert.is_true(told("reinstated DEP-01 in regeln/DEP.md"))
+      assert.is_false(told("stands in no layout"))
+      assert.are.same(
+        { "DEP-01", "DEP-02" },
+        vim.tbl_map(function(rule)
+          return rule.id
+        end, contract.view(nil).rules)
+      )
+    end)
+
+    it("takes --before, and --section with --layout and --first", function()
+      run("Rules reinstate DEP-01 --before=DEP-02 --yes")
+      assert.is_true(index_of(layout_text(), "{{rule DEP-01}}") < index_of(layout_text(), "{{rule DEP-02}}"))
+      run("Rules retire DEP-01 --yes")
+      run("Rules reinstate DEP-01 --section=Extra --layout=regeln/DEP.md --first --yes")
+      assert.is_true(index_of(layout_text(), "## Extra") < index_of(layout_text(), "{{rule DEP-01}}"))
+      assert.is_true(index_of(layout_text(), "{{rule DEP-01}}") < index_of(layout_text(), "{{rule DEP-02}}"))
+      run("Rules retire DEP-01 --yes")
+      -- a blank in a section is written with a backslash before it
+      run("Rules reinstate DEP-01 --section=Two\\ Words --layout=regeln/DEP.md --yes")
+      assert.is_true(index_of(layout_text(), "## Two Words") < index_of(layout_text(), "{{rule DEP-01}}"))
+      assert.are.same({}, asked)
+    end)
+
+    it("hands a section with a # and a % in it to the door as it is", function()
+      -- the layout as it is after the retire (without DEP-01), with one more section
+      write_raw(root .. "/_layouts/regeln/DEP.md", (LAYOUT:gsub("{{rule DEP%-01}}\n\n", "")) .. "\n## C# and 100% Done\n\n")
+      require("rules.ui.candidates").reset()
+      run("Rules reinstate DEP-01 --section=C#\\ and\\ 100%\\ Done --layout=regeln/DEP.md --yes")
+      local layout = layout_text()
+      assert.is_true(index_of(layout, "## C# and 100% Done") < index_of(layout, "{{rule DEP-01}}"))
+      assert.is_true(told("reinstated DEP-01 in regeln/DEP.md"))
+    end)
+
+    it("--yes brings it back without asking", function()
+      run("Rules reinstate DEP-01 --after=DEP-02 --yes")
+      assert.are.same({}, asked)
+      assert.is_true(back())
+    end)
+
+    it("--dry says what would happen, asks nothing and moves nothing", function()
+      local layout_before = layout_text()
+      run("Rules reinstate DEP-01 --after=DEP-02 --dry")
+      assert.are.same({}, asked)
+      assert.is_true(told("would reinstate DEP-01 in regeln/DEP.md"))
+      assert.is_true(still_retired())
+      assert.is_false(back())
+      assert.are.equal(layout_before, layout_text())
+    end)
+
+    it("without a place the rule comes back in no layout, and says why and what to do", function()
+      local layout_before = layout_text()
+      run("Rules reinstate DEP-01")
+      assert.are.equal(1, #asked)
+      assert.is_truthy(asked[1].question:find("no layout", 1, true))
+      assert.is_truthy(asked[1].question:find("not recorded", 1, true))
+      assert.is_true(back())
+      assert.are.equal(layout_before, layout_text())
+      assert.is_true(told("DEP-01 stands in no layout"))
+      assert.is_true(told("--after=<ID>"))
+      assert.is_true(told(":Rules move DEP-01"))
+      -- a dry run says it as well
+      run("Rules retire DEP-01 --yes")
+      notes = {}
+      run("Rules reinstate DEP-01 --dry")
+      assert.is_true(told("would reinstate DEP-01"))
+      assert.is_true(told("stands in no layout"))
+    end)
+
+    it("tells what the door answers word for word, and asks nothing about a step it refuses", function()
+      local layout_before = layout_text()
+      run("Rules reinstate DEP-02 --after=DEP-01")
+      assert.is_true(told("not_found: no retired rule with the id DEP-02"))
+      notes = {}
+      run("Rules reinstate NOPE-01")
+      assert.is_true(told("not_found: no retired rule with the id NOPE-01"))
+      notes = {}
+      run("Rules reinstate DEP-01 --after=GHOST-01")
+      assert.is_true(told("invalid_argument: no layout has {{rule GHOST-01}} to put it next to"))
+      notes = {}
+      run("Rules reinstate DEP-01 --section=Core")
+      assert.is_true(told("invalid_argument: section and top need the layout"))
+      notes = {}
+      run("Rules reinstate DEP-01 --section=Core --layout=regeln/NOPE.md")
+      assert.is_true(told("invalid_argument: no layout makes the document"))
+      notes = {}
+      run("Rules reinstate DEP-01 --after=DEP-02 --before=DEP-02")
+      assert.is_true(told("invalid_argument: give one place: after, before, section or top"))
+      notes = {}
+      run("Rules reinstate DEP-01 --after=DEP-02 --first")
+      assert.is_true(told("invalid_argument: first and nth go with a section"))
+      notes = {}
+      run("Rules reinstate DEP-01 --layout=regeln/DEP.md")
+      assert.is_true(told("invalid_argument: layout, first, nth and gap need a place"))
+      assert.are.same({}, asked)
+      assert.is_true(still_retired())
+      assert.are.equal(layout_before, layout_text())
+    end)
+
+    it("refuses a word it cannot use, with the hint for a blank in a section", function()
+      run("Rules reinstate DEP-01 --section=Two Words --layout=regeln/DEP.md")
+      assert.is_true(told("unexpected argument: Words"))
+      assert.is_true(told("backslash"))
+      assert.are.same({}, asked)
+      assert.is_true(still_retired())
+    end)
+
+    it("needs --yes where there is nobody to ask", function()
+      vim.api.nvim_list_uis = saved_uis
+      run("Rules reinstate DEP-01 --after=DEP-02")
+      assert.are.same({}, asked)
+      assert.is_true(told("run it with --yes"))
+      assert.is_true(still_retired())
+    end)
+
+    it("reloads the unmodified buffers of the layout and of the rule, and names a changed one", function()
+      local layout_buf = buffer_of(root .. "/_layouts/regeln/DEP.md")
+      run("Rules reinstate DEP-01 --after=DEP-02 --yes")
+      assert.is_true(told("reloaded"))
+      assert.is_false(vim.bo[layout_buf].modified)
+      assert.is_truthy(table.concat(vim.api.nvim_buf_get_lines(layout_buf, 0, -1, false), "\n"):find("{{rule DEP-01}}", 1, true))
+
+      -- the buffer of the rule file was left open by the retire: the file is there again
+      local rule_buf = buffer_of(rule_path("DEP-01"))
+      run("Rules retire DEP-01 --yes")
+      assert.is_true(told("no longer there (retired)"))
+      notes = {}
+      run("Rules reinstate DEP-01 --after=DEP-02 --yes")
+      assert.is_true(told("reloaded"))
+      assert.is_truthy(table.concat(vim.api.nvim_buf_get_lines(rule_buf, 0, -1, false), "\n"):find("Text of one.", 1, true))
+      assert.is_false(vim.bo[rule_buf].modified)
+
+      -- a buffer with unsaved changes is a conflict and is left as it is
+      run("Rules retire DEP-01 --yes")
+      vim.api.nvim_buf_set_lines(layout_buf, 0, 1, false, { "unsaved" })
+      notes = {}
+      run("Rules reinstate DEP-01 --after=DEP-02 --yes")
+      assert.is_true(told("unsaved changes"))
+      assert.are.equal("unsaved", vim.api.nvim_buf_get_lines(layout_buf, 0, 1, false)[1])
+      assert.is_true(vim.bo[layout_buf].modified)
+      assert.is_truthy(read_raw(root .. "/_layouts/regeln/DEP.md"):find("{{rule DEP-01}}", 1, true))
+    end)
+
+    it("names the buffer of the retired file, which the reinstate removed, and leaves it open", function()
+      local retired_buf = buffer_of(root .. "/_retired/DEP/DEP-01.md")
+      run("Rules reinstate DEP-01 --after=DEP-02 --yes")
+      assert.is_true(vim.api.nvim_buf_is_valid(retired_buf))
+      assert.is_true(told("no longer there (reinstated)"))
+    end)
+
+    describe("completion", function()
+      it("offers the retired ids only, never an active one", function()
+        assert.are.same({ "DEP-01" }, complete("Rules reinstate DEP"))
+        assert.are.same({ "DEP-01" }, complete("Rules reinstate "))
+        -- a retired rule that is back is not offered any more, a rule that is retired now is
+        run("Rules reinstate DEP-01 --after=DEP-02 --yes")
+        assert.are.same({}, complete("Rules reinstate DEP"))
+        run("Rules retire DEP-02 --yes")
+        assert.are.same({ "DEP-02" }, complete("Rules reinstate DEP"))
+        -- the other verbs still offer the active ones
+        assert.are.same({ "DEP-01" }, complete("Rules retire DEP"))
+      end)
+
+      it("offers the active ids for --after and --before, the layouts and the sections", function()
+        assert.are.same({ "--after=DEP-02" }, complete("Rules reinstate DEP-01 --after=DEP"))
+        assert.are.same({ "--before=DEP-02" }, complete("Rules reinstate DEP-01 --before=DEP"))
+        assert.are.same({ "--layout=regeln/DEP.md" }, complete("Rules reinstate DEP-01 --layout=reg"))
+        local sections = complete("Rules reinstate DEP-01 --section=")
+        assert.is_true(vim.tbl_contains(sections, "--section=Core"))
+        assert.is_true(vim.tbl_contains(sections, "--section=Two\\ Words"))
+        assert.are.same({ "--section=Two\\ Words" }, complete("Rules reinstate DEP-01 --section=Two"))
+      end)
+
+      it("offers the verb", function()
+        assert.is_true(vim.tbl_contains(complete("Rules "), "reinstate"))
+      end)
+    end)
+  end)
+
   describe("move", function()
     it("moves the rule into a section of the layout", function()
       run("Rules move DEP-02 --to=regeln/DEP.md#Core")

@@ -13,6 +13,7 @@
 | `:Rules new` | `[<FAMILY> [title...]]` | `severity=`, `text=`, `ruleset=`, `--to=`, `--after=`, `--before=`, `--first`, `--yes`, `--dry` | Makes a rule at the next free id of the family (1 to 12 uppercase letters `A-Z`, or a family the ruleset has, spelled as there). With the family, a title and `severity=` the rule is made and opened (a family no rule has yet is asked about first, `--yes` skips the question); with less, the [form](#the-form) opens, filled in with what was given. See [Making, changing, retiring and moving rules](#making-changing-retiring-and-moving-rules) |
 | `:Rules set` | `<id>` | `severity=`, `title=`, `text=`, `check=`, `agent=`, `--dry` | Changes parts of a rule's file; every line it was not asked to change stays byte for byte (see [what `set` leaves alone](#making-changing-retiring-and-moving-rules)) |
 | `:Rules retire` | `<id>` | `--by=<id>`, `reason=`, `--yes`, `--dry` | Moves a rule's file to `_retired/` and out of every layout; the id stays taken. Asks first |
+| `:Rules reinstate` | `<id>` (a retired one) | `--after=<id>`, `--before=<id>`, `--section=<heading>`, `--first`, `--layout=<file>`, `--yes`, `--dry` | Brings a retired rule back: its file returns from `_retired/` and the id is in use again. A place puts it into a layout; without one it stands in no layout (where it stood is not recorded) and the command says so. Asks first |
 | `:Rules move` | `<id>` | `--to=<file>#<section>`, `--after=<id>`, `--before=<id>`, `--first`, `--dry` | Moves the rule's `{{rule ID}}` line within its layout or into another; the rule's own file is not touched |
 | `:Rules list` | — | `--family=<PREFIX>`, `--severity=<level>`, `--format=json` | Puts the rules in the quickfix list, each at its source line; `--format=json` prints the `rules.list` document of the [machine contract](CONTRACT.md) |
 | `:RulesVault` | — | — | Shows the vault in use (where it was named, its rulesets, whether it is a clean git repository). See [Finding rules in the vault](#finding-rules-in-the-vault) |
@@ -35,7 +36,9 @@ No default keymaps are bound (the form binds a few keys in its own buffer, see
 below). `--family=`, a gate's `<name>`, the `<id>` of `show`, `set`, `retire`
 and `move`, `--by=`, `--after=`, `--before=`, the severities, `--ruleset=` and
 the places of `--to=` (the layouts, then the headings of one layout) all
-tab-complete against whatever is actually loaded/configured right now. The
+tab-complete against whatever is actually loaded/configured right now. The `<id>` of
+`reinstate` completes to the **retired** rules only (an active id is no candidate), its
+`--layout=` to the layouts and its `--section=` to the headings of all layouts. The
 first word of a `:RulesVault` verb completes to the rulesets of the vault, the
 parts, and the ids (retired ones too) and families **of the vault's rulesets**
 (the ones the command resolves a word in, not whatever `setup({ rulesets })`
@@ -151,7 +154,7 @@ find it.
 
 ## Making, changing, retiring and moving rules
 
-`new`, `set`, `retire` and `move` are a thin layer over the write door of the
+`new`, `set`, `retire`, `reinstate` and `move` are a thin layer over the write door of the
 machine contract, [`rules-ops/1`](CONTRACT.md#rules-ops1-write) (the same door
 an app or an agent uses): the command line is turned into one operation, the
 door does the work and answers, the answer is told. The commands check nothing
@@ -166,6 +169,8 @@ writes a ruleset in the one-file-per-rule form ([RULESET-FORMAT.md](RULESET-FORM
 :Rules set DEP-06 check={"type":"grep","pattern":"vim%.loop"}
 :Rules set DEP-06 check=
 :Rules retire DEP-03 --by=DEP-09 reason=superseded by DEP-09
+:Rules reinstate DEP-03 --after=DEP-02
+:Rules reinstate DEP-03 --section=Core\ Rules --layout=regeln/DEP.md --first
 :Rules move DEP-06 --to=regeln/DEP.md#Core
 :Rules move DEP-06 --to=regeln/DEP.md#Core\ Rules --first
 :Rules list --family=DEP --severity=critical
@@ -239,8 +244,31 @@ writes a ruleset in the one-file-per-rule form ([RULESET-FORMAT.md](RULESET-FORM
 - **`retire` asks first** (`No` is the button the dialog starts on; `--yes`
   skips the question). The door is asked with a dry run before the question,
   so a rule that is not there or a `--by=` that does not exist is told without a
-  question. A session without a screen to ask on needs `--yes`. A retired rule
-  is brought back through the API (`reinstate`), there is no command for it yet.
+  question. A session without a screen to ask on needs `--yes`.
+- **`reinstate` is the way back from `retire`** and goes the same way: the door is
+  asked with a dry run first (a rule that is not retired, an id that is loaded again, a
+  place that does not exist is told, word for word, without a question), `--dry`
+  stops there, `--yes` skips the question. It is `reinstate` of
+  [`rules-ops/1`](CONTRACT.md#rules-ops1-write) and nothing else: the file returns to
+  where it came from (`was:` in its frontmatter), the id is in use again.
+  - **The place** is one of `--after=<id>`, `--before=<id>` (in the layout that holds
+    that rule; `--layout=<file>` names the layout when several hold it) or
+    `--section=<heading>` with `--layout=<file>` (`--first`: the start of the
+    section, not its end; a blank in the heading is written with a backslash before
+    it). It is handed to the door as typed: two places, `--section` without
+    `--layout`, `--first` without a section or a layout that does not exist are what
+    the door answers (`invalid_argument: ...`). Note that this is `--section=` and
+    `--layout=`, not the `--to=<file>#<section>` of `new` and `move`.
+  - **Without a place** the command does not guess one. Where the rule stood is not
+    on disk: only the answer of the `retire` carried it (`inverse`, for an app or an
+    agent), and the file of a retired rule keeps no layout. So the rule comes back in
+    **no layout**; the question says so, and the command says it again afterwards
+    (`DEP-03 stands in no layout: ...`), naming the flags and `:Rules move` to put
+    it in one. `:Rules catalog` names a rule that is in no layout.
+  - **The open buffers** are looked after as for every write: an unmodified buffer
+    of the layout, or of the rule's file (left open by the `retire`), is reloaded; a
+    buffer with unsaved changes is a conflict and left as it is; the buffer of the
+    removed `_retired/` file is named and left open.
 - **The open buffers of the ruleset** are looked after around every write: an
   unmodified buffer of a file that changed (the rule, a layout, a generated
   document) is reloaded; a buffer with **unsaved changes** is left as it is and

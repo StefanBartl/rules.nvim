@@ -1,5 +1,5 @@
 ---@module 'rules.ui.cmd'
----@brief The handlers of `:Rules new`, `set`, `retire`, `move` and `list` -- words in, one request to `rules-ops/1` out.
+---@brief The handlers of `:Rules new`, `set`, `retire`, `reinstate`, `move`, `list` -- words in, one request to the door out.
 ---@description
 --- A thin layer: a handler reads the command line (`rules.cmdline`), builds the operation and hands it to the door
 --- through `rules.write` (the open buffers are looked after, the answer is told). It checks nothing of a rule itself:
@@ -11,6 +11,9 @@
 ---    made, then the write
 ---  - `set`: `key=value` words (a value may hold spaces)
 ---  - `retire`: `dry_run` first, then the question (`--yes` skips it), then the write
+---  - `reinstate`: the same, for a retired rule; a place (`--after=`, `--before=`, `--section=` with `--layout=`) is
+---    handed to the door as given. Without one the rule comes back in no layout, and that is told: where it stood is
+---    not recorded on disk
 ---  - `move`: one place (`--to=`, `--after=`, `--before=`)
 ---  - `list`: the quickfix list, one rule at its source line (`--format=json` prints the document of `rules-export/1`)
 ---
@@ -373,6 +376,52 @@ end
 
 -- ── retire ──────────────────────────────────────────────────────────────────────
 
+---How a verb that asks goes: the door checks first (`dry_run`), `--dry` stops there, `--yes` writes at once, otherwise
+---the question is asked and only a Yes writes. A step the door would refuse is told without a question.
+---@class Rules.AskSpec
+---@field question fun(entry: table): string  the text of the question, from the entry of the dry run
+---@field yes_label string                    "Yes, <yes_label>"
+---@field declined string                     told when the answer is not a yes
+---@field nobody string                       told when there is no screen to ask on and no `--yes`
+---@field after? fun(entry: table, dry: boolean)  told after the dry run (`--dry`) and after the write
+
+---@param ctx table
+---@param op table  the operation
+---@param spec Rules.AskSpec
+local function ask_then_run(ctx, op, spec)
+  local dry = write().run({ op }, { dry = true })
+  local checked = ok_entry(dry)
+  if ctx.flags.dry or not checked then
+    write().say(dry, { op })
+    if ctx.flags.dry and checked and spec.after then
+      spec.after(checked, true)
+    end
+    return
+  end
+  local function go()
+    local result = run({ op }, false)
+    local done = ok_entry(result)
+    if done and spec.after then
+      spec.after(done, false)
+    end
+  end
+  if ctx.flags.yes then
+    go()
+    return
+  end
+  if #vim.api.nvim_list_uis() == 0 then
+    notify.error(spec.nobody)
+    return
+  end
+  require("rules.ui.confirm").yesno(spec.question(checked), spec.yes_label, function(yes)
+    if yes then
+      go()
+    else
+      notify.info(spec.declined)
+    end
+  end)
+end
+
 ---`:Rules retire <ID> [--by=<ID>] [reason=...] [--yes] [--dry]`
 ---@param ctx table
 function M.retire(ctx)
@@ -395,36 +444,83 @@ function M.retire(ctx)
     op.reason = values.reason
   end
 
-  -- the door checks first (an id that is not there, a rule it cannot retire): the question is asked only for a
-  -- step that would happen
-  local dry = write().run({ op }, { dry = true })
-  if ctx.flags.dry or not ok_entry(dry) then
-    write().say(dry, { op })
-    return
-  end
-  local function go()
-    run({ op }, false)
-  end
-  if ctx.flags.yes then
-    go()
-    return
-  end
-  if #vim.api.nvim_list_uis() == 0 then
-    notify.error(("retire asks before it moves %s, and there is nobody to ask: run it with --yes"):format(id))
-    return
-  end
   local by = op.replaced_by and (" Replaced by %s."):format(op.replaced_by) or ""
-  require("rules.ui.confirm").yesno(
-    ("Retire %s?\n\nIts file moves to _retired/, the id stays taken, and it leaves every layout.%s"):format(id, by),
-    "retire",
-    function(yes)
-      if yes then
-        go()
-      else
-        notify.info(("%s was not retired"):format(id))
-      end
+  ask_then_run(ctx, op, {
+    question = function()
+      return ("Retire %s?\n\nIts file moves to _retired/, the id stays taken, and it leaves every layout.%s"):format(id, by)
+    end,
+    yes_label = "retire",
+    declined = ("%s was not retired"):format(id),
+    nobody = ("retire asks before it moves %s, and there is nobody to ask: run it with --yes"):format(id),
+  })
+end
+
+-- ── reinstate ───────────────────────────────────────────────────────────────────
+
+---What `reinstate` without a place leaves undone, said once the dry run or the write is over: the file is back, the
+---rule stands in no layout. Where it stood before it was retired is not on disk (only the answer of that `retire`
+---carried it), so the command cannot know it and does not guess.
+---@param id string
+---@return string
+local function unplaced_text(id)
+  local give = "Give --after=<ID>, --before=<ID> or --section=<heading> with --layout=<file>,"
+  local later = ("or put it in one later with :Rules move %s --after=<ID>"):format(id)
+  return ("%s stands in no layout: where it stood before it was retired is not recorded. %s %s"):format(id, give, later)
+end
+
+---`:Rules reinstate <ID> [--after=<ID>|--before=<ID>|--section=<heading> [--first]] [--layout=<file>] [--yes] [--dry]`
+---The place is handed to the door as given, with no check of its own: a place that does not exist, two places, a
+---`--section` without its `--layout` are what the door answers.
+---@param ctx table
+function M.reinstate(ctx)
+  local routes = require("rules.ui.routes")
+  local words, werr = M.words(ctx, routes.FLAGS.reinstate)
+  if not words then
+    notify.error(tostring(werr))
+    return
+  end
+  local bound = cmdline.bind(words, {}, false)
+  local left = bound and bound.lead or {}
+  if #left > 0 then
+    local hint = ""
+    if ctx.flags.section then
+      hint = " (a blank in a section is written with a backslash before it)"
     end
-  )
+    notify.error(("unexpected argument: %s%s"):format(cmdline.join(left), hint))
+    return
+  end
+  local id = ctx.args.id
+  ---@type table
+  local op = {
+    op = "reinstate",
+    id = id,
+    after = ctx.flags.after,
+    before = ctx.flags.before,
+    section = ctx.flags.section,
+    layout = ctx.flags.layout,
+  }
+  if ctx.flags.first then
+    op.first = true
+  end
+
+  ask_then_run(ctx, op, {
+    question = function(entry)
+      local where = "It stands in no layout afterwards: where it stood is not recorded (--after=, --before= or --section="
+        .. " with --layout= put it in one)."
+      if entry.placed and entry.placed.layout then
+        where = ("It is put into %s."):format(entry.placed.layout)
+      end
+      return ("Reinstate %s?\n\nIts file comes back from _retired/ and the id is in use again. %s"):format(id, where)
+    end,
+    yes_label = "reinstate",
+    declined = ("%s was not reinstated"):format(id),
+    nobody = ("reinstate asks before it brings %s back, and there is nobody to ask: run it with --yes"):format(id),
+    after = function(entry)
+      if not entry.placed then
+        notify.warn(unplaced_text(id))
+      end
+    end,
+  })
 end
 
 -- ── move ────────────────────────────────────────────────────────────────────────

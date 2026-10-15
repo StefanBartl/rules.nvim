@@ -40,7 +40,17 @@ describe(":Rules option float", function()
 
   it("keeps the type texts of the positional arguments to one short line", function()
     local argtypes = require("lib.nvim.bindings.usercmd.composer.argtypes")
-    for _, name in ipairs({ "RULES_GATE", "RULES_ID", "RULES_FAMILY", "RULES_PLACE", "RULES_RULESET" }) do
+    local types = {
+      "RULES_GATE",
+      "RULES_ID",
+      "RULES_RETIRED_ID",
+      "RULES_FAMILY",
+      "RULES_PLACE",
+      "RULES_RULESET",
+      "RULES_LAYOUT",
+      "RULES_SECTION",
+    }
+    for _, name in ipairs(types) do
       local text = argtypes.get(name).desc or ""
       assert.is_true(text ~= "", name .. " shows a text")
       assert.is_nil(text:find("\n", 1, true), name .. " is one line")
@@ -94,6 +104,7 @@ describe(":Rules option float", function()
       new = { "to", "after", "before", "first", "dry" },
       set = { "dry" },
       retire = { "by", "yes", "dry" },
+      reinstate = { "after", "before", "section", "first", "layout", "yes", "dry" },
       move = { "to", "after", "before", "first", "dry" },
       list = { "family", "severity", "format" },
     }

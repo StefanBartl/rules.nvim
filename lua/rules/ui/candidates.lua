@@ -29,16 +29,17 @@ local function view()
   return ok and result or nil
 end
 
----Distinct values of `field` over the rules, sorted.
+---Distinct values of `field` over the loaded rules (or over the retired ones), sorted.
 ---@param field "id"|"family"
+---@param retired? boolean  the retired rules of the scan, not the loaded ones
 ---@return string[]
-local function column(field)
+local function column(field, retired)
   local scan = view()
   if not scan then
     return {}
   end
   local seen, out = {}, {}
-  for _, rule in ipairs(scan.rules) do
+  for _, rule in ipairs(retired and (scan.retired or {}) or scan.rules) do
     local value = rule[field]
     if value and not seen[value] then
       seen[value] = true
@@ -79,6 +80,19 @@ end
 ---@return string[]
 function M.ids()
   return column("id")
+end
+
+---The ids of the retired rules that no loaded rule has again: the ones `:Rules reinstate` can bring back. (An id that is
+---loaded AND retired - a file in `_retired/` of a rule that was made again - is no candidate: the door refuses it.)
+---@return string[]
+function M.retired_ids()
+  local loaded = {}
+  for _, id in ipairs(column("id")) do
+    loaded[id] = true
+  end
+  return vim.tbl_filter(function(id)
+    return not loaded[id]
+  end, column("id", true))
 end
 
 ---The names the rulesets go by in a document.
@@ -180,6 +194,37 @@ function M.places(lead)
     end
   end
   return out
+end
+
+---The heading texts of every layout (each once, in the order they are found) that start with `lead`, a blank written
+---`\ ` as the command line wants it: what `--section=` offers. Which layout the heading belongs to is not known at
+---that point of the line (`--layout=` may come after it), so all of them are offered.
+---@param lead string
+---@return string[]
+function M.sections(lead)
+  local all = layouts()
+  local outputs = vim.tbl_keys(all)
+  table.sort(outputs)
+  local seen, out = {}, {}
+  for _, output in ipairs(outputs) do
+    for _, heading in ipairs(all[output]) do
+      local candidate = escape(heading)
+      if not seen[candidate] and candidate:sub(1, #lead) == lead then
+        seen[candidate] = true
+        out[#out + 1] = candidate
+      end
+    end
+  end
+  return out
+end
+
+---The `output` paths of the layouts that start with `lead`: what `--layout=` offers.
+---@param lead string
+---@return string[]
+function M.layouts(lead)
+  return vim.tbl_filter(function(output)
+    return output:sub(1, #lead) == lead
+  end, M.layout_outputs())
 end
 
 ---Forget what was kept (the specs, after they wrote a layout).
