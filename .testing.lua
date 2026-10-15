@@ -12,7 +12,7 @@ return {
   isolated = "file",
   host = "c",
   -- TESTS/vault_ci_spec.lua: the opt-in run against the real rulesets names its two folders in these variables.
-  env_allow = { "RULES_REAL_LUA", "RULES_REAL_NATIVE" },
+  env_allow = { "RULES_REAL_LUA", "RULES_REAL_NATIVE", "RULES_REAL_GO" },
   -- Guards (docs/GUARDS.md of testing.nvim). The suite is clean for these, so they raise errors.
   guards = {
     fs = "error",
