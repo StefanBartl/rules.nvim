@@ -32,28 +32,28 @@ end
 
 describe("rules.engine.waivers.valid_date", function()
   it("takes a real calendar date, YYYY-MM-DD", function()
-    for _, date in ipairs({ "2026-10-15", "2028-02-29", "2000-02-29", "2026-12-31", "0001-01-01" }) do
+    for _, date in ipairs({ "2030-10-15", "2028-02-29", "2000-02-29", "2030-12-31", "0001-01-01" }) do
       assert.is_true(waivers.valid_date(date), date)
     end
   end)
 
   it("refuses a day the calendar does not have", function()
-    for _, date in ipairs({ "2027-02-29", "1900-02-29", "2026-04-31", "2026-13-01", "2026-00-10", "2026-10-00", "0000-01-01" }) do
+    for _, date in ipairs({ "2031-02-29", "1900-02-29", "2030-04-31", "2030-13-01", "2030-00-10", "2030-10-00", "0000-01-01" }) do
       assert.is_false(waivers.valid_date(date), date)
     end
   end)
 
   it("refuses any other spelling: no time, no time zone, no short fields, no other type", function()
     for _, date in ipairs({
-      "2026-10-15T00:00:00Z",
-      "2026-10-15T00:00",
-      "2026-10-15Z",
-      "2026-10-15+02:00",
-      "2026-1-5",
+      "2030-10-15T00:00:00Z",
+      "2030-10-15T00:00",
+      "2030-10-15Z",
+      "2030-10-15+02:00",
+      "2030-1-5",
       "26-10-15",
       "2026/10/15",
-      " 2026-10-15",
-      "2026-10-15 ",
+      " 2030-10-15",
+      "2030-10-15 ",
       "20261015",
       "",
     }) do
@@ -79,11 +79,11 @@ describe("rules.engine.waivers clock", function()
       return "2031-03-04"
     end
     assert.are.equal("2031-03-04", (waivers.today(nil)))
-    assert.are.equal("2026-10-15", (waivers.today("2026-10-15")))
+    assert.are.equal("2030-10-15", (waivers.today("2030-10-15")))
   end)
 
   it("a date that is none is an error, not the clock", function()
-    local today, err = waivers.today("2026-02-30")
+    local today, err = waivers.today("2030-02-30")
     assert.is_nil(today)
     assert.matches("YYYY%-MM%-DD", err)
   end)
@@ -93,22 +93,22 @@ describe("rules.engine.waivers clock", function()
   end)
 
   it("a waiver is valid through its last day and expired the day after", function()
-    local entry = { reason = "r", expires = "2026-10-15" }
-    assert.is_false(waivers.is_expired(entry, "2026-10-14"))
-    assert.is_false(waivers.is_expired(entry, "2026-10-15"))
-    assert.is_true(waivers.is_expired(entry, "2026-10-16"))
-    assert.is_true(waivers.is_expired(entry, "2027-01-01"))
+    local entry = { reason = "r", expires = "2030-10-15" }
+    assert.is_false(waivers.is_expired(entry, "2030-10-14"))
+    assert.is_false(waivers.is_expired(entry, "2030-10-15"))
+    assert.is_true(waivers.is_expired(entry, "2030-10-16"))
+    assert.is_true(waivers.is_expired(entry, "2031-01-01"))
     assert.is_false(waivers.is_expired({ reason = "r" }, "2099-12-31"))
   end)
 
   it("expired() lists the ids that ran out, sorted", function()
     local entries = {
-      ["B-02"] = { reason = "r", expires = "2026-01-01" },
-      ["A-01"] = { reason = "r", expires = "2026-02-01" },
-      ["C-03"] = { reason = "r", expires = "2026-10-15" },
+      ["B-02"] = { reason = "r", expires = "2030-01-01" },
+      ["A-01"] = { reason = "r", expires = "2030-02-01" },
+      ["C-03"] = { reason = "r", expires = "2030-10-15" },
       ["D-04"] = { reason = "r" },
     }
-    assert.are.same({ "A-01", "B-02" }, waivers.expired(entries, "2026-10-15"))
+    assert.are.same({ "A-01", "B-02" }, waivers.expired(entries, "2030-10-15"))
   end)
 end)
 
@@ -120,9 +120,9 @@ describe("rules.engine.waivers.load_entries: the object form", function()
       [[{
         "DEP-01": "old form",
         "DEP-02": { "reason": "new form" },
-        "DEP-03": { "reason": "dated", "expires": "2026-12-31" },
+        "DEP-03": { "reason": "dated", "expires": "2030-12-31" },
         "DEP-04": { "reason": "scoped", "paths": ["src", "docs/**/*.md"] },
-        "DEP-05": { "reason": "both", "expires": "2027-02-28", "paths": ["lib/"] }
+        "DEP-05": { "reason": "both", "expires": "2031-02-28", "paths": ["lib/"] }
       }]]
     )
 
@@ -131,14 +131,14 @@ describe("rules.engine.waivers.load_entries: the object form", function()
     assert.is_nil(err)
     assert.are.same({ reason = "old form" }, entries["DEP-01"])
     assert.are.same({ reason = "new form" }, entries["DEP-02"])
-    assert.are.same({ reason = "dated", expires = "2026-12-31" }, entries["DEP-03"])
+    assert.are.same({ reason = "dated", expires = "2030-12-31" }, entries["DEP-03"])
     assert.are.same({ reason = "scoped", paths = { "src", "docs/**/*.md" } }, entries["DEP-04"])
-    assert.are.same({ reason = "both", expires = "2027-02-28", paths = { "lib/" } }, entries["DEP-05"])
+    assert.are.same({ reason = "both", expires = "2031-02-28", paths = { "lib/" } }, entries["DEP-05"])
   end)
 
   it("load() keeps its shape for existing callers: the reason text of every entry", function()
     local dir = tmp_dir()
-    put(dir, '{"DEP-01": "old form", "DEP-03": {"reason": "dated", "expires": "2026-12-31"}}')
+    put(dir, '{"DEP-01": "old form", "DEP-03": {"reason": "dated", "expires": "2030-12-31"}}')
 
     local reasons, err = waivers.load(dir)
 
@@ -148,19 +148,19 @@ describe("rules.engine.waivers.load_entries: the object form", function()
 
   -- every one of these is a file that exists and cannot be used: an error, never "no waivers"
   local BAD = {
-    { name = "an unknown key", json = '{"DEP-01": {"reason": "r", "expiry": "2026-12-31"}}', match = "unknown key" },
-    { name = "no reason", json = '{"DEP-01": {"expires": "2026-12-31"}}', match = "needs a reason" },
+    { name = "an unknown key", json = '{"DEP-01": {"reason": "r", "expiry": "2030-12-31"}}', match = "unknown key" },
+    { name = "no reason", json = '{"DEP-01": {"expires": "2030-12-31"}}', match = "needs a reason" },
     { name = "an empty reason", json = '{"DEP-01": {"reason": "   "}}', match = "says something" },
     { name = "a reason that is no text", json = '{"DEP-01": {"reason": 5}}', match = "must be a text" },
     { name = "a multi-line reason", json = '{"DEP-01": {"reason": "a\\nb"}}', match = "newline" },
     { name = "a too long reason", json = '{"DEP-01": {"reason": "' .. string.rep("x", 501) .. '"}}', match = "exceeds" },
     {
       name = "a date with a time",
-      json = '{"DEP-01": {"reason": "r", "expires": "2026-12-31T10:00:00"}}',
+      json = '{"DEP-01": {"reason": "r", "expires": "2030-12-31T10:00:00"}}',
       match = "YYYY%-MM%-DD",
     },
-    { name = "a date with a time zone", json = '{"DEP-01": {"reason": "r", "expires": "2026-12-31Z"}}', match = "YYYY%-MM%-DD" },
-    { name = "a day the calendar lacks", json = '{"DEP-01": {"reason": "r", "expires": "2027-02-29"}}', match = "YYYY%-MM%-DD" },
+    { name = "a date with a time zone", json = '{"DEP-01": {"reason": "r", "expires": "2030-12-31Z"}}', match = "YYYY%-MM%-DD" },
+    { name = "a day the calendar lacks", json = '{"DEP-01": {"reason": "r", "expires": "2031-02-29"}}', match = "YYYY%-MM%-DD" },
     { name = "a date that is a number", json = '{"DEP-01": {"reason": "r", "expires": 20261231}}', match = "YYYY%-MM%-DD" },
     { name = "a date that is null", json = '{"DEP-01": {"reason": "r", "expires": null}}', match = "YYYY%-MM%-DD" },
     { name = "paths that is a text", json = '{"DEP-01": {"reason": "r", "paths": "src"}}', match = "list of text" },
@@ -265,7 +265,7 @@ end)
 describe("rules.engine.waivers.encode", function()
   it("writes sorted keys, two spaces, LF and a final newline; a reason alone stays the short form", function()
     local text = waivers.encode({
-      ["DEP-02"] = { reason = "b", expires = "2026-12-31", paths = { "src", "docs" } },
+      ["DEP-02"] = { reason = "b", expires = "2030-12-31", paths = { "src", "docs" } },
       ["DEP-01"] = { reason = "a" },
     })
 
@@ -274,7 +274,7 @@ describe("rules.engine.waivers.encode", function()
         "{",
         '  "DEP-01": "a",',
         '  "DEP-02": {',
-        '    "expires": "2026-12-31",',
+        '    "expires": "2030-12-31",',
         '    "paths": [',
         '      "src",',
         '      "docs"',
@@ -296,7 +296,7 @@ describe("rules.engine.waivers.encode", function()
   it("reads back as what was written", function()
     local entries = {
       ["DEP-01"] = { reason = 'with "quotes" and a / slash and ünïcode' },
-      ["DEP-02"] = { reason = "b", expires = "2026-12-31", paths = { "src" } },
+      ["DEP-02"] = { reason = "b", expires = "2030-12-31", paths = { "src" } },
     }
     local back, err = waivers.parse(waivers.encode(entries), "x")
     assert.is_nil(err)
@@ -404,45 +404,45 @@ describe("rules.engine.runner with expiring and path-limited waivers", function(
 
   it("a waiver on its last day still waives", function()
     local root = project()
-    local w = { ["DEP-01"] = { reason = "tracked", expires = "2026-10-15" } }
+    local w = { ["DEP-01"] = { reason = "tracked", expires = "2030-10-15" } }
 
-    local res = find(runner.check_family(rules, "DEP", root, w, { today = "2026-10-15" }), "DEP-01")
+    local res = find(runner.check_family(rules, "DEP", root, w, { today = "2030-10-15" }), "DEP-01")
 
     assert.are.equal("waived", res.status)
     assert.are.equal("tracked", res.waiver_reason)
-    assert.are.equal("2026-10-15", res.waiver_expires)
+    assert.are.equal("2030-10-15", res.waiver_expires)
     assert.is_nil(res.expired_waiver)
     assert.are.equal(2, #res.findings)
   end)
 
   it("the day after, it is expired: the finding flags again and the result says when and why", function()
     local root = project()
-    local w = { ["DEP-01"] = { reason = "tracked", expires = "2026-10-15" } }
+    local w = { ["DEP-01"] = { reason = "tracked", expires = "2030-10-15" } }
 
-    local res = find(runner.check_family(rules, "DEP", root, w, { today = "2026-10-16" }), "DEP-01")
+    local res = find(runner.check_family(rules, "DEP", root, w, { today = "2030-10-16" }), "DEP-01")
 
     assert.are.equal("fail", res.status)
     assert.are.equal(2, #res.findings)
-    assert.are.same({ reason = "tracked", expires = "2026-10-15" }, res.expired_waiver)
+    assert.are.same({ reason = "tracked", expires = "2030-10-15" }, res.expired_waiver)
     assert.is_nil(res.waiver_reason)
   end)
 
   it("an expired waiver of a rule that passes is told too: it is a waiver to renew or remove", function()
     local root = project()
-    local w = { ["DEP-09"] = { reason = "old", expires = "2026-01-01" } }
+    local w = { ["DEP-09"] = { reason = "old", expires = "2030-01-01" } }
 
-    local res = find(runner.check_family(rules, "DEP", root, w, { today = "2026-10-16" }), "DEP-09")
+    local res = find(runner.check_family(rules, "DEP", root, w, { today = "2030-10-16" }), "DEP-09")
 
     assert.are.equal("pass", res.status)
-    assert.are.equal("2026-01-01", res.expired_waiver.expires)
+    assert.are.equal("2030-01-01", res.expired_waiver.expires)
   end)
 
   it("takes the date from the clock when the run is given none", function()
     local root = project()
-    local w = { ["DEP-01"] = { reason = "tracked", expires = "2026-10-15" } }
+    local w = { ["DEP-01"] = { reason = "tracked", expires = "2030-10-15" } }
     local saved = waivers.clock
     waivers.clock = function()
-      return "2026-10-16"
+      return "2030-10-16"
     end
     local results = runner.check_family(rules, "DEP", root, w)
     waivers.clock = saved
@@ -463,7 +463,7 @@ describe("rules.engine.runner with expiring and path-limited waivers", function(
     local root = project()
     local w = { ["DEP-01"] = { reason = "r", paths = { "src", "docs/*.lua" } } }
 
-    local res = find(runner.check_family(rules, "DEP", root, w, { today = "2026-10-15" }), "DEP-01")
+    local res = find(runner.check_family(rules, "DEP", root, w, { today = "2030-10-15" }), "DEP-01")
 
     assert.are.equal("waived", res.status)
     assert.are.same({ "src", "docs/*.lua" }, res.waiver_paths)
@@ -473,7 +473,7 @@ describe("rules.engine.runner with expiring and path-limited waivers", function(
     local root = project()
     local w = { ["DEP-01"] = { reason = "legacy", paths = { "src" } } }
 
-    local res = find(runner.check_family(rules, "DEP", root, w, { today = "2026-10-15" }), "DEP-01")
+    local res = find(runner.check_family(rules, "DEP", root, w, { today = "2030-10-15" }), "DEP-01")
 
     assert.are.equal("fail", res.status)
     assert.are.equal(1, #res.findings)
@@ -486,7 +486,7 @@ describe("rules.engine.runner with expiring and path-limited waivers", function(
     local root = project()
     local w = { ["DEP-01"] = { reason = "legacy", paths = { "vendor" } } }
 
-    local res = find(runner.check_family(rules, "DEP", root, w, { today = "2026-10-15" }), "DEP-01")
+    local res = find(runner.check_family(rules, "DEP", root, w, { today = "2030-10-15" }), "DEP-01")
 
     assert.are.equal("fail", res.status)
     assert.are.equal(2, #res.findings)
@@ -498,7 +498,7 @@ describe("rules.engine.runner with expiring and path-limited waivers", function(
     local broken = { { id = "DEP-05", severity = "critical", check = { type = "nope" } } }
     local w = { ["DEP-05"] = { reason = "legacy", paths = { "src" } } }
 
-    local res = runner.check_family(broken, "DEP", root, w, { today = "2026-10-15" })[1]
+    local res = runner.check_family(broken, "DEP", root, w, { today = "2030-10-15" })[1]
 
     assert.are.equal("error", res.status)
   end)
@@ -508,7 +508,7 @@ describe("rules.engine.runner with expiring and path-limited waivers", function(
     local w = { ["DEP-01"] = { reason = "r", paths = { "src", "docs" } } }
     local saved = vim.fn.getcwd()
     vim.cmd.cd(vim.fn.fnameescape(root .. "/src"))
-    local results = runner.check_family(rules, "DEP", root, w, { today = "2026-10-15" })
+    local results = runner.check_family(rules, "DEP", root, w, { today = "2030-10-15" })
     vim.cmd.cd(vim.fn.fnameescape(saved))
 
     assert.are.equal("waived", find(results, "DEP-01").status)
@@ -537,12 +537,12 @@ describe("rules.report.buffer with waivers", function()
         status = "waived",
         findings = { { file = "a", line = 1, text = "t" } },
         waiver_reason = "legacy",
-        waiver_expires = "2026-12-31",
+        waiver_expires = "2030-12-31",
         waiver_paths = { "src", "docs" },
       },
     })
 
-    assert.are.equal("⚪ DEP-01 -- waived (legacy, until 2026-12-31, only in src, docs): 1 finding(s) suppressed", lines[3])
+    assert.are.equal("⚪ DEP-01 -- waived (legacy, until 2030-12-31, only in src, docs): 1 finding(s) suppressed", lines[3])
   end)
 
   it("a waived rule without expiry or paths reads as it always did", function()
@@ -559,22 +559,22 @@ describe("rules.report.buffer with waivers", function()
         rule = rule,
         status = "fail",
         findings = { { file = "a.lua", line = 3, text = "t" } },
-        expired_waiver = { reason = "legacy", expires = "2026-09-01" },
+        expired_waiver = { reason = "legacy", expires = "2030-09-01" },
       },
     })
 
     assert.are.equal("🟡 DEP-01 -- 1 finding(s)", lines[3])
     assert.are.equal("      a.lua:3: t", lines[4])
-    assert.are.equal("      waiver expired on 2026-09-01 (legacy): renew it or remove it", lines[5])
+    assert.are.equal("      waiver expired on 2030-09-01 (legacy): renew it or remove it", lines[5])
   end)
 
   it("an expired waiver of a passing rule is said too", function()
     local lines = buffer.render({
-      { rule = rule, status = "pass", findings = {}, expired_waiver = { reason = "legacy", expires = "2026-09-01" } },
+      { rule = rule, status = "pass", findings = {}, expired_waiver = { reason = "legacy", expires = "2030-09-01" } },
     })
 
     assert.are.equal("🟡 DEP-01 -- ok", lines[3])
-    assert.matches("waiver expired on 2026%-09%-01 %(legacy%)", lines[4])
+    assert.matches("waiver expired on 2030%-09%-01 %(legacy%)", lines[4])
   end)
 
   it("a waiver that covered some findings by path says how many", function()
@@ -602,22 +602,22 @@ describe("rules.report.json with waivers", function()
         status = "waived",
         findings = {},
         waiver_reason = "r",
-        waiver_expires = "2026-12-31",
+        waiver_expires = "2030-12-31",
         waiver_paths = { "src" },
       },
-      { rule = rule, status = "fail", findings = {}, expired_waiver = { reason = "r", expires = "2026-01-01" } },
+      { rule = rule, status = "fail", findings = {}, expired_waiver = { reason = "r", expires = "2030-01-01" } },
       { rule = rule, status = "fail", findings = {}, partial_waiver = { reason = "r", paths = { "src" }, suppressed = 2 } },
     })
 
-    assert.are.equal("2026-12-31", entries[1].waiver_expires)
+    assert.are.equal("2030-12-31", entries[1].waiver_expires)
     assert.are.same({ "src" }, entries[1].waiver_paths)
-    assert.are.equal("2026-01-01", entries[2].expired_waiver.expires)
+    assert.are.equal("2030-01-01", entries[2].expired_waiver.expires)
     assert.are.equal(2, entries[3].partial_waiver.suppressed)
   end)
 
   it("an expired waiver on a critical rule that fails keeps the exit code at 1", function()
     local results = {
-      { rule = rule, status = "fail", findings = {}, expired_waiver = { reason = "r", expires = "2026-01-01" } },
+      { rule = rule, status = "fail", findings = {}, expired_waiver = { reason = "r", expires = "2030-01-01" } },
     }
     assert.are.equal(1, json.exit_code(results))
   end)
@@ -633,14 +633,14 @@ describe("a diff-scoped gate", function()
         rule = { id = "DEP-01" },
         status = "fail",
         findings = { { file = file, line = 1, text = "t" } },
-        expired_waiver = { reason = "r", expires = "2026-01-01" },
+        expired_waiver = { reason = "r", expires = "2030-01-01" },
       },
     }
 
     local scoped = gate.scope_to_diff(results, { [file] = true })
 
     assert.are.equal("fail", scoped[1].status)
-    assert.are.equal("2026-01-01", scoped[1].expired_waiver.expires)
+    assert.are.equal("2030-01-01", scoped[1].expired_waiver.expires)
   end)
 
   it("keeps the note of an expired waiver on a rule the diff leaves passing", function()
@@ -649,13 +649,13 @@ describe("a diff-scoped gate", function()
         rule = { id = "DEP-01" },
         status = "fail",
         findings = { { file = "elsewhere.lua", line = 1, text = "t" } },
-        expired_waiver = { reason = "r", expires = "2026-01-01" },
+        expired_waiver = { reason = "r", expires = "2030-01-01" },
       },
     }
 
     local scoped = gate.scope_to_diff(results, {})
 
     assert.are.equal("pass", scoped[1].status)
-    assert.are.equal("2026-01-01", scoped[1].expired_waiver.expires)
+    assert.are.equal("2030-01-01", scoped[1].expired_waiver.expires)
   end)
 end)
