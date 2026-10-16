@@ -820,6 +820,88 @@ describe("rules-ops/1 waivers: a file that cannot be used", function()
   end)
 end)
 
+describe("rules-ops/1 waivers: the file as the engine reads it", function()
+  local api = require("rules.api")
+  local BOM = "\239\187\191"
+
+  ---@param target string
+  ---@param link string
+  ---@return boolean made
+  local function symlink(target, link)
+    return (pcall(function()
+      assert(vim.uv.fs_symlink(target, link))
+    end))
+  end
+
+  it("a file with a byte order mark is usable by the door and the document, as it is by the engine", function()
+    local fx = fixture()
+    write_raw(fx.file, BOM .. '{"ERR-01": "old form", "DEP-02": {"reason": "dated", "expires": "2031-01-01"}}')
+    -- the engine reads it ...
+    local entries, err = waivers.load_entries(fx.project)
+    assert.is_nil(err)
+    assert.are.same({ reason = "old form" }, entries["ERR-01"])
+
+    -- ... so the document does ...
+    local doc, code = vim.json.decode((api.call("waivers", nil, fx.opts))), nil
+    assert.are.equal("rules.waivers", doc.kind, vim.inspect(doc))
+    assert.are.same({ total = 2, expired = 0, unknown = 0 }, doc.counts)
+    assert.are.equal(etag.of(read_raw(fx.file)), doc.etag, code)
+
+    -- ... and so does the write door: waive, renew and remove all work, and the file comes out canonical (no mark)
+    local waive = one(fx.opts, { op = "waive", id = "DEP-01", reason = "new" })
+    assert.is_true(waive.ok, vim.inspect(waive))
+    assert.are.equal(nil, read_raw(fx.file):find(BOM, 1, true))
+    write_raw(fx.file, BOM .. read_raw(fx.file))
+    local renew = one(fx.opts, { op = "renew", id = "DEP-02", expires = "2032-01-01" })
+    assert.is_true(renew.ok, vim.inspect(renew))
+    write_raw(fx.file, BOM .. read_raw(fx.file))
+    local remove = one(fx.opts, { op = "remove", id = "ERR-01" })
+    assert.is_true(remove.ok, vim.inspect(remove))
+    local after = waivers.load_entries(fx.project)
+    assert.are.same({ "DEP-01", "DEP-02" }, vim.fn.sort(vim.tbl_keys(after)))
+  end)
+
+  it("a link where the file belongs is read: the document lists it, only the write refuses", function()
+    local fx = fixture()
+    local target = tmp_dir() .. "/shared.json"
+    write_raw(target, '{"DEP-01": {"reason": "shared by the monorepo", "expires": "2030-10-15"}}')
+    if not symlink(target, fx.file) then
+      pending("this machine cannot make a symbolic link")
+      return
+    end
+    -- the engine follows the link ...
+    local entries, err = waivers.load_entries(fx.project)
+    assert.is_nil(err)
+    assert.are.equal("shared by the monorepo", entries["DEP-01"].reason)
+
+    -- ... so does the read-only document ...
+    local text, code = api.call("waivers", nil, fx.opts)
+    local doc = vim.json.decode(text)
+    assert.is_nil(code, text)
+    assert.are.equal("rules.waivers", doc.kind)
+    assert.are.equal("DEP-01", doc.items[1].id)
+    assert.is_true(doc.exists)
+    assert.are.equal(etag.of(read_raw(target)), doc.etag)
+
+    -- ... and a write still refuses, with the file the link points to untouched
+    refused(one(fx.opts, { op = "renew", id = "DEP-01", expires = "2031-01-01" }), "forbidden")
+    assert.are.equal('{"DEP-01": {"reason": "shared by the monorepo", "expires": "2030-10-15"}}', read_raw(target))
+  end)
+
+  it("a link that leads nowhere is a file that cannot be used, for the document too", function()
+    local fx = fixture()
+    if not symlink(tmp_dir() .. "/missing.json", fx.file) then
+      pending("this machine cannot make a symbolic link")
+      return
+    end
+
+    local doc, code = vim.json.decode((api.call("waivers", nil, fx.opts))), nil
+    assert.are.equal("rules.error", doc.kind, code)
+    assert.are.equal("invalid_argument", doc.code)
+    assert_no_path(doc.message, fx.project)
+  end)
+end)
+
 describe("rules-export/1 waivers", function()
   local api = require("rules.api")
 
@@ -992,5 +1074,29 @@ describe("scripts/ruleset.lua check --waivers", function()
     -- wrong usage: --waivers needs a project, --today needs --waivers
     assert.are.equal(2, check({ "--waivers", fx.ruleset }).code)
     assert.are.equal(2, check({ "--today=2030-10-15", "--project=" .. fx.project, fx.ruleset }).code)
+  end)
+
+  it("reads the waivers file through a link, and one with a byte order mark: the engine does", function()
+    if not vim.env.LIB_NVIM_DIR or vim.env.LIB_NVIM_DIR == "" then
+      pending("LIB_NVIM_DIR is not set: the script cannot find lib.nvim")
+      return
+    end
+    local fx = fixture()
+    local target = tmp_dir() .. "/shared.json"
+    write_raw(target, "\239\187\191" .. '{"DEP-01": {"reason": "shared", "expires": "2030-10-15"}}')
+    local made = pcall(function()
+      assert(vim.uv.fs_symlink(target, fx.file))
+    end)
+    if not made then
+      pending("this machine cannot make a symbolic link")
+      return
+    end
+
+    local valid = check({ "--waivers", "--today=2030-10-15", "--project=" .. fx.project, fx.ruleset })
+    assert.are.equal(0, valid.code, valid.stdout .. valid.stderr)
+    assert.matches("ok:", valid.stdout)
+    local expired = check({ "--waivers", "--today=2030-10-16", "--project=" .. fx.project, fx.ruleset })
+    assert.are.equal(1, expired.code, expired.stdout .. expired.stderr)
+    assert.matches("DEP%-01 ran out on 2030%-10%-15", expired.stdout)
   end)
 end)

@@ -300,7 +300,7 @@ none, for the configured one); the `if_match` stops a replay against another fol
 
 Errors: `invalid_argument` (a bad id, reason, date, path or project, an unknown rule for `waive`, a file that cannot be
 used, a waiver there already), `not_found` (no waiver to renew or remove; a project that is not a folder), `conflict`
-(`details.expected`, `details.actual`), `locked` (retryable), `forbidden` (the file is a link), `payload_too_large`,
+(`details.expected`, `details.actual`), `locked` (retryable), `forbidden` (a write, and the file is a link; reads follow it), `payload_too_large`,
 `io`.
 
 **A date in the past** is not refused: `waive` or `renew` with an `expires` before today succeeds and the entry carries a

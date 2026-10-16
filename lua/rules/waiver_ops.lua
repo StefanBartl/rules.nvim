@@ -175,19 +175,27 @@ end
 
 ---The waivers file of a project as it is now.
 ---@param path string
+---@param read_only? boolean  true: a link is followed, as the engine does (only a write refuses it)
 ---@return { bytes: string|nil, etag: string, entries: Rules.WaiverEntries }|nil state  bytes is nil when there is no file
 ---@return Lib.Contract.Error|nil err  without any path
-local function read_state(path)
+local function read_state(path, read_only)
   local stat = vim.uv.fs_lstat(path)
   if not stat then
     return { bytes = nil, etag = etag.of(""), entries = {} }, nil
   end
   if stat.type == "link" then
-    return nil,
-      errors.fail(
-        "forbidden",
-        waivers.FILE .. " is a link: edit the file it points to by hand, the engine does not write through a link"
-      )
+    if not read_only then
+      return nil,
+        errors.fail(
+          "forbidden",
+          waivers.FILE .. " is a link: edit the file it points to by hand, the engine does not write through a link"
+        )
+    end
+    -- the refusal is for the write (it would replace the link); the engine reads through the link, so does a read
+    stat = vim.uv.fs_stat(path)
+    if not stat then
+      return nil, errors.fail("invalid_argument", waivers.FILE .. " is a link that leads nowhere")
+    end
   end
   if stat.type ~= "file" then
     return nil, errors.fail("invalid_argument", waivers.FILE .. " is not a file")
@@ -503,7 +511,7 @@ function M.document(params, opts)
   if not dir then
     return nil, perr
   end
-  local state, serr = read_state(waivers.path(dir))
+  local state, serr = read_state(waivers.path(dir), true)
   if not state then
     return nil, serr
   end
