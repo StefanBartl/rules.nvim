@@ -1,10 +1,11 @@
 -- scripts/ruleset.lua -- the headless tools for a ruleset in the one-file-per-rule form.
 --
 --   nvim --headless -u NONE -i NONE -n -l scripts/ruleset.lua catalog [--check] [OPTIONS] [<ruleset-folder>]
---   nvim --headless -u NONE -i NONE -n -l scripts/ruleset.lua check [--waivers [--today=YYYY-MM-DD]] [OPTIONS] [<ruleset-folder>]
+--   nvim --headless -u NONE -i NONE -n -l scripts/ruleset.lua check [CHECKS] [OPTIONS] [<ruleset-folder>]
 --   nvim --headless -u NONE -i NONE -n -l scripts/ruleset.lua migrate [--write] [--rules-dir=D] [--layouts-dir=D] [OPTIONS] <dir>
 --
 -- OPTIONS  --vault=D --project=D --trust=D (repeatable)
+-- CHECKS   (check only) --waivers [--today=YYYY-MM-DD]   --gaps | --strict-gaps
 --
 -- The folder may be `@vault/<name>`, a ruleset of the rules-vault (`--vault=D`, else `$RULES_VAULT`, else `vault` in the
 -- `.rules.json` of `--project=D` / `$RULES_PROJECT`). `catalog` without a folder builds every ruleset the settings
@@ -28,6 +29,12 @@
 --           required) and exits 1 when that file cannot be used or a waiver in it has EXPIRED (its `expires` day is
 --           before today; docs/BINDINGS.md "Waivers"). A waiver for an id no ruleset has is a note, not a failure.
 --           `--today=YYYY-MM-DD` judges the expiry as of that day (a reproducible run); default: today's date.
+--           With `--gaps` it also lists, as notes, the numbers a family skips between its smallest and largest id
+--           (DEP-01 and DEP-03 with no DEP-02; a retired rule keeps its number, so it leaves no gap). It is a hint
+--           and exits 0: gaps appear legitimately (a rule deleted instead of retired, a ruleset that numbers in
+--           blocks on purpose), so nothing is said without the flag. `--strict-gaps` lists them too and exits 1
+--           when there is one, for a vault that numbers without holes. It judges the folders being checked together:
+--           name a folder to leave the others out.
 -- migrate   turns the documents with ```rule blocks into one file per rule plus layouts. Without --write it
 --           only converts in memory and says what it would do and whether the result reads back byte for
 --           byte (apart from the table of contents, which is counted). With --write it writes the files and
@@ -79,7 +86,7 @@ vim.opt.rtp:append(lib)
 local function usage()
   io.stderr:write(
     "usage: ruleset.lua catalog [--check] [--vault=D] [--project=D] [--trust=D] [<folder>] | "
-      .. "check [--waivers [--today=YYYY-MM-DD]] [--vault=D] [--project=D] [--trust=D] [<folder>] | "
+      .. "check [--waivers [--today=YYYY-MM-DD]] [--gaps|--strict-gaps] [--vault=D] [--project=D] [--trust=D] [<folder>] | "
       .. "migrate [--write] [--rules-dir=D] [--layouts-dir=D] [--vault=D] [--project=D] [--trust=D] <folder>\n"
   )
   os.exit(2)
@@ -90,7 +97,15 @@ end
 --- the documents `--check` is there to check).
 local FLAGS = {
   catalog = { check = "bool", vault = "value", project = "value", trust = "multi" },
-  check = { vault = "value", project = "value", trust = "multi", waivers = "bool", today = "value" },
+  check = {
+    vault = "value",
+    project = "value",
+    trust = "multi",
+    waivers = "bool",
+    today = "value",
+    gaps = "bool",
+    ["strict-gaps"] = "bool",
+  },
   migrate = {
     write = "bool",
     ["rules-dir"] = "value",
@@ -253,6 +268,24 @@ if command == "check" then
   if code ~= 0 then
     io.stdout:write("FAILED: a configured ruleset is not a folder\n")
     os.exit(code)
+  end
+  if flags.gaps or flags["strict-gaps"] then
+    -- a hint about the numbering, apart from the load errors: asked for, never part of the snapshot document
+    local gaps_mod = require("rules.engine.gaps")
+    local found, gaps_err = require("rules.contract").gaps({ rulesets = roots, vault = flags.vault, trust = flags.trust })
+    if not found then
+      io.stdout:write("FAILED: the numbering could not be read: " .. tostring(gaps_err and gaps_err.message or gaps_err) .. "\n")
+      os.exit(1)
+    end
+    local strict = flags["strict-gaps"] == true
+    for _, gap in ipairs(found) do
+      io.stdout:write(("  %s: %s\n"):format(strict and "gap" or "note", gaps_mod.text(gap)))
+    end
+    io.stdout:write(("%d number(s) not taken in %d family(ies)\n"):format(gaps_mod.total(found), #found))
+    if strict and #found > 0 then
+      io.stdout:write(("FAILED: %d family(ies) skip numbers (--strict-gaps)\n"):format(#found))
+      os.exit(1)
+    end
   end
   if flags.waivers then
     -- the waivers of the project (`rules.waivers`): a file that cannot be used or a waiver that ran out fails the run
