@@ -316,7 +316,22 @@ The **load errors** that turn *loading* red (and, for one ruleset alone, *readin
   rule is an ordinary document (notes, a README) and a document with ` ```rule ` blocks loads as it always did;
 - a **retired file that does not read** (no frontmatter, empty, conflict markers, named for one id and saying another).
 
-`ruleset.lua check [--vault=D] [--project=D] [--trust=D] [<folder>]` loads through the snapshot document of `rules-export/1`
+**A gap in the numbering is no load error.** `DEP-01` and `DEP-03` with no `DEP-02` appears when a rule is deleted instead of
+retired, and a ruleset may leave numbers out on purpose (blocks of ten per topic). So the template's *loading* step does not
+mention it, and `check` says nothing about it unless asked:
+
+- `check --gaps` lists, as notes, the numbers every family skips between its smallest and largest id and exits 0:
+  `  note: DEP: DEP-02, DEP-05..DEP-07 not taken between DEP-01 and DEP-08`, then `4 number(s) not taken in 1 family(ies)`;
+- `check --strict-gaps` lists them as `gap:` lines and exits 1 (`FAILED: 1 family(ies) skip numbers (--strict-gaps)`) when
+  there is one. Put it into your own *loading* step if your vault numbers without holes; a load error is reported first and
+  wins. All rulesets that are checked together count as one set, so name a folder to leave the others out.
+
+A retired rule keeps its number taken: `retire` instead of deleting the file leaves no gap. On the real rulesets this plugin
+was measured against (623 rules in three rulesets) 9 of 23 families have gaps, 172 numbers in all, almost all of them whole
+blocks; that is why the flag is opt-in. The details are in
+[RULESET-FORMAT.md](RULESET-FORMAT.md#gaps-in-the-numbering). The hint is not part of any document of `rules-export/1`.
+
+`ruleset.lua check [--gaps|--strict-gaps] [--vault=D] [--project=D] [--trust=D] [<folder>]` loads through the snapshot document of `rules-export/1`
 and exits 1 on any `load_errors` or on a configured ruleset that is not a folder (the entry and where it was named are in
 the message, `ruleset rulesets/gone (the .rules.json of the vault) is not a folder`), 2 on wrong usage or when there is
 nothing to check. With `--vault=D` and no folder it checks **every ruleset the vault offers** (its own list, else every

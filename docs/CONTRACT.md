@@ -85,6 +85,10 @@ Two rulesets that share an id load only one of them and report the other as a
 duplicate; an id is unique across every ruleset that is loaded together (the
 native apps' release family is `NREL` for that reason, `REL` is the Lua one).
 
+A gap in the numbering of a family (`DEP-01`, `DEP-03`) is **not** a load error and is in no
+document: it is a hint the engine keeps apart (`rules.contract.gaps`), which
+`scripts/ruleset.lua check --gaps` shows ([RULESET-FORMAT.md](RULESET-FORMAT.md#gaps-in-the-numbering)).
+
 A ruleset goes by the last part of its path (`Checklists`); only when two
 rulesets would get the same name, the folder above is added
 (`wkdbook-Lua/Checklists`). A name is never taken from higher up than that, so
