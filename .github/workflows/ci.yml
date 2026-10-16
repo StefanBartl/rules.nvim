@@ -81,6 +81,12 @@ jobs:
           bash scripts/test.sh --json "$RUNNER_TEMP/testing-ir.json"
       - name: Conformance gate
         run: bash scripts/test.sh conformance
+      # The TypeScript declarations of the machine contract (schemas/rules-export/1/rules-export.d.ts) are generated
+      # from the JSON Schema next to them; a schema change without `--write` fails here with the first line that
+      # differs. The same check runs as a spec (TESTS/contract_dts_spec.lua); this step names it in the job list.
+      # No Node and no lib.nvim: the generator is a Lua script that nvim runs.
+      - name: Contract declarations are current
+        run: nvim --headless -u NONE -i NONE -n -l scripts/contract-dts.lua --check
       # The IR is what a reporter or a person reads to find out WHICH case failed on WHICH platform.
       - uses: actions/upload-artifact@v7
         if: failure()

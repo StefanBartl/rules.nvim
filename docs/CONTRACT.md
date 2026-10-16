@@ -10,6 +10,46 @@ only writer: an app or an agent never edits a rule file itself.
 Schema: [`schemas/rules-export/1/rules-export.schema.json`](../schemas/rules-export/1/rules-export.schema.json).
 Golden files (the exact bytes the engine writes for a fixture ruleset):
 [`schemas/rules-export/1/golden/`](../schemas/rules-export/1/golden/).
+TypeScript types: [`schemas/rules-export/1/rules-export.d.ts`](../schemas/rules-export/1/rules-export.d.ts), see
+[TypeScript types](#typescript-types).
+
+## TypeScript types
+
+`schemas/rules-export/1/rules-export.d.ts` is **generated** from `rules-export.schema.json` and never edited by hand:
+`RulesExport` is the union of every document (`Hello`, `Snapshot`, `List`, `Rule`, `NextId`, `Sources`, `Waivers`,
+`Result`, `Error`, told apart by `kind`), and the pieces they share are types of their own (`Head`, `RuleSummary`,
+`Severity`, `Waiver`, ...). `Result` is the answer of the write door, the `rules-ops/1` document the schema covers; the
+request of `rules-ops/1` is not in the schema and so not in the types.
+
+```bash
+nvim --headless -u NONE -i NONE -n -l scripts/contract-dts.lua --write   # after a change to the schema; commit the diff
+nvim --headless -u NONE -i NONE -n -l scripts/contract-dts.lua --check   # exit 1 when the file is stale (the default)
+```
+
+The generator (`scripts/contract/dts.lua`, driven by `scripts/contract-dts.lua`) is a small Lua program that nvim
+runs: no Node and no package in this repository, unlike `tasks-export/1` of tasks.nvim, which uses
+`json-schema-to-typescript`. It maps the subset of JSON Schema this schema uses (`type`, `enum`, `const`, `$ref` to
+`#/$defs/...`, `oneOf` / `anyOf` as a union, `allOf` as an intersection, `properties`, `required`,
+`additionalProperties`, `items`; `title` and `description` become comments; `pattern`, `minimum`, `maxItems` and the like
+change no type). **A keyword outside that subset stops the generator** with its name and its place in the schema
+(`unsupported keyword 'prefixItems' at #/$defs/x/properties/y`), exit code 1: a type is never `any`. If the schema grows
+such a keyword, extend the generator first.
+
+How the types read:
+
+- An object that lists its properties is **closed**: no index signature, so a typo in a field name is a type error. A
+  reader at run time still ignores fields it does not know ([Rules the documents keep](#rules-the-documents-keep));
+  the type just does not promise any. An object without properties (`check`, `inverse`, `diff`, `details`) is a
+  dictionary, `{ [k: string]: unknown }`.
+- A field is optional (`name?:`) unless the schema lists it in `required`. A document is a **`Head &` something**, and
+  `required` of the part may name a field only the head declares (`digest`, `rev`): it is then written `digest: unknown`
+  and, in the intersection with the head's `digest?: string`, comes out as a required string.
+- Keys are sorted, LF only, one final newline: the same schema always gives the same bytes. The header names the schema it
+  came from.
+- The file is the one the schema generates now, or CI is red: `TESTS/contract_dts_spec.lua` compares it (in process and
+  through the command line, which also proves the exit codes) and the `tests` job of `.github/workflows/ci.yml` has the
+  step `Contract declarations are current`. A client checks its own use against the golden files: every document in
+  `schemas/rules-export/1/golden/` is a valid value of its type (checked once with `tsc`, not in this repository's CI).
 
 ## Rules the documents keep
 
@@ -350,6 +390,9 @@ paths, determinism, no machine path, the host and the golden files. To rewrite
 the golden files after a deliberate change, create
 `schemas/rules-export/1/golden/.update`, run the specs once, delete the marker
 and review the diff.
+
+`TESTS/contract_dts_spec.lua`: the generator of the TypeScript types on small schemas, what it refuses by name, and the
+committed `rules-export.d.ts` against the schema ([TypeScript types](#typescript-types)).
 
 `TESTS/settings_spec.lua` and `TESTS/vault_spec.lua`: the settings files, the rank, the vault, and that a
 vault with two rulesets gives the documents of the same two folders passed one by one (also through the command
