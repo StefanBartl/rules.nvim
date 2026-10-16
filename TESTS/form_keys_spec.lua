@@ -268,6 +268,26 @@ describe("the keys of the :Rules new form", function()
     end)
   end)
 
+  it("tells a key with a control character by its name: a newline in a hint would crash the form", function()
+    -- "\n" is a legal key (a non-empty string); "\r" is what people write for Enter
+    config.setup({ keys = { form = { help = "\n", cancel = "\r", toggle = { "\t", "x" } } } })
+
+    local ok, buf = pcall(open)
+
+    assert.is_true(ok, tostring(buf))
+    local hint = vim.api.nvim_buf_get_lines(buf, 0, -1, false)[1] .. text(buf)
+    assert.is_truthy(hint:find("<NL> help", 1, true), hint)
+    assert.is_truthy(hint:find("<Tab>/x", 1, true), hint)
+    -- no raw control character in the buffer text (a line feed would have been a second line)
+    assert.is_nil(text(buf):find("[%z\1-\8\11-\31\127]"))
+    -- the help names them too
+    local rows = table.concat(ui.help_lines(), "\n")
+    assert.is_truthy(rows:find("<NL>%s+this help"), rows)
+    assert.is_nil(rows:find("[%z\1-\8\11-\31\127]"))
+    -- and the keys work: a key is still the character it is
+    assert.is_true(bound(buf, "n", "\n"))
+  end)
+
   it("warns at setup() when two actions share a key, and the form still opens with what was set", function()
     config.setup({ keys = { form = { help = "<C-s>" } } })
     assert.is_true(told("submit, help share the key <C-s>"))

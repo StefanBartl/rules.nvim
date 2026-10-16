@@ -171,6 +171,13 @@ local function escape(text)
   return (text:gsub(" ", "\\ "))
 end
 
+---A text as ONE word of the command line (a blank, a tab or a backslash in it marked), for a name the user did not type.
+---@param text string
+---@return string
+local function as_word(text)
+  return require("rules.cmdline").escape(text)
+end
+
 ---The places that start with `lead`: the layouts' `output` paths until a `#` is typed, then the headings of that
 ---layout.
 ---@param lead string
@@ -178,10 +185,12 @@ end
 function M.places(lead)
   local all = layouts()
   local out = {}
-  local file = lead:match("^([^#]*)#")
-  if file then
+  local typed = lead:match("^([^#]*)#")
+  if typed then
+    -- the layout is found by its name, the way it is written on the line (a blank as `\ `) is not that name
+    local file = require("rules.cmdline").unescape(typed)
     for _, heading in ipairs(all[file] or {}) do
-      local candidate = file .. "#" .. escape(heading)
+      local candidate = as_word(file) .. "#" .. escape(heading)
       if candidate:sub(1, #lead) == lead then
         out[#out + 1] = candidate
       end
@@ -189,8 +198,9 @@ function M.places(lead)
     return out
   end
   for _, output in ipairs(M.layout_outputs()) do
-    if output:sub(1, #lead) == lead then
-      out[#out + 1] = output
+    local candidate = as_word(output)
+    if candidate:sub(1, #lead) == lead then
+      out[#out + 1] = candidate
     end
   end
   return out
@@ -218,13 +228,19 @@ function M.sections(lead)
   return out
 end
 
----The `output` paths of the layouts that start with `lead`: what `--layout=` offers.
+---The `output` paths of the layouts that start with `lead`: what `--layout=` offers, a blank written `\ ` as the command
+---line wants it (the lead is compared the way it was typed, so `my\ d` finds `my docs/x.md`).
 ---@param lead string
 ---@return string[]
 function M.layouts(lead)
-  return vim.tbl_filter(function(output)
-    return output:sub(1, #lead) == lead
-  end, M.layout_outputs())
+  local out = {}
+  for _, output in ipairs(M.layout_outputs()) do
+    local candidate = as_word(output)
+    if candidate:sub(1, #lead) == lead then
+      out[#out + 1] = candidate
+    end
+  end
+  return out
 end
 
 ---The project folder a command line names with `--project=` (the last one), as typed.
@@ -276,7 +292,15 @@ function M.project_dirs(lead)
   if not ok then
     return {}
   end
-  return vim.tbl_map(escape, list)
+  return vim.tbl_map(function(dir)
+    -- the editor ends a folder with the separator of the system; on Windows that is a backslash, and a backslash before
+    -- the blank that follows (` --dry`) is an escaped blank: the next word would be part of the folder. `/` is a
+    -- separator there too.
+    if vim.fn.has("win32") == 1 then
+      dir = dir:gsub("\\", "/")
+    end
+    return as_word(dir)
+  end, list)
 end
 
 ---Forget what was kept (the specs, after they wrote a layout).

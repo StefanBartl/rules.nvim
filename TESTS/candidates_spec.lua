@@ -137,6 +137,31 @@ describe("rules.ui.candidates", function()
     assert.are.same({}, candidates.layouts("nope"))
   end)
 
+  it("writes a blank of a layout path for the command line and finds it by the lead as it was typed", function()
+    write_raw(root .. "/_layouts/spaced.md", "---\nkind: layout\noutput: my docs/DEP list.md\n---\n# Deps list\n\n## Two Words\n")
+    candidates.reset()
+    local cmdline = require("rules.cmdline")
+
+    -- --layout=
+    assert.are.same({ "my\\ docs/DEP\\ list.md", "regeln/DEP.md", "regeln/ERR.md" }, candidates.layouts(""))
+    assert.are.same({ "my\\ docs/DEP\\ list.md" }, candidates.layouts("my\\ d"))
+    assert.are.same({ "my\\ docs/DEP\\ list.md" }, candidates.layouts("my\\ docs/DEP\\ l"))
+    assert.are.same({}, candidates.layouts("my docs"))
+    -- what it offers is one word of the line, and it names the layout
+    local offered = candidates.layouts("my")[1]
+    local words = cmdline.words("--layout=" .. offered .. " --dry")
+    assert.are.equal(2, #words)
+    assert.are.equal("--layout=my docs/DEP list.md", cmdline.unescape(words[1].text))
+
+    -- --to= (the places): the same, before and after the #
+    assert.are.same({ "my\\ docs/DEP\\ list.md" }, candidates.places("my\\ d"))
+    assert.are.same(
+      { "my\\ docs/DEP\\ list.md#Deps\\ list", "my\\ docs/DEP\\ list.md#Two\\ Words" },
+      candidates.places("my\\ docs/DEP\\ list.md#")
+    )
+    assert.are.same({ "my\\ docs/DEP\\ list.md#Two\\ Words" }, candidates.places("my\\ docs/DEP\\ list.md#Tw"))
+  end)
+
   it("offers nothing, and raises nothing, where no ruleset is configured", function()
     require("rules.config").setup({ rulesets = {} })
     contract.clear_cache()

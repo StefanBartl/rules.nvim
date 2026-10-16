@@ -8,7 +8,7 @@
 ---  - `words`, `join`: the words of the argument string as typed (no backslash dropped, no run of blanks made one),
 ---    and words put together again with the blanks between them
 ---  - `split_assignments`: `key=value` words, a value may hold spaces (a word that is no known `key=` goes on with the
----    value before it)
+---    value before it; with `guard`, a word that nearly is one -- `expire=` -- is an error instead)
 ---  - `bind`: the same with the one positional argument (the family, the id) found first, wherever it stands: a `key=`
 ---    word before it takes one word
 ---  - `patch`: the assignments of `:Rules set` as the `patch` of a `set` operation
@@ -110,15 +110,54 @@ local function set_of(known)
   return out
 end
 
+---The edit distance of two short words (insert, delete, change one letter).
+---@param a string
+---@param b string
+---@return integer
+local function distance(a, b)
+  local prev = {}
+  for j = 0, #b do
+    prev[j] = j
+  end
+  for i = 1, #a do
+    local row = { [0] = i }
+    for j = 1, #b do
+      local cost = a:sub(i, i) == b:sub(j, j) and 0 or 1
+      row[j] = math.min(prev[j] + 1, row[j - 1] + 1, prev[j - 1] + cost)
+    end
+    prev = row
+  end
+  return prev[#b]
+end
+
+---The known key a mistyped one was meant to be: `expire`, `Expires`, `expiry`, `expiration` for `expires`, `path` for
+---`paths`, `reasons` for `reason`. A word that is two edits from a known key or starts with the same four letters is a
+---near miss; `see=also` is not.
+---@param key string
+---@param known string[]
+---@return string|nil meant
+local function near_miss(key, known)
+  local lower = key:lower()
+  for _, name in ipairs(known) do
+    if distance(lower, name) <= 2 or (#lower >= 4 and lower:sub(1, 4) == name:sub(1, 4)) then
+      return name
+    end
+  end
+  return nil
+end
+
 ---The words that follow each other from a `key=` word: a word that is no known `key=` goes on with the value of the
----key before it.
+---key before it -- unless `guard` is set and the word is a near miss of a known key (`expire=2030-12-31` after a
+---`reason=`): that is a typo, and gluing it on would drop the field, for `expires` and `paths` the very ones that narrow
+---a waiver.
 ---@param tokens (string|Rules.Word)[]
 ---@param known string[]
 ---@param strict boolean|nil
 ---@param items { key: string, text: string }[]  the assignments so far; added to
 ---@param lead (string|Rules.Word)[]  the words before the first key; added to (not in strict mode)
+---@param guard boolean|nil
 ---@return string|nil err
-local function collect(tokens, known, strict, items, lead)
+local function collect(tokens, known, strict, items, lead, guard)
   local is_known = set_of(known)
   local current
   for _, token in ipairs(tokens) do
@@ -128,6 +167,10 @@ local function collect(tokens, known, strict, items, lead)
       current = { key = key, text = value }
       items[#items + 1] = current
     elseif current then
+      local meant = guard and key and near_miss(key, known)
+      if meant then
+        return ("unknown field '%s' (did you mean '%s='? known: %s)"):format(key, meant, table.concat(known, ", "))
+      end
       current.text = current.text .. sep_of(token) .. text
     elseif strict and key then
       return ("unknown field '%s' (known: %s)"):format(key, table.concat(known, ", "))
@@ -157,12 +200,13 @@ end
 ---@param tokens (string|Rules.Word)[]
 ---@param known string[]  the accepted keys
 ---@param strict? boolean  true: a word that starts no known `key=` before the first one is an error
+---@param guard? boolean  true: a near miss of a known key after a value is an error, not more of the value
 ---@return string[]|nil lead  the words before the first known key (the title of `:Rules new`)
 ---@return table<string, string>|nil values  key -> text (trimmed, may be empty)
 ---@return string|nil err
-function M.split_assignments(tokens, known, strict)
+function M.split_assignments(tokens, known, strict, guard)
   local items, lead = {}, {}
-  local err = collect(tokens, known, strict, items, lead)
+  local err = collect(tokens, known, strict, items, lead, guard)
   if err then
     return nil, nil, err
   end
@@ -180,9 +224,10 @@ end
 ---@param words (string|Rules.Word)[]  the words that are no flag
 ---@param known string[]  the accepted keys
 ---@param strict? boolean  true: a word after the positional argument that starts no known `key=` is an error
+---@param guard? boolean  true: a near miss of a known key after a value is an error, not more of the value
 ---@return { positional: string|nil, lead: (string|Rules.Word)[], values: table<string, string> }|nil bound
 ---@return string|nil err
-function M.bind(words, known, strict)
+function M.bind(words, known, strict, guard)
   local is_known = set_of(known)
   local at
   for i, token in ipairs(words) do
@@ -198,7 +243,7 @@ function M.bind(words, known, strict)
     items[#items + 1] = { key = key, text = value }
   end
   local after = at and vim.list_slice(words, at + 1, #words) or {}
-  local err = collect(after, known, strict, items, lead)
+  local err = collect(after, known, strict, items, lead, guard)
   if err then
     return nil, err
   end

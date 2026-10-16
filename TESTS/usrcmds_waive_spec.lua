@@ -292,6 +292,30 @@ describe(":Rules waive, renew, unwaive", function()
       assert.is_true(told("'reason' given twice"))
       assert.is_nil(read_raw(file))
     end)
+
+    it("refuses a mistyped key after a value: it would be glued to the reason and the waiver be wider than meant", function()
+      for line, field in pairs({
+        ["Rules waive DEP-01 reason=legacy code expire=2030-12-31"] = "expire",
+        ["Rules waive DEP-01 reason=legacy code path=src/legacy"] = "path",
+        ["Rules waive DEP-01 reason=legacy code expiry=2030-12-31"] = "expiry",
+        ["Rules waive DEP-01 reason=legacy code Paths=src"] = "Paths",
+        ["Rules waive DEP-01 expires=2030-12-31 reasons=because"] = "reasons",
+      }) do
+        notes = {}
+        run(line)
+        assert.is_true(told("unknown field '" .. field .. "'"), line)
+        assert.is_nil(read_raw(file), line)
+      end
+      -- the message says what was meant
+      notes = {}
+      run("Rules waive DEP-01 reason=r expire=2030-12-31")
+      assert.is_true(told("did you mean 'expires='"))
+    end)
+
+    it("still takes a word of the reason that has an equals sign and is no key", function()
+      run("Rules waive DEP-01 reason=set x=1 and see=also in the config")
+      assert.are.equal("set x=1 and see=also in the config", entries()["DEP-01"].reason)
+    end)
   end)
 
   describe("renew", function()
@@ -317,6 +341,16 @@ describe(":Rules waive, renew, unwaive", function()
     it("gives a waiver that has no last day one", function()
       run("Rules renew DEP-02 expires=2032-02-02")
       assert.are.same({ reason = "no expiry", expires = "2032-02-02" }, entries()["DEP-02"])
+    end)
+
+    it("refuses a mistyped key after a value instead of gluing it to the date or the reason", function()
+      local before = read_raw(file)
+      run("Rules renew DEP-01 expires=2031-01-01 reasons=because")
+      assert.is_true(told("unknown field 'reasons'"))
+      notes = {}
+      run("Rules renew DEP-01 reason=because expire=2031-01-01")
+      assert.is_true(told("unknown field 'expire'"))
+      assert.are.equal(before, read_raw(file))
     end)
 
     it("--dry writes nothing", function()
@@ -649,14 +683,31 @@ describe(":Rules waive, renew, unwaive", function()
     it("--project= offers the folders, a blank in a name written with a backslash before it", function()
       vim.fn.mkdir(project .. "/pkgs/a", "p")
       vim.fn.mkdir(project .. "/pkgs/b c", "p")
-      -- the editor ends a folder with the separator of the system
-      local sep = vim.fn.has("win32") == 1 and "\\" or "/"
+      -- always a slash, also where the editor ends a folder with a backslash (Windows): see the next spec
       local got = complete("Rules waive DEP-01 --project=pkgs/")
       table.sort(got)
-      assert.are.same({ "--project=pkgs" .. sep .. "a" .. sep, "--project=pkgs" .. sep .. "b\\ c" .. sep }, got)
+      assert.are.same({ "--project=pkgs/a/", "--project=pkgs/b\\ c/" }, got)
       -- and what it offers is read back as the folder it names
       local typed = got[2]:gsub("^%-%-project=", "")
-      assert.are.equal("pkgs" .. sep .. "b c" .. sep, require("rules.cmdline").unescape(typed))
+      assert.are.equal("pkgs/b c/", require("rules.cmdline").unescape(typed))
+    end)
+
+    it("--project= offers a folder the line can go on after: a blank and the next word are not part of it", function()
+      vim.fn.mkdir(project .. "/pkgs/sub", "p")
+      local got = complete("Rules waive DEP-01 reason=x --project=pk")
+      assert.are.same({ "--project=pkgs/" }, got)
+      got = complete("Rules waive DEP-01 reason=x --project=pkgs/su")
+      assert.are.same({ "--project=pkgs/sub/" }, got)
+      for _, rest in ipairs({ " --dry", " reason=more" }) do
+        local words = require("rules.cmdline").words(got[1] .. rest)
+        assert.are.equal(2, #words, got[1] .. rest)
+        local value = words[1].text:gsub("^%-%-project=", "")
+        assert.are.equal("pkgs/sub/", require("rules.cmdline").unescape(value))
+      end
+      -- typed and run: the folder is found, not "pkgs/sub/ --dry"
+      run("Rules waive DEP-01 reason=x --project=pkgs/sub/ --dry")
+      assert.is_true(told("would waive DEP-01"))
+      assert.is_false(told("not_found"))
     end)
 
     it("--project= completes nothing for a lead with a backtick: it would be a command substitution", function()

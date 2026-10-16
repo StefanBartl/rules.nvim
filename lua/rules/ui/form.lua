@@ -28,6 +28,18 @@ local function form_keys()
   return require("rules.config").get().keys.form
 end
 
+---A key as text for the hint and the help: a key with a control character in it (a literal `"\r"` for Enter, `"\n"`) is
+---told as its name (`<CR>`, `<NL>`), so no raw control character stands in a line (a newline would make the buffer refuse
+---the line). A key written as a name (`<C-s>`) or a plain one is shown as it is.
+---@param key string
+---@return string
+local function display(key)
+  if key:find("[%z\1-\31\127]") then
+    return vim.fn.keytrans(key)
+  end
+  return key
+end
+
 ---The keys of several actions as one list for a help line, each key once.
 ---@param keymap table<string, string|string[]|false>
 ---@param actions string[]
@@ -38,7 +50,7 @@ local function shown(keymap, actions)
     for _, key in ipairs(keys_mod.list(keymap[action])) do
       if not seen[key] then
         seen[key] = true
-        list[#list + 1] = key
+        list[#list + 1] = display(key)
       end
     end
   end
@@ -58,7 +70,7 @@ function M.key_hint(keymap)
       for _, key in ipairs(keys_mod.list(keymap[action])) do
         if not seen[key] then
           seen[key] = true
-          list[#list + 1] = key
+          list[#list + 1] = display(key)
         end
       end
     end
