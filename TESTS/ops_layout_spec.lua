@@ -95,9 +95,13 @@ end
 describe("rules-ops/1 layouts: retire and its inverse", function()
   ---@param layout string[]
   ---@param id string
+  ---@param no_final? boolean  the layout does not end in a newline
   ---@return table inverse, string path
-  local function retire_and_back(layout, id)
+  local function retire_and_back(layout, id, no_final)
     local root, opts, path = fixture(layout)
+    if no_final then
+      write_raw(path, (read_raw(path):gsub("\n$", "")))
+    end
     local before = read_raw(path)
     local retired = one(opts, { op = "retire", id = id })
     local inverse = inverse_of(retired)
@@ -134,6 +138,66 @@ describe("rules-ops/1 layouts: retire and its inverse", function()
         retire_and_back(layout, id)
       end
     end
+  end)
+
+  -- a token that stands alone between two blank lines: taking it out leaves one blank line where there were two, and
+  -- the inverse has to give the second one back
+  it("puts a single token between two blank lines back, byte for byte", function()
+    local SHAPES = {
+      ["alone in its section, a heading behind"] = { "## A", "", "{{rule DEP-01}}", "", "## B", "" },
+      ["alone in the last section"] = { "## A", "", "{{rule DEP-01}}", "" },
+      ["alone in the layout"] = { "", "{{rule DEP-01}}", "" },
+      ["two blank lines on each side"] = { "## A", "", "", "{{rule DEP-01}}", "", "", "## B", "" },
+      ["three blank lines above, one below"] = { "## A", "", "", "", "{{rule DEP-01}}", "", "## B", "" },
+      ["behind an introduction"] = { "## A", "", "Intro.", "", "{{rule DEP-01}}", "", "## B", "" },
+      ["a subsection behind"] = { "## A", "", "{{rule DEP-01}}", "", "### Sub", "", "{{rule DEP-02}}", "" },
+      ["a heading behind, rules in the next section"] = { "## A", "", "{{rule DEP-01}}", "", "## B", "", "{{rule DEP-02}}" },
+      ["separated from the rule above"] = { "## A", "", "{{rule DEP-02}}", "", "{{rule DEP-01}}", "", "{{rule DEP-03}}", "" },
+      ["separated from the rule above and below"] = { "## A", "", "{{rule DEP-02}}", "", "{{rule DEP-01}}", "", "## B" },
+    }
+    local checked = 0
+    for name, layout in pairs(SHAPES) do
+      for _, no_final in ipairs({ false, true }) do
+        -- without a final newline the last blank line is the end of the file, not a line of its own
+        if not (no_final and layout[#layout] == "") then
+          local ok, why = pcall(retire_and_back, layout, "DEP-01", no_final)
+          assert.is_true(ok, ("%s (no final newline: %s): %s"):format(name, tostring(no_final), tostring(why)))
+          checked = checked + 1
+        end
+      end
+    end
+    assert.are.equal(12, checked)
+  end)
+
+  it("takes one of the blank lines around the token out, and keeps all of them in the place", function()
+    local layout = { "## A", "", "", "{{rule DEP-01}}", "", "", "## B", "" }
+    local _, opts, path = fixture(layout)
+    local retired = one(opts, { op = "retire", id = "DEP-01" })
+    assert.are.equal(
+      doc({ "---", "kind: layout", "output: regeln/DEP.md", "---", "## A", "", "", "", "## B", "" }),
+      read_raw(path)
+    )
+    -- one of the four blank lines is gone; the blank lines the token stood between are in the place
+    assert.are.same({ above = 2, below = 2 }, inverse_of(retired).places["regeln/DEP.md"].gap)
+  end)
+
+  it("puts a token that stood between two pieces of text back at the end of that text (documented limit)", function()
+    -- no place can say "between these two paragraphs", so the token comes back in its section, behind the text; the
+    -- bytes are the same but for where the token stands
+    local layout = { "## A", "", "Intro.", "", "{{rule DEP-01}}", "", "More.", "", "## B", "" }
+    local _, opts, path = fixture(layout)
+    local before = read_raw(path)
+    local inverse = inverse_of(one(opts, { op = "retire", id = "DEP-01" }))
+    assert.is_true(one(opts, inverse).ok)
+    local after = read_raw(path)
+    assert.is_true(layout_edit.has(after, "DEP-01"))
+    assert.are.same({ section = "A", prev = nil }, layout_edit.locate(after, "DEP-01"))
+    local function sorted(text)
+      local lines = vim.split(text, "\n", { plain = true })
+      table.sort(lines)
+      return lines
+    end
+    assert.are.same(sorted(before), sorted(after))
   end)
 
   it("G4-4: puts a rule that was first of its section back into that section, not into a subsection", function()
