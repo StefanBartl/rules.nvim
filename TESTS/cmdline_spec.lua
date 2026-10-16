@@ -29,6 +29,23 @@ describe("rules.cmdline.split_assignments", function()
     assert.is_truthy(loose:find("expected key=value", 1, true))
   end)
 
+  it("with guard, a near miss of a known key after a value is an error, a word that is no near miss goes on", function()
+    local keys = cmdline.WAIVE_KEYS
+    for _, typo in ipairs({ "expire", "expiry", "expiration", "Expires", "path", "reasons", "reson" }) do
+      local lead, _, err = cmdline.split_assignments({ "reason=legacy", "code", typo .. "=2030-12-31" }, keys, true, true)
+      assert.is_nil(lead, typo)
+      assert.is_truthy(err:find("unknown field '" .. typo .. "'", 1, true), typo)
+      local bound, berr = cmdline.bind({ "DEP-01", "reason=legacy", typo .. "=x" }, keys, true, true)
+      assert.is_nil(bound, typo)
+      assert.is_truthy(berr:find("did you mean", 1, true), typo)
+    end
+    local _, values = cmdline.split_assignments({ "reason=set", "x=1", "see=also", "id=7" }, keys, true, true)
+    assert.are.same({ reason = "set x=1 see=also id=7" }, values)
+    -- without guard, the word is glued on as it always was
+    local _, glued = cmdline.split_assignments({ "reason=legacy", "expire=2030-12-31" }, keys, true)
+    assert.are.same({ reason = "legacy expire=2030-12-31" }, glued)
+  end)
+
   it("refuses a key given twice", function()
     local lead, _, err = cmdline.split_assignments({ "title=a", "title=b" }, cmdline.SET_KEYS, true)
     assert.is_nil(lead)

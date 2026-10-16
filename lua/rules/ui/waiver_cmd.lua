@@ -35,7 +35,9 @@ local function read(ctx, name, keys)
     notify.error(tostring(werr))
     return nil
   end
-  local bound, serr = cmdline.bind(words, keys, #keys > 0)
+  -- guard: `expire=2030-12-31` or `path=src` after a value is a typo, not more words of the reason (the waiver would be
+  -- written without its end or its paths: wider than meant)
+  local bound, serr = cmdline.bind(words, keys, #keys > 0, #keys > 0)
   if not bound then
     notify.error(tostring(serr))
     return nil

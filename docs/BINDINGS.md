@@ -361,7 +361,8 @@ require("rules").setup({
 An action takes a key, a list of keys (every one is bound) or `false` (no key
 for it); an action that is not named keeps its default. The hint under the
 title of the form and `g?` show the keys that are really bound (`-` for an
-action with none). Unknown actions (`keys.form.sumbit (did you mean
+action with none; a key written as a control character, `"\r"` or `"\n"`, is shown by
+its name, `<CR>` or `<NL>`). Unknown actions (`keys.form.sumbit (did you mean
 submit?)`), values of the wrong type and two actions on one key are warned about
 at `setup()`, never ignored silently; `keys` is a `setup()` option only (in a
 `.rules.json` it is an unknown key). See [CONFIG.md](CONFIG.md#the-keys-of-the-form).
@@ -549,7 +550,10 @@ for word (`invalid_argument: ...`, `not_found: no waiver for DEP-01`).
   (`reason=run with --dry now` is a dry run) and a bare `--` ends the flags where it stands
   for that (see [Words and values](#making-changing-retiring-and-moving-rules)). A word that
   is not part of a value (it stands before the first `key=`) and a `key=` the verb does not
-  take are refused before anything is asked of the door.
+  take are refused before anything is asked of the door. So is a **near miss of a key** after a
+  value (`reason=legacy code expire=2030-12-31`, `path=src`, `reasons=`): glued to the reason
+  it would drop the field, and a waiver without its `expires=` or `paths=` is wider than meant.
+  A word with an equals sign that is no near miss (`x=1`, `see=also`) stays part of the reason.
 - **`paths=`** are separated by commas; **no blank is needed or wanted around a comma**
   (blanks around one are dropped). A blank **inside** a path is part of it and is typed as
   it is, no backslash: `paths=my dir/legacy,docs/a b.md` is `my dir/legacy` and `docs/a
@@ -579,7 +583,8 @@ for word (`invalid_argument: ...`, `not_found: no waiver for DEP-01`).
   read the waivers file of the working directory. So the project is, in this order:
   1. `--project=<dir>`, handed to the door as typed: a folder relative to the working directory
      (a blank is written with a backslash before it, `--project=my\ app`; `<Tab>` offers folders and
-     writes it so), which must be the working directory or a folder inside it (the door answers
+     writes it so, always with `/` as the separator, also on Windows: a folder that ends in a backslash
+     would turn the blank after it into part of the name), which must be the working directory or a folder inside it (the door answers
      `project must be the configured project or a folder inside it` for any other, and for a
      folder that does not exist). `--project=.` is the working directory;
   2. the project **of the current buffer**: the nearest folder above its file that holds a

@@ -264,7 +264,9 @@ COMMANDS                                                        *rules-commands*
     inside a path is part of it, a comma inside braces belongs to a glob:
     `paths=src/legacy,docs/**/*.{md,txt}`). The engine checks everything and
     answers in its own words: an id no rule has, a waiver that is there
-    already (|:Rules_renew| changes it), a path with `..`. <Tab> offers the
+    already (|:Rules_renew| changes it), a path with `..`. A word after a
+    value that nearly is a key (`expire=`, `path=`, `reasons=`) is refused,
+    not made part of the reason. <Tab> offers the
     ids of the loaded rules; expires= has no completion, its help names today.
     --dry checks and shows the file that would be written.
 
