@@ -10,7 +10,8 @@
 --- heading), `text` (the prose), `check` and `agent` (the block; `vim.NIL` removes a key). A `check` or `agent` patch
 --- writes the block again from its evaluated table, so a block with a Lua function or a comment is refused for it: it
 --- stays a thing to edit by hand. A `severity` or `text` patch never writes the block again: the block's own
---- `severity` literal is changed in place, comments and functions stay.
+--- `severity` literal is changed in place (also when its key is spelled `["severity"]` or `['severity']`), comments and
+--- functions stay.
 ---
 --- The result is read back with the loader's own parser and compared with what was asked for; a text that would
 --- not read as the patch says (a prose with a heading in it, an invalid `agent`) is refused, never written.
@@ -177,14 +178,29 @@ local function string_end(source, at)
 end
 
 ---Walks the source of a block the way Lua reads it, so a string or a long bracket is never taken for a comment. Tells
----whether the source holds a comment, and where the string literals of its top-level `severity = "..."` stand (the
----line of the source, the first and the last column of the literal, quotes included).
+---whether the source holds a comment, and where the string literals of its top-level `severity = "..."` stand, also
+---when the key is spelled `["severity"] = "..."` or `['severity'] = '...'` (the line of the source, the first and the
+---last column of the literal, quotes included).
 ---@param source string
 ---@return boolean comment
 ---@return { line: integer, from: integer, to: integer }[] severities
 local function scan(source)
   local comment, found = false, {}
   local depth, i, n = 0, 1, #source
+
+  ---Record the string literal that opens at `from` as a severity.
+  ---@param from integer  the position of its opening quote
+  ---@return integer stop  the position of its closing quote
+  local function literal(from)
+    local stop = string_end(source, from)
+    local before = source:sub(1, from - 1)
+    local _, breaks = before:gsub("\n", "")
+    local line_start = before:match(".*\n()") or 1
+    if source:sub(stop, stop) == source:sub(from, from) and not source:sub(from, stop):find("\n", 1, true) then
+      found[#found + 1] = { line = breaks + 1, from = from - line_start + 1, to = stop - line_start + 1 }
+    end
+    return stop
+  end
 
   while i <= n do
     local c = source:sub(i, i)
@@ -195,6 +211,10 @@ local function scan(source)
       i = string_end(source, i) + 1
     elseif c == "[" and long_end(source, i) then
       i = long_end(source, i) --[[@as integer]]
+    elseif c == "[" and depth == 0 and source:match([=[^%[%s*(["'])severity%1%s*%]%s*=%s*()["']]=], i) then
+      -- the key in brackets: ["severity"] = "..."
+      local _, from = source:match([=[^%[%s*(["'])severity%1%s*%]%s*=%s*()["']]=], i)
+      i = literal(from --[[@as integer]]) + 1
     elseif c == "{" then
       depth, i = depth + 1, i + 1
     elseif c == "}" then
@@ -206,14 +226,7 @@ local function scan(source)
       if name == "severity" and depth == 0 and source:sub(after - #name - 1, after - #name - 1) ~= "." then
         local from = source:match([=[^%s*=%s*()["']]=], after)
         if from then
-          local stop = string_end(source, from)
-          local before = source:sub(1, from - 1)
-          local _, breaks = before:gsub("\n", "")
-          local line_start = before:match(".*\n()") or 1
-          if source:sub(stop, stop) == source:sub(from, from) and not source:sub(from, stop):find("\n", 1, true) then
-            found[#found + 1] = { line = breaks + 1, from = from - line_start + 1, to = stop - line_start + 1 }
-          end
-          i = stop + 1
+          i = literal(from) + 1
         end
       end
     else

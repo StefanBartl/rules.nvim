@@ -198,3 +198,59 @@ describe("rule_edit: a block that is not written one field to a line (G5-3)", fu
     assert.is_nil(removed:find("first", 1, true))
   end)
 end)
+
+describe("rule_edit: the severity of a block that spells the key in brackets", function()
+  ---@param block string[]
+  ---@return string
+  local function rule_with(block)
+    local lines = { "---", "id: DEP-01", "severity: critical", "family: DEP", "---", "", "#### `DEP-01` — one", "", "```rule" }
+    vim.list_extend(lines, block)
+    vim.list_extend(lines, { "```", "", "Text.", "", "---", "" })
+    return doc(lines)
+  end
+
+  -- the line of the block that holds the key, and how it reads after a patch to "recommended"
+  local SPELLINGS = {
+    ["double quotes"] = { '["severity"] = "critical",', '["severity"] = "recommended",' },
+    ["single quotes"] = { "['severity'] = 'critical',", "['severity'] = 'recommended'," },
+    ["blanks inside the brackets"] = { '[ "severity" ]  =  "critical",', '[ "severity" ]  =  "recommended",' },
+  }
+  local CHECK = 'check = { type = "grep", pattern = "x" },'
+
+  for name, spelling in pairs(SPELLINGS) do
+    it("changes the block's own severity when the key is written with " .. name, function()
+      local text = rule_with({ spelling[1], CHECK })
+      local changed = assert(rule_edit.apply("DEP-01.md", text, { severity = "recommended" }))
+      assert.are.equal("recommended", parser.parse_rule_text("DEP-01.md", changed).severity)
+      -- the frontmatter and that one literal changed, nothing else
+      local want = text:gsub("severity: critical", "severity: recommended", 1):gsub(vim.pesc(spelling[1]), function()
+        return spelling[2]
+      end, 1)
+      assert.are.equal(want, changed)
+    end)
+
+    it("changes it together with a check when the key is written with " .. name, function()
+      local text = rule_with({ spelling[1], CHECK })
+      local patch = { severity = "recommended", check = { type = "grep", pattern = "y" } }
+      local changed = assert(rule_edit.apply("DEP-01.md", text, patch))
+      local rule = parser.parse_rule_text("DEP-01.md", changed)
+      assert.are.equal("recommended", rule.severity)
+      assert.are.same({ type = "grep", pattern = "y" }, rule.check)
+      assert.is_truthy(changed:find(spelling[2], 1, true))
+    end)
+  end
+
+  it("leaves a severity key that is nested in the check alone", function()
+    local text = rule_with({ 'check = { type = "grep", pattern = "x", ["severity"] = "keep" },' })
+    local changed = assert(rule_edit.apply("DEP-01.md", text, { severity = "recommended" }))
+    assert.is_truthy(changed:find('["severity"] = "keep"', 1, true))
+    assert.are.equal("recommended", parser.parse_rule_text("DEP-01.md", changed).severity)
+  end)
+
+  it("does not take a bracket key of another name for the severity", function()
+    local text = rule_with({ '["severity2"] = "x",', 'check = { type = "grep", pattern = "x" },' })
+    local changed = assert(rule_edit.apply("DEP-01.md", text, { severity = "recommended" }))
+    -- the block does not repeat the severity: only the frontmatter changes
+    assert.are.equal((text:gsub("severity: critical", "severity: recommended", 1)), changed)
+  end)
+end)
