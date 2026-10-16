@@ -85,7 +85,7 @@ For a ruleset in the one-file-per-rule form the commands also write:
 `:Rules new <FAMILY>` makes a rule at the next free id (with less than a title
 and `severity=` a Markdown form opens, checked up front, with a dry-run preview
 before anything is written), `:Rules set <ID> key=value` changes parts of its
-file, `:Rules retire <ID>` moves it to `_retired/` (it asks first), `:Rules
+file, `:Rules retire <ID>` moves it to `_retired/` (it asks first, and its message names the `:Rules reinstate` line that puts it back where it stood), `:Rules
 reinstate <ID> --after=<ID>` brings a retired rule back (asks first; without a place
 it stands in no layout, and the command says so), `:Rules
 move <ID> --to=<file>#<section>` moves it in a layout, `:Rules list` puts the

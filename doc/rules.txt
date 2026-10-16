@@ -211,7 +211,14 @@ COMMANDS                                                        *rules-commands*
     stays taken. Asks first (--yes skips the question; a session without a
     screen needs it). The engine is asked with a dry run before the
     question, so a rule that is not there is told without one. --by names
-    the rule that takes its place. |:Rules_reinstate| brings it back.
+    the rule that takes its place. |:Rules_reinstate| brings it back, and
+    the message names the line for it, built from the engine's answer (the
+    only place that remembers where the rule stood): `put it back with
+    :Rules reinstate DEP-03 --layout=regeln/DEP.md --after=DEP-02`, ready to
+    run (a blank in a value is written `\ `, a `#` or `%` as it is). A rule
+    that stood in several layouts gets the line for the first and a note
+    for the others; the top of a layout, the n-th section of one name and
+    the blank lines around the old place are notes, not part of the line.
 
                                                               *:Rules_reinstate*
 :Rules reinstate {id} [--after={id} | --before={id} | --section={heading}
