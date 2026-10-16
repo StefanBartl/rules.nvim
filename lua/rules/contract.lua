@@ -24,6 +24,7 @@ local errors = require("lib.nvim.contract.errors")
 local expand_path = require("lib.nvim.cross.fs.expand_path")
 local doc_mod = require("lib.nvim.contract.doc")
 
+local gaps = require("rules.engine.gaps")
 local loader = require("rules.engine.loader")
 local parser = require("rules.engine.parser")
 
@@ -300,6 +301,7 @@ end
 ---@field retired table[]              { id, family, source, replaced_by?, retired?, reason? }
 ---@field files table[]              { path, rules, etag }
 ---@field load_errors string[]
+---@field gaps Rules.FamilyGaps[]    the numbers each family skips: a hint, never part of `load_errors` or of a document
 ---@field rev string
 
 ---The rules that were retired: `<ruleset>/_retired/<FAMILY>/<ID>.md` (`rules-ops/1` `retire`). The loader does not
@@ -418,11 +420,21 @@ local function build_view(paths)
   end
   table.sort(scrubbed, json.bytes_less)
 
+  -- a retired rule keeps its number taken, so it leaves no gap (the ids `next_id` counts)
+  local retired = retired_of(paths, names)
+  local taken = {}
+  for _, list in ipairs({ rules, retired }) do
+    for _, item in ipairs(list) do
+      taken[#taken + 1] = item.id
+    end
+  end
+
   return {
     paths = paths,
     names = names,
     abs = abs,
-    retired = retired_of(paths, names),
+    retired = retired,
+    gaps = gaps.find(taken),
     rules = rules,
     full = full,
     files = files,
@@ -662,6 +674,20 @@ function M.families(view)
     out[fam] = true
   end
   return out
+end
+
+---The numbers each family skips between its smallest and largest id (`rules.engine.gaps`), loaded and retired ids
+---counted as taken, over all configured rulesets together. A hint for a person or a CI job that asks for it: it is
+---no `load_errors` entry and no part of any document of `rules-export/1`.
+---@param opts Rules.Contract.Opts|nil
+---@return Rules.FamilyGaps[]|nil gaps
+---@return Lib.Contract.Error|nil err
+function M.gaps(opts)
+  local view, err = M.view(opts)
+  if not view then
+    return nil, err
+  end
+  return view.gaps, nil
 end
 
 ---The id one past the highest number of a family, in the width the family uses (at least two digits). `nil` when
