@@ -16,7 +16,8 @@
 --- `expires` is a calendar date (`YYYY-MM-DD`, no time zone). A waiver is valid through that day; the day after, it is
 --- EXPIRED: the finding flags again and the report says so. `paths` (relative to the project root, `/`, no `..`) limit
 --- the waiver to findings in those files or folders; a glob (`*`, `**`, `?`, `[ab]`, `{a,b}`) is matched on the whole
---- path (`vim.glob`), a plain name is that file or the folder with that name.
+--- path (`vim.glob`), a plain name is that file or the folder with that name (a name with glob characters, `pages/[id].tsx`,
+--- is also taken as written).
 ---
 --- Strictness is the point: a file that exists but cannot be used (unknown key, bad date, bad path, wrong type) is an
 --- error, never "no waivers". `M.load` keeps its old shape for existing callers (id -> reason text); `M.load_entries`
@@ -108,6 +109,14 @@ end
 
 -- ── validation ──────────────────────────────────────────────────────────────────
 
+--- The length of a text in characters (the limits below are told in characters, not bytes: a 300-letter German reason is
+--- 300 characters, not 600). Bytes that are no UTF-8 count one each.
+---@param text string
+---@return integer
+local function chars(text)
+  return vim.fn.strchars(text)
+end
+
 --- Why a reason cannot be used, or nil.
 ---@param reason any
 ---@return string|nil why
@@ -121,7 +130,7 @@ function M.reason_error(reason)
   if reason:find("[%z\1-\8\11-\31\127]") then
     return "must not contain a control character"
   end
-  if #reason > M.MAX_REASON_LEN then
+  if chars(reason) > M.MAX_REASON_LEN then
     return ("exceeds %d characters"):format(M.MAX_REASON_LEN)
   end
   return nil
@@ -149,7 +158,7 @@ function M.path_error(path)
   if type(path) ~= "string" or path == "" then
     return "a path must be a non-empty text"
   end
-  if #path > M.MAX_PATH_LEN then
+  if chars(path) > M.MAX_PATH_LEN then
     return ("a path exceeds %d characters"):format(M.MAX_PATH_LEN)
   end
   if path:find("[%z\1-\31\127]") then
@@ -272,7 +281,7 @@ function M.id_error(id)
   if type(id) ~= "string" or id == "" then
     return "a rule id must be a non-empty text"
   end
-  if #id > M.MAX_ID_LEN or id:find("[%z\1-\31\127]") then
+  if chars(id) > M.MAX_ID_LEN or id:find("[%z\1-\31\127]") then
     return ("a rule id has at most %d characters and no control character"):format(M.MAX_ID_LEN)
   end
   return nil
@@ -284,6 +293,9 @@ end
 ---@return Rules.WaiverEntries|nil entries
 ---@return string|nil err
 function M.parse(raw, label)
+  -- a byte order mark (Notepad, Windows PowerShell 5.1 `Set-Content -Encoding UTF8`) is no part of the JSON: the loader
+  -- (`readfile`) drops it, so the write door and the document must too, or one file would be two things
+  raw = raw:gsub("^\239\187\191", "")
   local ok, decoded = safe_error.safe_call(vim.json.decode, raw)
   if not ok or type(decoded) ~= "table" then
     return nil, label .. ": could not parse as JSON"
@@ -428,18 +440,26 @@ end
 
 -- ── paths of a waiver against the files of a finding ────────────────────────────
 
+--- A path with `/`, absolute, `.` and `..` resolved, nothing expanded: a folder called `$HOME` or `~x` is that folder
+--- (`vim.fs.normalize` would read the variable).
+---@param path string
+---@return string
+local function normalized(path)
+  return (vim.fs.normalize(vim.fn.fnamemodify(path, ":p"), { expand_env = false }):gsub("/+$", ""))
+end
+
 --- A path with `/`, absolute, `.` and `..` resolved, the real path where the file system has one (links, 8.3 names).
 --- A file that does not exist (yet) takes the real path of its nearest existing folder.
 ---@param path string
 ---@return string
 local function real_of(path)
-  local normal = vim.fs.normalize(vim.fn.fnamemodify(path, ":p")):gsub("/+$", "")
+  local normal = normalized(path)
   local tail = {}
   local head = normal
   while head ~= "" do
     local real = vim.uv.fs_realpath(head)
     if real then
-      local out = vim.fs.normalize(real):gsub("/+$", "")
+      local out = vim.fs.normalize(real, { expand_env = false }):gsub("/+$", "")
       for i = #tail, 1, -1 do
         out = out .. "/" .. tail[i]
       end
@@ -465,7 +485,7 @@ function M.relativizer(root)
   local key = CASE_INSENSITIVE and base:lower() or base
   local folders = {}
   return function(file)
-    local normal = vim.fs.normalize(vim.fn.fnamemodify(file, ":p")):gsub("/+$", "")
+    local normal = normalized(file)
     local dir, name = normal:match("^(.*)/([^/]*)$")
     if not dir or name == "" then
       return nil
@@ -489,13 +509,19 @@ end
 local glob_cache = {}
 
 --- Whether `rel` (a path relative to the project root) is in one of `paths`: the same file, a file under a folder
---- with that name, or a match of a glob on the whole path or on a folder above it. Matched as written (case counts).
+--- with that name, or a match of a glob on the whole path or on a folder above it. Matched as written (case counts). An
+--- entry with glob characters is tried as a name FIRST: `pages/[id].tsx` is the file of that name (a real Next.js route)
+--- as well as the glob that matches `pages/i.tsx` and `pages/d.tsx`.
 ---@param paths string[]
 ---@param rel string
 ---@return boolean
 function M.path_matches(paths, rel)
   for _, path in ipairs(paths) do
     local body = path:gsub("/$", "")
+    if rel == body or rel:sub(1, #body + 1) == body .. "/" then
+      -- the name as written, also when it has glob characters: `pages/[id].tsx` is that file
+      return true
+    end
     if has_glob(body) then
       local pattern = glob_cache[body]
       if pattern == nil then
@@ -518,8 +544,6 @@ function M.path_matches(paths, rel)
           from = slash + 1
         end
       end
-    elseif rel == body or rel:sub(1, #body + 1) == body .. "/" then
-      return true
     end
   end
   return false

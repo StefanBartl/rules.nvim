@@ -209,6 +209,24 @@ describe("rules.engine.waivers.load_entries: the object form", function()
     end)
   end
 
+  it("counts the limits in characters, as the messages and the docs say, not in bytes", function()
+    local a_umlaut = vim.fn.nr2char(228) -- two bytes, one character
+    -- a reason of 300 letters is 600 bytes; the cap is 500 characters
+    assert.is_nil(waivers.reason_error(string.rep(a_umlaut, 300)))
+    assert.is_nil(waivers.reason_error(string.rep(a_umlaut, waivers.MAX_REASON_LEN)))
+    assert.matches("exceeds 500 characters", waivers.reason_error(string.rep(a_umlaut, waivers.MAX_REASON_LEN + 1)))
+    assert.is_nil(waivers.path_error(string.rep(a_umlaut, 150)))
+    assert.matches("exceeds 200 characters", waivers.path_error(string.rep(a_umlaut, 201)))
+    assert.is_nil(waivers.id_error(string.rep(a_umlaut, 60)))
+    assert.is_not_nil(waivers.id_error(string.rep(a_umlaut, 101)))
+    -- and the file takes such a reason, whole
+    local dir = tmp_dir()
+    put(dir, vim.json.encode({ ["DEP-01"] = string.rep(a_umlaut, 300) }))
+    local entries, err = waivers.load_entries(dir)
+    assert.is_nil(err)
+    assert.are.equal(string.rep(a_umlaut, 300), entries["DEP-01"].reason)
+  end)
+
   it("takes a date on the last day of a leap year and a path with a glob and a trailing slash", function()
     local dir = tmp_dir()
     put(dir, '{"DEP-01": {"reason": "r", "expires": "2028-02-29", "paths": ["src/", "**/*.{md,txt}", "a[bc]/x"]}}')
@@ -330,6 +348,27 @@ describe("rules.engine.waivers.path_matches", function()
     assert.is_true(waivers.path_matches({ "docs", "src/*.lua" }, "src/a.lua"))
     assert.is_false(waivers.path_matches({ "docs", "src/*.lua" }, "test/a.lua"))
   end)
+
+  it("a name with glob characters is that file too: a dynamic route like pages/[id].tsx", function()
+    assert.is_true(waivers.path_matches({ "pages/[id].tsx" }, "pages/[id].tsx"))
+    assert.is_true(waivers.path_matches({ "pages/[id]" }, "pages/[id]/edit.tsx"))
+    assert.is_true(waivers.path_matches({ "pages/[id]/" }, "pages/[id]/edit.tsx"))
+    -- it is still the glob it looks like
+    assert.is_true(waivers.path_matches({ "pages/[id].tsx" }, "pages/i.tsx"))
+    assert.is_false(waivers.path_matches({ "pages/[id].tsx" }, "pages/x.tsx"))
+    assert.is_false(waivers.path_matches({ "pages/[id].tsx" }, "pages/[id].tsxx"))
+  end)
+
+  it("a name with glob characters keeps a finding in that file waived, in a run", function()
+    local root = tmp_dir()
+    write_file(root .. "/pages/[id].lua", "vim.loop.now()\n")
+    local rules = { { id = "DEP-01", severity = "recommended", check = { type = "grep", pattern = "vim%.loop%." } } }
+    local w = { ["DEP-01"] = { reason = "dynamic route", paths = { "pages/[id].lua" } } }
+
+    local results = runner.check_family(rules, "DEP", root, w, { today = "2030-10-15" })
+
+    assert.are.equal("waived", results[1].status, vim.inspect(results[1]))
+  end)
 end)
 
 describe("rules.engine.waivers.relativizer", function()
@@ -376,6 +415,29 @@ describe("rules.engine.waivers.relativizer", function()
 
     assert.are.equal("src/a.lua", waivers.relativizer(link)(real .. "/src/a.lua"))
     assert.are.equal("src/a.lua", waivers.relativizer(real)(link .. "/src/a.lua"))
+  end)
+
+  it("expands nothing: a folder called like a variable that is set, or like ~x, is that folder", function()
+    local saved = vim.env.RULES_SPEC_ELSEWHERE
+    vim.env.RULES_SPEC_ELSEWHERE = vim.fs.normalize(vim.fn.tempname())
+    local root = tmp_dir()
+    write_file(root .. "/$RULES_SPEC_ELSEWHERE/f.lua", "x")
+    write_file(root .. "/~x/f.lua", "x")
+    write_file(root .. "/${RULES_SPEC_ELSEWHERE}/f.lua", "x")
+    local rel = waivers.relativizer(root)
+
+    local variable = rel(root .. "/$RULES_SPEC_ELSEWHERE/f.lua")
+    local braced = rel(root .. "/${RULES_SPEC_ELSEWHERE}/f.lua")
+    local tilde = rel(root .. "/~x/f.lua")
+    local missing = rel(root .. "/$RULES_SPEC_ELSEWHERE/not-there.lua")
+    vim.env.RULES_SPEC_ELSEWHERE = saved
+
+    assert.are.equal("$RULES_SPEC_ELSEWHERE/f.lua", variable)
+    assert.are.equal("${RULES_SPEC_ELSEWHERE}/f.lua", braced)
+    assert.are.equal("~x/f.lua", tilde)
+    assert.are.equal("$RULES_SPEC_ELSEWHERE/not-there.lua", missing)
+    -- and a path of the waiver names such a folder
+    assert.is_true(waivers.path_matches({ "$RULES_SPEC_ELSEWHERE" }, variable))
   end)
 end)
 

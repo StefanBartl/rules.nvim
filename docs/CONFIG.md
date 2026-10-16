@@ -179,6 +179,9 @@ A file is one JSON object. Its keys are rule ids, its values one of two forms th
   relative to the project root, written with `/`, no `..`, no absolute path, no `~`. A plain name is that file or
   the folder with that name (and everything under it, `src/legacy` or `src/legacy/`); a glob (`*` inside one folder,
   `**` across folders, `?`, `[ab]`, `{a,b}`; `vim.glob`) must match the whole path, or a folder above the file.
+  A name that has glob characters is also taken as the name it is: `pages/[id].tsx` (a dynamic route) waives the
+  file of that name, and still matches `pages/i.tsx` and `pages/d.tsx` as the glob it looks like. (A name that is no
+  valid glob at all, like `a/{x}.ts`, is refused when the file is read: the engine does not guess.)
   Matched as written (case counts). A finding that is no file at all (a check that errored names the project, not a
   file) is never inside `paths`. A rule with findings both inside and outside stays failing with the ones outside,
   and the report says how many were waived.
@@ -193,6 +196,11 @@ key, a date that is none, a path with `..`, an empty file, a folder in its place
 check`, `:Rules gate` and their headless counterparts (`check_family_json`, `run_gate_json`) stop and say why; the
 findings it was meant to hold never come back silently as "no waivers" with a warning on the side. A project without
 the file has no waivers, which is not an error.
+
+The file is read the same way everywhere (the engine, the `waivers` document, `check --waivers`, the write door): a
+UTF-8 byte order mark at the start (Notepad, Windows PowerShell 5.1 `Set-Content -Encoding UTF8`) is no part of the
+JSON, and a file that is a link is read through the link. Only a **write** refuses a link (`forbidden`): it would
+replace the link, so edit the file it points to by hand. A write leaves the file canonical, without the mark.
 
 ### CI
 
