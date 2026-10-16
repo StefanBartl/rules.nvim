@@ -53,7 +53,10 @@ provide — the same way you'd point ESLint at your own `.eslintrc`.
 - [Bindings](docs/BINDINGS.md) — the `:Rules` command and its subcommands, including the form of `:Rules new`, and `:RulesVault` (find a rule, a family or a ruleset in the vault; make a vault).
 - [Settings files and the rules-vault](docs/CONFIG.md) — `.rules.json` in a project and in a vault, which place wins, `vault` / `$RULES_VAULT`, `@vault/<name>`.
 - [Agent-run manual rules](docs/AGENT.md) — planned, not built: how the rules with no `check` could be worked by an agent, as proposals a person reviews.
-- [Machine contract](docs/CONTRACT.md) — `rules-export/1` (the ruleset as JSON documents for apps, agents and CI) and `rules-ops/1` (create, change, retire and move a rule through the engine).
+- [Machine contract](docs/CONTRACT.md) — `rules-export/1` (the ruleset as JSON documents for apps, agents and CI) and `rules-ops/1` (create, change, retire and move a rule through the engine). A TypeScript client imports the types in
+  [`schemas/rules-export/1/rules-export.d.ts`](schemas/rules-export/1/rules-export.d.ts), generated from the JSON Schema next to
+  them: after a change to the schema run `nvim --headless -u NONE -i NONE -n -l scripts/contract-dts.lua --write` and commit the
+  result (CI fails on a stale file; [how](docs/CONTRACT.md#typescript-types)).
 
 `:help rules` is the same command reference inside the editor.
 
