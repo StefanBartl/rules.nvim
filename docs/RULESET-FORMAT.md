@@ -297,6 +297,32 @@ told, and both are taken. A retired file that does not read (empty, no frontmatt
 an `id`, merge-conflict markers) is a load error as well; a `README.md` or a file that is
 not `.md` in `_retired/` is none.
 
+### Gaps in the numbering
+
+An id is `<FAMILY>-<NUMBER>`. When a family has `DEP-01` and `DEP-03` and nothing
+called `DEP-02`, the number is **not taken**: the rule was deleted instead of
+retired, or never made. The engine reports this as a **hint, never a load error**,
+apart from `load_errors` and from every document of `rules-export/1` (the snapshot
+carries no field for it); `scripts/ruleset.lua check --gaps` lists it and
+`--strict-gaps` turns it into an exit 1 ([CONFIG.md](CONFIG.md#the-ci-of-a-vault)).
+The editor has no command for it: `:Rules check` sweeps a family across a repository
+and is something else.
+
+- Only the numbers **between the smallest and the largest** id of a family count. A
+  family that starts at `DEP-05`, or that grows at its end, has no gap.
+- A **retired** rule keeps its number taken (its id is still in `_retired/`), so
+  retiring a rule instead of deleting its file leaves no gap. Retired and loaded ids
+  of all rulesets that are checked together are counted as one set, as for
+  duplicates.
+- `DEP-1` and `DEP-01` are one number. An id that is not `<letters>-<digits>` is not
+  numbered; a number of more than 15 digits is left out.
+- A ruleset may leave numbers out **on purpose**: blocks of ten per topic
+  (`PRIN-10`..`PRIN-19` for one theme, `PRIN-20`.. for the next). Such a ruleset
+  would turn every `--strict-gaps` run red, so the check says nothing about
+  numbering unless it is asked to, and the flag is for a ruleset that numbers without
+  holes. Measured on a real vault (a Lua, a native and a Go ruleset, 623 rules): 9 of
+  23 families have gaps, 172 numbers in all, nearly all of them whole blocks.
+
 ## Layouts and catalogs
 
 With a rule per file there is no document to read top to bottom. The documents
@@ -477,8 +503,8 @@ An absolute name, a drive, a `.` or `..` part, or a character a Windows file nam
 cannot hold is refused before anything is written. The script knows exactly
 `--write`, `--rules-dir` and `--layouts-dir` for `migrate`, and `--check` for
 `catalog` (`scripts/ruleset.lua check`, which loads all rulesets together and
-exits 1 on any load error such as a duplicate id, takes only `--vault` and
-`--project`); an unknown flag, a typo (`--chek`), a value on a flag that takes none
+exits 1 on any load error such as a duplicate id, takes `--vault`, `--project`,
+`--trust`, `--waivers` with `--today`, and `--gaps` or `--strict-gaps`); an unknown flag, a typo (`--chek`), a value on a flag that takes none
 (`--write=true`, `catalog --check=1`) or no value on one that needs it is wrong
 usage: exit code 2, and nothing is done (a misspelt `--check` must not write the
 documents it was meant to check). A path that is not a folder is a problem (exit
