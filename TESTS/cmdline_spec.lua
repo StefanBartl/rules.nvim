@@ -254,3 +254,97 @@ describe("rules.cmdline.paths", function()
     assert.are.same({ "{a,b" }, cmdline.paths("{a,b"))
   end)
 end)
+
+describe("rules.cmdline.escape", function()
+  it("writes a blank, a tab and a backslash as the words of the command line read them back", function()
+    assert.are.equal([[Two\ Words]], cmdline.escape("Two Words"))
+    assert.are.equal("a\\\tb", cmdline.escape("a\tb"))
+    assert.are.equal([[a\\b\ c]], cmdline.escape([[a\b c]]))
+    -- nothing else is marked: the arguments of the command are not expanded
+    assert.are.equal("C#\\ and\\ 100%\\ Done", cmdline.escape("C# and 100% Done"))
+    assert.are.equal("plain", cmdline.escape("plain"))
+  end)
+
+  it("comes back as one word, unchanged, through words and unescape", function()
+    for _, text in ipairs({ "Two Words", [[a\b c]], [[ends\]], "C# and 100%  Done", "x\ty", [[\ ]] }) do
+      local words = cmdline.words("--section=" .. cmdline.escape(text) .. " --next")
+      assert.are.equal(2, #words)
+      assert.are.equal("--section=" .. text, cmdline.unescape(words[1].text))
+    end
+  end)
+end)
+
+describe("rules.cmdline.reinstate_hint", function()
+  local function inverse(places)
+    return { op = "reinstate", id = "DEP-02", places = places }
+  end
+
+  it("says an after, a before and a section place with the layout, every value as one word", function()
+    local hint = cmdline.reinstate_hint("DEP-02", inverse({ ["regeln/Dep Rules.md"] = { after = "DEP-01" } }))
+    assert.are.equal(":Rules reinstate DEP-02 --layout=regeln/Dep\\ Rules.md --after=DEP-01", hint.command)
+    assert.are.same({}, hint.notes)
+    hint = cmdline.reinstate_hint("DEP-02", inverse({ ["regeln/DEP.md"] = { before = "DEP-03" } }))
+    assert.are.equal(":Rules reinstate DEP-02 --layout=regeln/DEP.md --before=DEP-03", hint.command)
+    hint = cmdline.reinstate_hint("DEP-02", inverse({ ["regeln/DEP.md"] = { section = "C# and 100% Done", first = true } }))
+    assert.are.equal(":Rules reinstate DEP-02 --layout=regeln/DEP.md --section=C#\\ and\\ 100%\\ Done --first", hint.command)
+    hint = cmdline.reinstate_hint("DEP-02", inverse({ ["regeln/DEP.md"] = { section = "Core" } }))
+    assert.are.equal(":Rules reinstate DEP-02 --layout=regeln/DEP.md --section=Core", hint.command)
+  end)
+
+  it("takes the place of an inverse that is one place of its own", function()
+    local hint = cmdline.reinstate_hint("DEP-02", { op = "reinstate", id = "DEP-02", layout = "regeln/DEP.md", after = "DEP-01" })
+    assert.are.equal(":Rules reinstate DEP-02 --layout=regeln/DEP.md --after=DEP-01", hint.command)
+  end)
+
+  it("gives one line, for the first layout in the order of the names, and names the others in a note", function()
+    local hint = cmdline.reinstate_hint(
+      "DEP-02",
+      inverse({
+        ["z/last.md"] = { section = "Core", first = true },
+        ["a first.md"] = { after = "DEP-01" },
+        ["m/mid.md"] = { before = "DEP-05" },
+      })
+    )
+    assert.are.equal(":Rules reinstate DEP-02 --layout=a\\ first.md --after=DEP-01", hint.command)
+    assert.are.equal(1, #hint.notes)
+    assert.is_truthy(hint.notes[1]:find('m/mid.md (before DEP-05), z/last.md (the start of the section "Core")', 1, true))
+    assert.is_truthy(hint.notes[1]:find("takes one place", 1, true))
+  end)
+
+  it("has no line for the top of a layout or the n-th section of a name, and skips to a layout it can say", function()
+    local hint = cmdline.reinstate_hint(
+      "DEP-02",
+      inverse({ ["a.md"] = { top = true }, ["b.md"] = { section = "Core", nth = 2 }, ["c.md"] = { after = "DEP-01" } })
+    )
+    assert.are.equal(":Rules reinstate DEP-02 --layout=c.md --after=DEP-01", hint.command)
+    assert.is_truthy(hint.notes[1]:find('a.md (the top), b.md (the end of the section "Core" (the 2. of that name))', 1, true))
+    -- the top of the only layout: no line, and the two steps that get there
+    hint = cmdline.reinstate_hint("DEP-02", inverse({ ["my dir/a.md"] = { top = true } }))
+    assert.is_nil(hint.command)
+    assert.are.equal(2, #hint.notes)
+    assert.is_truthy(hint.notes[2]:find(":Rules reinstate DEP-02, then :Rules move DEP-02 --to=my\\ dir/a.md", 1, true))
+    -- a '#' in the layout name would be read by --to= as a section
+    hint = cmdline.reinstate_hint("DEP-02", inverse({ ["a#b.md"] = { top = true } }))
+    assert.is_nil(hint.command)
+    assert.are.equal(1, #hint.notes)
+    -- a second section of a name alone: no line, no two steps
+    hint = cmdline.reinstate_hint("DEP-02", inverse({ ["a.md"] = { section = "Core", nth = 3 } }))
+    assert.is_nil(hint.command)
+    assert.are.equal(1, #hint.notes)
+  end)
+
+  it("tells that the blank lines around the old place are not part of the line", function()
+    local hint = cmdline.reinstate_hint("DEP-02", inverse({ ["a.md"] = { after = "DEP-01", gap = { above = 2, below = 0 } } }))
+    assert.are.equal(":Rules reinstate DEP-02 --layout=a.md --after=DEP-01", hint.command)
+    assert.is_truthy(hint.notes[1]:find("blank lines", 1, true))
+  end)
+
+  it("says nothing without a place", function()
+    for _, bad in ipairs({ vim.NIL, {}, { op = "reinstate", id = "DEP-02" }, inverse({}), inverse({ ["a.md"] = {} }) }) do
+      local hint = cmdline.reinstate_hint("DEP-02", bad)
+      assert.is_nil(hint.command)
+      assert.are.same({}, hint.notes)
+    end
+    assert.is_nil(cmdline.reinstate_hint("DEP-02", nil).command)
+  end)
+end)

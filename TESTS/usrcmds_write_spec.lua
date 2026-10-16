@@ -936,6 +936,164 @@ describe(":Rules new, set, retire, move, list", function()
     end)
   end)
 
+  describe("retire names the reinstate line", function()
+    local NAME = "regeln/Dep Rules.md"
+    local SECOND = "regeln/Second.md"
+
+    ---@param name string  a file under _layouts
+    ---@param lines string[]  what follows the frontmatter
+    ---@param output? string
+    local function put_layout(name, lines, output)
+      local head = { "---", "kind: layout", "output: " .. (output or name), "---" }
+      write_raw(("%s/_layouts/%s"):format(root, name), table.concat(vim.list_extend(head, lines), "\n"))
+      contract.clear_cache()
+      require("rules.ui.candidates").reset()
+    end
+
+    ---@return string
+    local function dep_rules()
+      return assert(read_raw(root .. "/_layouts/" .. NAME))
+    end
+
+    ---The command of the "put it back with" message, as a user would type it (the colon taken off), or nil.
+    ---@return string|nil
+    local function hint_line()
+      for _, note in ipairs(notes) do
+        local line = note.text:match("put it back with :(.*)$")
+        if line then
+          return line
+        end
+      end
+      return nil
+    end
+
+    before_each(function()
+      -- the fixture's own layout makes room for ones with a blank in their name
+      os.remove(root .. "/_layouts/regeln/DEP.md")
+      write_raw(root .. "/_rules/DEP/DEP-03.md", rule_file("DEP-03", "recommended", "three", "Text of three."))
+      put_layout(NAME, {
+        "# Dependencies",
+        "",
+        "## C# and 100% Done",
+        "",
+        "{{rule DEP-01}}",
+        "",
+        "{{rule DEP-03}}",
+        "",
+        "## Extra",
+        "",
+        "{{rule DEP-02}}",
+        "",
+      })
+      -- a session with a screen: the reinstate that is run from the message asks, and the stub answers Yes
+      vim.api.nvim_list_uis = function()
+        return { {} }
+      end
+      notes, asked = {}, {}
+    end)
+
+    it("follows the line that says the rule is retired, and writes the layout's blank with a backslash", function()
+      run("Rules retire DEP-02 --yes")
+      assert.is_true(told("retired DEP-02"))
+      assert.are.equal("Rules reinstate DEP-02 --layout=regeln/Dep\\ Rules.md --section=Extra --first", hint_line())
+      assert.is_nil(dep_rules():find("{{rule DEP-02}}", 1, true))
+    end)
+
+    it("puts the rule back where it stood when the line is run, byte for byte where the line can say it", function()
+      local before = dep_rules()
+      run("Rules retire DEP-02 --yes")
+      local line = assert(hint_line())
+      assert.are_not.equal(before, dep_rules())
+      notes = {}
+      run(line)
+      assert.is_true(told("reinstated DEP-02 in " .. NAME))
+      assert.are.equal(before, dep_rules())
+    end)
+
+    it("runs for an --after, which is the rule's place where the author left it behind another", function()
+      run("Rules retire DEP-03 --yes")
+      local line = assert(hint_line())
+      assert.are.equal("Rules reinstate DEP-03 --layout=regeln/Dep\\ Rules.md --after=DEP-01", line)
+      -- the blank lines around its old place are no part of the command line: the layout says so
+      assert.is_true(told("blank lines"))
+      notes = {}
+      run(line)
+      assert.is_true(told("reinstated DEP-03 in " .. NAME))
+      local text = dep_rules()
+      assert.is_true(index_of(text, "{{rule DEP-01}}") < index_of(text, "{{rule DEP-03}}"))
+      assert.is_true(index_of(text, "{{rule DEP-03}}") < index_of(text, "## Extra"))
+    end)
+
+    it("types a section with a # and a % the way the command line reads it", function()
+      -- DEP-01 has no rule above it in its section: its place is the start of that section
+      run("Rules retire DEP-01 --yes")
+      local line = assert(hint_line())
+      assert.are.equal("Rules reinstate DEP-01 --layout=regeln/Dep\\ Rules.md --section=C#\\ and\\ 100%\\ Done --first", line)
+      notes = {}
+      run(line)
+      assert.is_true(told("reinstated DEP-01 in " .. NAME))
+      local text = dep_rules()
+      assert.is_true(index_of(text, "## C# and 100% Done") < index_of(text, "{{rule DEP-01}}"))
+      assert.is_true(index_of(text, "{{rule DEP-01}}") < index_of(text, "{{rule DEP-03}}"))
+    end)
+
+    it("gives one line for the first layout and a note for the others", function()
+      put_layout(SECOND, { "# Second", "", "## Other", "", "{{rule DEP-01}}", "", "{{rule DEP-02}}", "" })
+      run("Rules retire DEP-01 --yes")
+      local line = assert(hint_line())
+      assert.are.equal("Rules reinstate DEP-01 --layout=regeln/Dep\\ Rules.md --section=C#\\ and\\ 100%\\ Done --first", line)
+      assert.is_true(told("it also stood in " .. SECOND .. ' (the start of the section "Other")'))
+      assert.is_true(told("takes one place"))
+      notes = {}
+      run(line)
+      assert.is_truthy(dep_rules():find("{{rule DEP-01}}", 1, true))
+      assert.is_nil(read_raw(root .. "/_layouts/" .. SECOND):find("{{rule DEP-01}}", 1, true))
+    end)
+
+    it("has no line for the top of a layout, and says the two steps that get there", function()
+      put_layout(NAME, { "{{rule DEP-01}}", "", "# Dependencies", "", "## Extra", "", "{{rule DEP-02}}", "" })
+      run("Rules retire DEP-01 --yes")
+      assert.is_nil(hint_line())
+      local reinstate, move
+      for _, note in ipairs(notes) do
+        reinstate, move =
+          note.text:match(":(Rules reinstate DEP%-01), then :(Rules move DEP%-01 %-%-to=.-) puts it at the top of ")
+        if reinstate then
+          break
+        end
+      end
+      assert.are.equal("Rules move DEP-01 --to=regeln/Dep\\ Rules.md", move)
+      run(assert(reinstate))
+      assert.is_nil(dep_rules():find("{{rule DEP-01}}", 1, true))
+      run(move)
+      local text = dep_rules()
+      assert.is_true(index_of(text, "{{rule DEP-01}}") < index_of(text, "# Dependencies"))
+    end)
+
+    it("names no machine path, only the layout as the ruleset gives it", function()
+      run("Rules retire DEP-01 --yes")
+      assert.is_truthy(hint_line())
+      for _, note in ipairs(notes) do
+        for _, path in ipairs({ root, real(root), vim.fs.dirname(vim.fs.dirname(root)) }) do
+          assert.is_nil(note.text:find(path, 1, true), note.text)
+        end
+        assert.is_nil(note.text:find("_layouts", 1, true), note.text)
+      end
+    end)
+
+    it("is not told for a dry run, a question that was declined, or a refusal", function()
+      run("Rules retire DEP-02 --dry")
+      assert.is_true(told("would retire DEP-02"))
+      assert.is_nil(hint_line())
+      answer = 1
+      run("Rules retire DEP-02")
+      assert.is_true(told("DEP-02 was not retired"))
+      assert.is_nil(hint_line())
+      run("Rules retire NOPE-01 --yes")
+      assert.is_nil(hint_line())
+    end)
+  end)
+
   describe("reinstate", function()
     ---@return boolean
     local function back()

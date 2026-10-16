@@ -14,6 +14,8 @@
 ---  - `patch`: the assignments of `:Rules set` as the `patch` of a `set` operation
 ---  - `place`, `place_text`: a place (`--to=<layout>#<section>`, `--after=<ID>`, `--before=<ID>`) as the fields of
 ---    an operation
+---  - `escape`, `reinstate_hint`: the other direction -- a value as one word of a command line, and the
+---    `:Rules reinstate` line that undoes a `retire`, built from the `inverse` of its answer
 ---
 --- Not its job: checking a value against the rules of a rule (that is the door's, `rules.ops`: its answer is what
 --- the user sees), writing, windows.
@@ -334,6 +336,130 @@ function M.place_text(text)
   end
   -- anything else is a layout (its path may hold a space); the door says when there is none of that name
   return M.to(trimmed)
+end
+
+-- ── the other direction: a place told as a command line ─────────────────────────
+
+---A text as ONE word of a command line, the way `M.words` and Neovim's own split read it back: a backslash before every
+---blank, tab and backslash. Nothing else needs a mark: the arguments of the `:Rules` command are not expanded, so a `#`
+---or a `%` (a heading `C# and 100% Done`) stands as it is.
+---@param text string
+---@return string
+function M.escape(text)
+  return (text:gsub("[\\ \t]", "\\%0"))
+end
+
+---@class Rules.ReinstateHint
+---@field command string|nil  the `:Rules reinstate` line for one of the layouts, ready to run
+---@field notes string[]      what the line leaves out, one sentence each
+
+---A place as words, for a note: `after DEP-01`, `the start of the section "Core"`, `the top`.
+---@param place table
+---@return string
+local function place_words(place)
+  if place.after then
+    return "after " .. place.after
+  elseif place.before then
+    return "before " .. place.before
+  elseif place.section then
+    local nth = (type(place.nth) == "number" and place.nth > 1) and (" (the %d. of that name)"):format(place.nth) or ""
+    return ('the %s of the section "%s"%s'):format(place.first and "start" or "end", place.section, nth)
+  end
+  return "the top"
+end
+
+---The flags of `:Rules reinstate` that say a place in a layout; nil where the command line has no word for it (the top
+---of a layout, the n-th section of one name).
+---@param layout string
+---@param place table
+---@return string|nil flags
+local function reinstate_flags(layout, place)
+  local head = "--layout=" .. M.escape(layout)
+  if type(place.after) == "string" then
+    return head .. " --after=" .. M.escape(place.after)
+  elseif type(place.before) == "string" then
+    return head .. " --before=" .. M.escape(place.before)
+  elseif type(place.section) == "string" and not (type(place.nth) == "number" and place.nth > 1) then
+    return head .. " --section=" .. M.escape(place.section) .. (place.first and " --first" or "")
+  end
+  return nil
+end
+
+---The `:Rules reinstate` line that undoes a `retire`, from the `inverse` of its answer (an operation `reinstate`, with
+---`places` = `{ [layout output] = place }`, or one place as fields of its own with `layout`). The line puts the rule
+---back into ONE layout, the first (in the order of the layout names) that the command line can say: `--layout=<file>`
+---with `--after=<ID>`, `--before=<ID>` or `--section=<heading> [--first]`, each value written as one word. What it
+---cannot say goes into `notes`: the other layouts that held the rule (the command takes one place, so the rest is
+---left to the author or to `rules-ops/1`), the top of a layout and the n-th section of one name (no flag for them),
+---and the blank lines around the old place (`gap`, not part of the command line). Layout names are the ones the door
+---gives, relative to the ruleset: no machine path. Nothing is checked or written.
+---@param id string
+---@param inverse table|nil
+---@return Rules.ReinstateHint
+function M.reinstate_hint(id, inverse)
+  local hint = { notes = {} }
+  if type(inverse) ~= "table" then
+    return hint
+  end
+  ---@type { layout: string, place: table }[]
+  local stood = {}
+  ---@param layout string
+  ---@param place any
+  local function add(layout, place)
+    -- a place that names nothing (a layout whose old place was not found) has nothing to tell
+    if type(place) == "table" and (place.after or place.before or place.section or place.top) then
+      stood[#stood + 1] = { layout = layout, place = place }
+    end
+  end
+  if type(inverse.places) == "table" then
+    local layouts = vim.tbl_keys(inverse.places)
+    table.sort(layouts)
+    for _, layout in ipairs(layouts) do
+      add(layout, inverse.places[layout])
+    end
+  elseif type(inverse.layout) == "string" then
+    add(inverse.layout, inverse)
+  end
+  local chosen
+  for _, one in ipairs(stood) do
+    local flags = reinstate_flags(one.layout, one.place)
+    if flags then
+      chosen = one
+      hint.command = (":Rules reinstate %s %s"):format(M.escape(id), flags)
+      break
+    end
+  end
+  local rest = {}
+  for _, one in ipairs(stood) do
+    if one ~= chosen then
+      rest[#rest + 1] = ("%s (%s)"):format(one.layout, place_words(one.place))
+    end
+  end
+  -- `--after=` and `--before=` write no blank line of their own, a gap of none is what the line gives
+  local gap = chosen and chosen.place.gap
+  local plain = gap and (gap.above or 0) == 0 and (gap.below or 0) == 0 and (chosen.place.after or chosen.place.before)
+  if gap and not plain then
+    hint.notes[#hint.notes + 1] = "the blank lines around its old place are not part of the line: the layout may read a little"
+      .. " different from before"
+  end
+  if #rest > 0 then
+    local lead = chosen and "it also stood in " or "it stood in "
+    local tail = chosen and ": :Rules reinstate takes one place, put the rule in the others by hand"
+      or ": :Rules reinstate has no flag for that place"
+    hint.notes[#hint.notes + 1] = lead .. table.concat(rest, ", ") .. tail
+  end
+  -- the top of the one layout that held the rule is reached in two steps: back with no place, then moved there
+  -- (`--to=` reads a '#' as the start of a section, so a layout with one in its name has no such line)
+  local only = not chosen and #stood == 1 and stood[1]
+  if only and only.place.top and not only.layout:find("#", 1, true) then
+    hint.notes[#hint.notes + 1] = (":Rules reinstate %s, then :Rules move %s --to=%s puts it at the top of %s"):format(
+      M.escape(id),
+      M.escape(id),
+      M.escape(only.layout),
+      only.layout
+    )
+  end
+  return hint
 end
 
 return M
