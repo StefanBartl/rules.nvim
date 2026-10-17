@@ -131,6 +131,7 @@ end
 ---@return Rules.Result[]|nil results
 ---@return string|nil err  the settings of the project cannot be used, or its waivers file
 ---@return string[]|nil expired  the waivers that ran out
+---@return Rules.Settings|nil res  the settings of the run (its rulesets, for the work list)
 local function run_family(family_prefix, path)
   local root = path or vim.fn.getcwd()
   local rules, err, res = load(root)
@@ -144,7 +145,7 @@ local function run_family(family_prefix, path)
   if #gate.unknown_families(rules, { family_prefix }) > 0 then
     notify.warn(("--family=%q matches no loaded rule -- typo in the prefix, or not loaded/migrated yet"):format(family_prefix))
   end
-  return runner.check_family(rules, family_prefix, root, entries, run_opts(res)), nil, expired
+  return runner.check_family(rules, family_prefix, root, entries, run_opts(res)), nil, expired, res
 end
 
 --- Shared by `run_gate`/`run_gate_json`.
@@ -153,6 +154,9 @@ end
 ---@param diff_ref string|nil  scope results to `git diff --name-only <ref>`
 ---@return Rules.Result[]|nil results
 ---@return string|nil error
+---@return string[]|nil expired
+---@return Rules.Settings|nil res  the settings of the run
+---@return string[]|nil families  the families of the gate
 local function run_gate_results(gate_name, path, diff_ref)
   local root = path or vim.fn.getcwd()
   local res, settings_err = settings_for(root)
@@ -190,7 +194,7 @@ local function run_gate_results(gate_name, path, diff_ref)
     results = gate.scope_to_diff(results, changed)
   end
 
-  return results, nil, expired
+  return results, nil, expired, loaded_res or res, families
 end
 
 --- Run one rule family against a path and report it (quickfix + buffer).
@@ -266,6 +270,51 @@ function M.run_gate_json(gate_name, path, diff_ref)
   end
   local json = require("rules.report.json")
   return json.encode(results), json.exit_code(results), results, nil
+end
+
+--- `check_family_json` with the work list `rules-work-list/1` (`docs/WORK-LIST.md`) instead of the plain entries:
+--- every rule of the family with its verdict, its text and its waiver, the manual ones as `unchecked`, for a tool that
+--- turns them into tasks. Same exit code, same errors, never quits Neovim.
+---@param family_prefix string
+---@param path string|nil  defaults to the current working directory
+---@return string|nil json
+---@return 0|1|nil exit_code
+---@return table|nil doc  the document `json` encodes, as a table
+---@return string|nil error
+function M.check_family_work_list(family_prefix, path)
+  local results, err, _, res = run_family(family_prefix, path)
+  if not results then
+    return nil, nil, nil, err
+  end
+  local work_list = require("rules.report.work_list")
+  local doc = work_list.build(results, {
+    rulesets = res and res.entries,
+    target = path or vim.fn.getcwd(),
+    scope = { kind = "family", family = family_prefix },
+  })
+  return require("lib.nvim.json.canonical").encode(doc), require("rules.report.json").exit_code(results), doc, nil
+end
+
+--- `run_gate_json` with the work list `rules-work-list/1`, see `check_family_work_list`.
+---@param gate_name string
+---@param path string|nil
+---@param diff_ref string|nil
+---@return string|nil json
+---@return 0|1|nil exit_code
+---@return table|nil doc
+---@return string|nil error
+function M.run_gate_work_list(gate_name, path, diff_ref)
+  local results, err, _, res, families = run_gate_results(gate_name, path, diff_ref)
+  if not results then
+    return nil, nil, nil, err
+  end
+  local work_list = require("rules.report.work_list")
+  local doc = work_list.build(results, {
+    rulesets = res and res.entries,
+    target = path or vim.fn.getcwd(),
+    scope = { kind = "gate", gate = gate_name, families = families, diff = diff_ref },
+  })
+  return require("lib.nvim.json.canonical").encode(doc), require("rules.report.json").exit_code(results), doc, nil
 end
 
 --- Find one loaded rule by its exact id, for jumping straight to its source

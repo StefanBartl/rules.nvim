@@ -11,6 +11,7 @@ CONTENTS                                                       *rules-contents*
     Vault .............. |rules-vault|
     Gates .............. |rules-gates|
     Waivers ............ |rules-waivers|
+    Work list .......... |rules-work-list|
     Ruleset format ...... |rules-ruleset-format|
 
 ==============================================================================
@@ -112,19 +113,23 @@ COMMANDS                                                        *rules-commands*
     CI run with a real exit code, call
     `require("rules").check_family_json(family, path)` directly — see
     docs/BINDINGS.md in the plugin's repository for the recipe.
+    With --format=work-list, prints the work list |rules-work-list| instead:
+    every rule of the family with its verdict, text and waiver, the manual
+    ones as "unchecked".
 
     --family={PREFIX}     required, e.g. --family=DEP
-    --format={FORMAT}     optional, only "json" is recognized
+    --format={FORMAT}     optional, "json" or "work-list"
 
                                                                    *:Rules_gate*
 :Rules gate {name} [{path}]
     Runs every family configured for gate {name} (see |rules-gates|) as one
     combined report. --diff={ref} narrows findings to files changed since
     that git ref (tracked + untracked); a rule left with no findings inside
-    the diff reports "pass". --format=json behaves like :Rules check's.
+    the diff reports "pass". --format=json and --format=work-list behave
+    like :Rules check's.
 
     --diff={REF}          optional, e.g. --diff=main
-    --format={FORMAT}     optional, only "json" is recognized
+    --format={FORMAT}     optional, "json" or "work-list"
 
                                                                    *:Rules_show*
 :Rules show {id}
@@ -414,6 +419,28 @@ them; a run that finds expired waivers names the last two.
 against every loaded rule and warns about an orphaned entry — a waiver
 whose rule id was retired or mistyped, which would otherwise sit silently
 protecting nothing.
+
+==============================================================================
+WORK LIST                                                      *rules-work-list*
+
+`:Rules check --family={PREFIX} --format=work-list` and `:Rules gate {name}
+--format=work-list` print the work list `rules-work-list/1`: a versioned
+JSON document a task tool turns into tasks without reading a rule file.
+Headless, with the exit code of |:Rules_check|'s JSON: >lua
+    local json, code, doc, err =
+      require("rules").check_family_work_list("ERR", vim.fn.getcwd())
+    -- require("rules").run_gate_work_list(name, path, diff_ref)
+<
+The head carries `schema` ("rules-work-list"), `schema_version`,
+`generated_at`, `rulesets` (name, source), `target` (path, commit) and
+`scope` (the family, or the gate with its families). Every rule of the run
+is one entry: `rule_id`, `family`, `severity`, `kind` ("automated" or
+"manual"), `status` ("pass", "fail", "waived" or "unchecked"), `title`,
+`section`, `description`, `source`, `findings` (file, line, text) and
+`waiver` (reason, expires, paths; `suppressed` for a waiver limited to
+paths, `expired` for one that ran out). A manual rule is "unchecked", never
+a pass; a check that could not run is "unchecked" with its `error`. The
+schema in full is docs/WORK-LIST.md in the plugin's repository.
 
 ==============================================================================
 RULESET FORMAT                                            *rules-ruleset-format*
