@@ -164,10 +164,10 @@ describe("layout_edit: where a token stands, and back", function()
     assert.are.equal(text, back)
   end)
 
-  -- every shape a token can stand in: what is above it, what is below it, how many blank lines on each side.
-  -- Not among them, because no place says it: a token between two pieces of text of an introduction (the place is the
-  -- end of the introduction, in the same section), and a token at the end of a file without a final newline that has
-  -- two blank lines above it (the file could not say it ended in a blank line).
+  -- every shape a token can stand in: what is above it, what is below it, how many blank lines on each side. A token
+  -- between two pieces of the author's text (prose above and below) comes back through `line` (behind the n-th line of
+  -- the section). Not among them, because no place says it: a token at the end of a file without a final newline that
+  -- has two blank lines above it (the file could not say it ended in a blank line).
   local ABOVE = {
     token = { "{{rule A-00}}" },
     prose = { "Some words." },
@@ -176,6 +176,7 @@ describe("layout_edit: where a token stands, and back", function()
   }
   local BELOW = {
     token = { "{{rule A-99}}" },
+    prose = { "More words." },
     heading = { "## Next" },
     nothing = {},
   }
@@ -214,6 +215,29 @@ describe("layout_edit: where a token stands, and back", function()
       end
     end
     assert.is_true(checked > 100)
+  end)
+
+  it("refuses a line place whose text has changed since, and takes one without around as before", function()
+    local text = doc({ "## A", "", "Intro.", "", "{{rule D-01}}", "", "More." })
+    local back, where = round(text, "D-01")
+    assert.are.equal(text, back)
+    assert.are.equal(3, where.line)
+    assert.is_truthy(tostring(where.around):match("^sha256:%x+$"), vim.inspect(where))
+    -- what the author does to the layout between taking the token out and putting it back
+    for name, edited in pairs({
+      ["a second line in the introduction"] = doc({ "## A", "", "Intro.", "Intro, second line.", "", "More." }),
+      ["a table instead of the introduction"] = doc({ "## A", "", "| a | b |", "|---|---|", "| 1 | 2 |", "", "More." }),
+      ["other text below"] = doc({ "## A", "", "Intro.", "", "Other." }),
+    }) do
+      local out, err = layout_edit.place(edited, "D-01", where)
+      assert.is_nil(out, name .. ": " .. tostring(out))
+      assert.is_truthy(tostring(err):find("has changed", 1, true), name .. ": " .. tostring(err))
+    end
+    -- a place written before `around` existed is put where its line says, unchecked
+    local old = vim.deepcopy(where)
+    old.around = nil
+    local edited = doc({ "## A", "", "Intro.", "Intro, second line.", "", "More." })
+    assert.is_truthy(layout_edit.place(edited, "D-01", old))
   end)
 
   it("leaves a rule that is first of a tight section where it was (a heading right behind it)", function()
