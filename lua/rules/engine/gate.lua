@@ -91,14 +91,16 @@ end
 --- A rule whose findings are all outside the diff reports "pass" instead --
 --- deliberate: a diff-scoped review answers "did this change introduce a
 --- problem", not "does this repo have any standing problems", which is what
---- an unscoped `:Rules check`/the `release` gate are for.
+--- an unscoped `:Rules check`/the `release` gate are for. An "error" stays
+--- as it is: a check that could not run judged no file, so no diff can make
+--- it a pass.
 ---@param results Rules.Result[]
 ---@param changed table<string, true>
 ---@return Rules.Result[]
 function M.scope_to_diff(results, changed)
   local scoped = {}
   for _, res in ipairs(results) do
-    if res.status == "fail" or res.status == "error" then
+    if res.status == "fail" then
       local kept = {}
       for _, f in ipairs(res.findings) do
         if changed[vim.fs.normalize(vim.fn.fnamemodify(f.file, ":p"))] then

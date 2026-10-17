@@ -190,6 +190,37 @@ describe("rules-work-list/1", function()
     assert.are.equal(head, doc.target.commit)
   end)
 
+  it("a gate scoped to a diff keeps a check that cannot run unchecked, never a pass", function()
+    local _, project = fixture()
+    local git = { "git", "-C", project, "-c", "user.name=t", "-c", "user.email=t@t", "-c", "commit.gpgsign=false" }
+    vim.fn.system({ "git", "-C", project, "init", "-q" })
+    vim.fn.system(vim.list_extend(vim.deepcopy(git), { "add", "-A" }))
+    vim.fn.system(vim.list_extend(vim.deepcopy(git), { "commit", "-q", "-m", "fixture" }))
+    write_lines(project .. "/new.lua", { "local e = 'OK'" })
+    local _, code, doc, err = rules.run_gate_work_list("work", project, "HEAD")
+    assert.is_nil(err)
+    local e = by_id(doc)
+    assert.are.equal("pass", e["WRK-01"].status) -- its finding lies outside the diff
+    assert.are.equal("unchecked", e["WRK-05"].status)
+    assert.matches("unknown check type", e["WRK-05"].error)
+    assert.are.equal(1, code) -- WRK-05 is critical and could not run, as with --format=json
+  end)
+
+  it("names the target by its absolute path when it was given relative to the cwd", function()
+    local _, project = fixture()
+    local saved_cwd = vim.fn.getcwd()
+    vim.fn.chdir(vim.fs.dirname(project))
+    local ok, doc = pcall(function()
+      local _, _, d = rules.check_family_work_list("WRK", "project")
+      return d
+    end)
+    vim.fn.chdir(saved_cwd)
+    assert.is_true(ok, doc)
+    assert.are.equal(real(project), real(doc.target.path))
+    assert.is_truthy(doc.target.path:find("/project$"))
+    assert.are.equal("code.lua", by_id(doc)["WRK-01"].findings[1].file)
+  end)
+
   it("errors like check_family_json: a broken waivers file is the error, no document", function()
     local _, project = fixture()
     write_lines(project .. "/.rules-waivers.json", { '{"WRK-01": {"reason": "r", "expires": "tomorrow"}}' })
