@@ -181,23 +181,68 @@ describe("rules-ops/1 layouts: retire and its inverse", function()
     assert.are.same({ above = 2, below = 2 }, inverse_of(retired).places["regeln/DEP.md"].gap)
   end)
 
-  it("puts a token that stood between two pieces of text back at the end of that text (documented limit)", function()
-    -- no place can say "between these two paragraphs", so the token comes back in its section, behind the text; the
-    -- bytes are the same but for where the token stands
-    local layout = { "## A", "", "Intro.", "", "{{rule DEP-01}}", "", "More.", "", "## B", "" }
+  it("puts a token that stood between two pieces of text back between them, byte for byte (line)", function()
+    local inverse = retire_and_back({ "## A", "", "Intro.", "", "{{rule DEP-01}}", "", "More.", "", "## B", "" }, "DEP-01")
+    -- behind line 3 of the section (the heading is line 1), with the blank lines it stood between
+    assert.are.same({ section = "A", line = 3, gap = { above = 1, below = 1 } }, inverse.places["regeln/DEP.md"])
+  end)
+
+  it("puts a token back between text in every kind of neighbourhood (line)", function()
+    local SHAPES = {
+      ["between two paragraphs"] = { "## A", "", "Intro.", "", "{{rule DEP-01}}", "", "More.", "" },
+      ["right under the heading, text behind"] = { "## A", "", "{{rule DEP-01}}", "", "More.", "", "## B", "" },
+      ["tight between text"] = { "## A", "Intro.", "{{rule DEP-01}}", "More.", "## B" },
+      ["token, text, token"] = { "## A", "", "{{rule DEP-02}}", "", "Text.", "", "{{rule DEP-01}}", "", "## B", "" },
+      ["text, token, text, token"] = { "## A", "", "Intro.", "", "{{rule DEP-01}}", "", "More.", "", "{{rule DEP-02}}" },
+      ["the n-th section of a name"] = { "## A", "{{rule DEP-02}}", "## A", "", "Intro.", "", "{{rule DEP-01}}", "", "More." },
+      ["two blank lines on each side"] = { "## A", "", "Intro.", "", "", "{{rule DEP-01}}", "", "", "More.", "" },
+    }
+    for name, layout in pairs(SHAPES) do
+      local ok, why = pcall(retire_and_back, layout, "DEP-01")
+      assert.is_true(ok, ("%s: %s"):format(name, tostring(why)))
+    end
+  end)
+
+  it("moves a token out from between text and back with its inverse, byte for byte (line)", function()
+    local layout = { "## A", "", "Intro.", "", "{{rule DEP-01}}", "", "More.", "", "## B", "", "{{rule DEP-02}}", "" }
     local _, opts, path = fixture(layout)
     local before = read_raw(path)
-    local inverse = inverse_of(one(opts, { op = "retire", id = "DEP-01" }))
+    local moved = one(opts, { op = "move", id = "DEP-01", after = "DEP-02" })
+    local inverse = inverse_of(moved)
+    assert.are.equal(3, inverse.line)
     assert.is_true(one(opts, inverse).ok)
-    local after = read_raw(path)
-    assert.is_true(layout_edit.has(after, "DEP-01"))
-    assert.are.same({ section = "A", prev = nil }, layout_edit.locate(after, "DEP-01"))
-    local function sorted(text)
-      local lines = vim.split(text, "\n", { plain = true })
-      table.sort(lines)
-      return lines
+    assert.are.equal(before, read_raw(path))
+  end)
+
+  it("checks line: whole number from 1, with a section only, not with first, inside the section", function()
+    local _, opts = fixture({ "## A", "", "Intro.", "", "```", "x", "```", "", "## B", "", "{{rule DEP-01}}", "" })
+    assert.is_true(one(opts, { op = "retire", id = "DEP-02" }).ok)
+    local function refused(place, code)
+      local entry = one(opts, vim.tbl_extend("force", { op = "reinstate", id = "DEP-02" }, place))
+      assert.is_false(entry.ok, vim.inspect(place))
+      if code then
+        assert.are.equal(code, entry.error.code, vim.inspect(place))
+      end
+      return entry
     end
-    assert.are.same(sorted(before), sorted(after))
+    for _, bad in ipairs({
+      { places = { ["regeln/DEP.md"] = { section = "A", line = 0 } } },
+      { places = { ["regeln/DEP.md"] = { section = "A", line = 2.5 } } },
+      { places = { ["regeln/DEP.md"] = { after = "DEP-01", line = 2 } } },
+      { places = { ["regeln/DEP.md"] = { top = true, line = 2 } } },
+      { places = { ["regeln/DEP.md"] = { section = "A", first = true, line = 2 } } },
+      { layout = "regeln/DEP.md", line = 2 },
+    }) do
+      refused(bad, "invalid_argument")
+    end
+    -- the section has 8 lines (heading to the blank line before "## B"): behind line 9 is outside it
+    local far = refused({ layout = "regeln/DEP.md", section = "A", line = 9 })
+    assert.is_truthy(tostring(far.error.message):find("no line 9", 1, true), vim.inspect(far))
+    -- behind line 5 is inside the fence: the token would be text there
+    local fenced = refused({ layout = "regeln/DEP.md", section = "A", line = 5 })
+    assert.is_truthy(tostring(fenced.error.message):find("code block", 1, true), vim.inspect(fenced))
+    -- behind the last line of the section is fine
+    assert.is_true(one(opts, { op = "reinstate", id = "DEP-02", layout = "regeln/DEP.md", section = "A", line = 8 }).ok)
   end)
 
   it("G4-4: puts a rule that was first of its section back into that section, not into a subsection", function()
