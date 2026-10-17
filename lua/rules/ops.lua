@@ -20,8 +20,8 @@
 ---    `inverse`: `reinstate` with `places` (every layout that held the rule).
 ---  - `reinstate` { id, place? | places? } brings a retired rule back, to where it came from. `places` is
 ---    `{ [layout output] = place }`. `inverse`: `retire`.
----  - `move` { id, after? | before? | (layout, section, first? | line?, nth?) } moves the `{{rule ID}}` line of a rule, within a
----    layout or to another one; the rule's file is not touched. `inverse`: `move` back.
+---  - `move` { id, after? | before? | (layout, section, first? | (line, around?), nth?) } moves the `{{rule ID}}` line of
+---    a rule, within a layout or to another one; the rule's file is not touched. `inverse`: `move` back.
 ---
 ---  - `waive` { id, reason, expires?, paths?, project?, if_match? }, `renew` { id, expires | no_expiry, reason?, project?,
 ---    if_match? } and `remove` { id, project?, if_match? } write the `.rules-waivers.json` of a PROJECT, not a ruleset
@@ -357,6 +357,7 @@ local PLACE_FIELDS = {
   top = "boolean",
   nth = "integer",
   line = "integer",
+  around = "string",
   gap = "object",
 }
 
@@ -396,13 +397,13 @@ end
 
 ---The place of a placement request: where in which layout.
 ---@param op table
----@return table|nil where   { after?, before?, section?, first?, nth?, line?, layout?, top?, gap? }
+---@return table|nil where   { after?, before?, section?, first?, nth?, line?, around?, layout?, top?, gap? }
 ---@return string|nil why
 local function placement(op)
   local n = (op.after and 1 or 0) + (op.before and 1 or 0) + (op.section and 1 or 0) + (op.top and 1 or 0)
   if n == 0 then
-    if op.layout ~= nil or op.first ~= nil or op.nth ~= nil or op.line ~= nil or op.gap ~= nil then
-      return nil, "layout, first, nth, line and gap need a place"
+    if op.layout ~= nil or op.first ~= nil or op.nth ~= nil or op.line ~= nil or op.around ~= nil or op.gap ~= nil then
+      return nil, "layout, first, nth, line, around and gap need a place"
     end
     return nil, nil
   end
@@ -421,6 +422,9 @@ local function placement(op)
   if op.line ~= nil and op.first ~= nil then
     return nil, "line and first exclude each other: line is the spot in the section"
   end
+  if op.around ~= nil and op.line == nil then
+    return nil, "around goes with line: it is the text around that line"
+  end
   if op.gap ~= nil then
     local why = gap_error(op.gap)
     if why then
@@ -434,6 +438,7 @@ local function placement(op)
     first = op.first,
     nth = op.nth,
     line = op.line,
+    around = op.around,
     layout = op.layout,
     top = op.top,
     gap = op.gap,
@@ -460,9 +465,10 @@ local function placements(op)
     or op.top ~= nil
     or op.nth ~= nil
     or op.line ~= nil
+    or op.around ~= nil
     or op.gap ~= nil
   then
-    return nil, "places goes alone, without after, before, section, layout, first, nth, line, gap or top"
+    return nil, "places goes alone, without after, before, section, layout, first, nth, line, around, gap or top"
   end
   local outputs = vim.tbl_keys(op.places)
   table.sort(outputs)
@@ -475,7 +481,7 @@ local function placements(op)
     for key, value in pairs(one) do
       if not (PLACE_FIELDS[key] and key ~= "layout" and place_field_ok(key, value)) then
         return nil,
-          "an entry of places has after, before, section, first, nth, line, gap or top, not " .. tostring(key):sub(1, 40)
+          "an entry of places has after, before, section, first, nth, line, around, gap or top, not " .. tostring(key):sub(1, 40)
       end
     end
     local where, why = placement(vim.tbl_extend("force", one, { layout = output }))
@@ -561,8 +567,8 @@ local function place_all(ctx, tx, root, op, wheres)
 end
 
 ---Where the token of `id` stands now, as a `place` that brings it back byte for byte (`layout_edit.where`): `{ layout,
----after }`, `{ layout, before }`, `{ layout, section, first? | line?, nth? }` or `{ layout, top }`, with `gap` (the blank
----lines around it) where `place` would not write them on its own; `nil` when the layout does not hold it.
+---after }`, `{ layout, before }`, `{ layout, section, first? | (line, around), nth? }` or `{ layout, top }`, with `gap`
+---(the blank lines around it) where `place` would not write them on its own; `nil` when the layout does not hold it.
 ---@param layout Rules.Layout
 ---@param id string
 ---@return table|nil
@@ -1310,6 +1316,7 @@ local function do_move(op, ctx)
         first = old.first,
         nth = old.nth,
         line = old.line,
+        around = old.around,
         top = old.top,
         gap = old.gap and json.object(old.gap) or nil,
       })

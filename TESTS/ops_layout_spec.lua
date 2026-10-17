@@ -183,8 +183,55 @@ describe("rules-ops/1 layouts: retire and its inverse", function()
 
   it("puts a token that stood between two pieces of text back between them, byte for byte (line)", function()
     local inverse = retire_and_back({ "## A", "", "Intro.", "", "{{rule DEP-01}}", "", "More.", "", "## B", "" }, "DEP-01")
-    -- behind line 3 of the section (the heading is line 1), with the blank lines it stood between
-    assert.are.same({ section = "A", line = 3, gap = { above = 1, below = 1 } }, inverse.places["regeln/DEP.md"])
+    -- behind line 3 of the section (the heading is line 1), with the blank lines it stood between and the fingerprint
+    -- of the two lines of text around it
+    local place = inverse.places["regeln/DEP.md"]
+    assert.is_truthy(tostring(place.around):match("^sha256:%x+$"), vim.inspect(place))
+    place.around = nil
+    assert.are.same({ section = "A", line = 3, gap = { above = 1, below = 1 } }, place)
+  end)
+
+  it("refuses to put a token back behind a line whose text has changed since the retire (line, around)", function()
+    local layout = { "## A", "", "Intro.", "", "{{rule DEP-01}}", "", "More.", "", "## B", "" }
+    local head = { "---", "kind: layout", "output: regeln/DEP.md", "---" }
+    -- what the author does to the layout between the retire and the reinstate
+    local EDITS = {
+      -- the token would split the new paragraph in two: line 3 still reads "Intro."
+      ["a second line in the introduction"] = { "## A", "", "Intro.", "Intro, second line.", "", "More.", "", "## B", "" },
+      -- the token would go between the header and the delimiter row of the table
+      ["a table instead of the introduction"] = { "## A", "", "| a | b |", "|---|---|", "| 1 | 2 |", "", "## B", "" },
+    }
+    for name, edited in pairs(EDITS) do
+      local _, opts, path = fixture(layout)
+      local inverse = inverse_of(one(opts, { op = "retire", id = "DEP-01" }))
+      local changed = doc(vim.list_extend(vim.deepcopy(head), edited))
+      write_raw(path, changed)
+      local back = one(opts, inverse)
+      assert.is_false(back.ok, name .. ": " .. vim.inspect(back))
+      assert.is_truthy(tostring(back.error.message):find("has changed", 1, true), name .. ": " .. vim.inspect(back))
+      assert.are.equal(changed, read_raw(path), name)
+    end
+  end)
+
+  it("still takes an inverse with line and no around (written before around existed)", function()
+    local layout = { "## A", "", "Intro.", "", "{{rule DEP-01}}", "", "More.", "", "## B", "" }
+    local _, opts, path = fixture(layout)
+    local before = read_raw(path)
+    local inverse = inverse_of(one(opts, { op = "retire", id = "DEP-01" }))
+    inverse.places["regeln/DEP.md"].around = nil
+    assert.is_true(one(opts, inverse).ok)
+    assert.are.equal(before, read_raw(path))
+  end)
+
+  it("refuses to move a token back behind a line whose text has changed since the move (line, around)", function()
+    local layout = { "## A", "", "Intro.", "", "{{rule DEP-01}}", "", "More.", "", "## B", "", "{{rule DEP-02}}", "" }
+    local _, opts, path = fixture(layout)
+    local inverse = inverse_of(one(opts, { op = "move", id = "DEP-01", after = "DEP-02" }))
+    assert.is_truthy(inverse.around)
+    write_raw(path, (read_raw(path):gsub("Intro%.\n", "Intro.\nIntro, second line.\n")))
+    local back = one(opts, inverse)
+    assert.is_false(back.ok, vim.inspect(back))
+    assert.is_truthy(tostring(back.error.message):find("has changed", 1, true), vim.inspect(back))
   end)
 
   it("puts a token back between text in every kind of neighbourhood (line)", function()
@@ -232,6 +279,9 @@ describe("rules-ops/1 layouts: retire and its inverse", function()
       { places = { ["regeln/DEP.md"] = { top = true, line = 2 } } },
       { places = { ["regeln/DEP.md"] = { section = "A", first = true, line = 2 } } },
       { layout = "regeln/DEP.md", line = 2 },
+      { layout = "regeln/DEP.md", section = "A", around = "sha256:0000000000000000" },
+      { places = { ["regeln/DEP.md"] = { section = "A", around = "sha256:0000000000000000" } } },
+      { places = { ["regeln/DEP.md"] = { section = "A", line = 2 } }, around = "sha256:0000000000000000" },
     }) do
       refused(bad, "invalid_argument")
     end

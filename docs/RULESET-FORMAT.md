@@ -406,7 +406,14 @@ byte. `retire` and `move` answer with where the token stood (the rule above it, 
 the start of its section, or of the layout; a number when the section's heading is
 not the first of its text; and the blank lines directly around it), so putting it
 back restores the layout byte for byte, also where the author set a heading right
-under a token or left no blank line behind it.
+under a token or left no blank line behind it. A token that stood between two
+pieces of the author's text (`Intro.`, the token, `More.`) is recorded as the line
+of its section it stood behind (`line`, the heading being line 1), together with a
+fingerprint of that line and the next line of text (`around`). When the author
+has changed the text there in the meantime (a second line added to `Intro.`, a
+table in its place), putting the rule back is refused instead of splitting the
+paragraph or the table; put it back with another place then (behind a rule, or
+the section without `line`, which is its end).
 
 **Table of contents.** One line per heading from level 2 on, each a link to its
 anchor, without the title (level 1) and without the heading called "Table of

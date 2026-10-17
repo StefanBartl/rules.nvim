@@ -1237,7 +1237,7 @@ describe(":Rules new, set, retire, move, list", function()
       assert.is_true(told("invalid_argument: first and nth go with a section"))
       notes = {}
       run("Rules reinstate DEP-01 --layout=regeln/DEP.md")
-      assert.is_true(told("invalid_argument: layout, first, nth, line and gap need a place"))
+      assert.is_true(told("invalid_argument: layout, first, nth, line, around and gap need a place"))
       assert.are.same({}, asked)
       assert.is_true(still_retired())
       assert.are.equal(layout_before, layout_text())

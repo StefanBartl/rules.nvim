@@ -17,6 +17,9 @@
 --- `line = n` on a section place puts the token behind the n-th line of that section, its heading being line 1 (what
 --- `retire` and `move` answer for a token that stood between two pieces of the author's text, where no other place
 --- says the spot); `first` does not go with it. The slot must lie inside the section and outside a fence or a comment.
+--- A line number alone says nothing about the text that stands there now; `around` (what `retire` and `move` give with
+--- `line`) is the fingerprint of the two lines the token stood between (the line behind which it goes and the next line
+--- that is not blank), so a place whose text has changed since is refused instead of splitting the author's text.
 ---
 --- `gap = { above = n, below = m }` on any place says how many blank lines stood above and below the token when it was
 --- taken out: the token goes back with exactly those (what `retire` and `move` answer to restore a layout byte for byte).
@@ -30,6 +33,8 @@
 --- hidden like that (the generator would place it twice).
 ---
 --- Not its job: finding the layouts of a ruleset (`rules.ops`), writing files, regenerating the documents.
+
+local etag = require("lib.nvim.fs.etag")
 
 local M = {}
 
@@ -179,6 +184,19 @@ local function index(lines)
     end
   end
   return out
+end
+
+---The fingerprint of the spot behind line `behind`: that line and the next line that is not blank ("" at the end of the
+---layout), what `around` of a `line` place holds.
+---@param lines string[]
+---@param behind integer
+---@return string
+local function around_of(lines, behind)
+  local below = behind + 1
+  while lines[below] == "" do
+    below = below + 1
+  end
+  return etag.of((lines[behind] or "") .. "\n" .. (lines[below] or ""))
 end
 
 ---Line index of the token of `id` the editor sees.
@@ -365,6 +383,7 @@ end
 ---@field nth integer|nil  the n-th section of that heading text (default 1)
 ---@field top boolean|nil
 ---@field line integer|nil  with `section`: behind the n-th line of the section, its heading being line 1
+---@field around string|nil  with `line`: the fingerprint of the lines around that spot; a changed one is refused
 ---@field gap { above?: integer, below?: integer }|nil  the blank lines around the token, exactly
 
 ---Put the token of `id` at a place.
@@ -399,6 +418,11 @@ function M.place(text, id, where)
     slot, blank_before, blank_after = section_slot(lines, idx, where.section, nth, first, where.line)
     if not slot then
       return nil, tostring(blank_before)
+    end
+    if where.line and where.around and around_of(lines, slot - 1) ~= where.around then
+      local why = "the text around line %d of the section %q has changed since the rule stood there (it no longer stands"
+        .. " between the same two lines): put it back with after, before or the section without line"
+      return nil, why:format(where.line, where.section)
     end
   elseif where.top then
     slot = top_slot(lines, idx)
@@ -444,7 +468,8 @@ function M.place(text, id, where)
 end
 
 ---Where the token of `id` stands now, as a place that puts it back: `{ after }`, `{ section, first, nth? }`,
----`{ before }`, `{ section, nth? }`, `{ section, nth?, line }` (between two pieces of the author's text) or `{ top }`,
+---`{ before }`, `{ section, nth? }`, `{ section, nth?, line, around }` (between two pieces of the author's text, with
+---the fingerprint of the two lines it stood between) or `{ top }`,
 ---with `gap` when the token stood between blank lines that `place` would not write on its own.
 ---The place is the first of these that gives back the layout byte for byte once the token is out; where none does
 ---(the author put text between the token and the rule above it, say) it is the first one, with the `gap`. The place is
@@ -507,16 +532,17 @@ function M.where(text, id)
   while lines[at + below + 1] == "" do
     below = below + 1
   end
+  local rest = M.remove(text, id)
   if head then
     cands[#cands + 1] = section(false)
     -- last, for a token between two pieces of the author's text: behind the line above its blank lines, counted from
-    -- the heading (line 1); taking the token out leaves those lines where they are
+    -- the heading (line 1); taking the token out leaves those lines where they are, so `around` is read from the rest
     local behind = section(false)
     behind.line = at - above - head
+    behind.around = around_of((split(rest)), at - above - 1)
     cands[#cands + 1] = behind
   end
   local gap = above <= 100 and below <= 100 and { above = above, below = below } or nil
-  local rest = M.remove(text, id)
   for _, cand in ipairs(cands) do
     if M.place(rest, id, cand) == text then
       return cand
