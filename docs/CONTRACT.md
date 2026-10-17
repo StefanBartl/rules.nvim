@@ -164,11 +164,15 @@ is the one that holds it, or the one named by `layout`), `section` (a heading
 text) with `layout` (the `output` path of the layout, `regeln/DEP.md`) and
 optionally `first` and `nth`, or `top` with `layout` (the start of the layout:
 before the first rule that stands above every heading, else under the
-frontmatter). Two more fields refine a place and are what `retire` and `move`
+frontmatter). Three more fields refine a place and are what `retire` and `move`
 answer with (`inverse`): `nth` (a whole number from 1, with `section` only: the
-n-th heading of that text, when several have it; the first by default) and `gap`
+n-th heading of that text, when several have it; the first by default), `line`
+(a whole number from 1, with `section` only and not with `first`: the token goes
+behind the n-th line of the section, its heading being line 1; the line must lie
+inside the section and outside a fenced code block or an HTML comment) and `gap`
 (`{ "above": n, "below": m }`, 0 to 100 each: the blank lines that stood directly
 above and below the token, which the token is then put back between, exactly).
+`line` is optional and new; an `inverse` without it means what it meant before.
 
 - **Where in a section.** A section is a heading up to the next heading of the
   same or a higher level. With rules in it, the token goes behind the last of
@@ -197,11 +201,12 @@ above and below the token, which the token is then put back between, exactly).
   `new` writes a blank line behind the token that taking it out leaves). `retire`
   records where the token stood (`after` the rule above it in its section, else
   `section` + `first`, else `before` the rule below it, else the end of its
-  section, else `top`; `nth` where the heading is not the first of its text; `gap`
-  where the way `new` puts a token in would not write the blank lines it had), so
-  `reinstate` gives the layout back byte for byte. Where the token stood between
-  two pieces of an introduction, the place is the end of that introduction (in the
-  same section).
+  section, else `section` + `line` (a token between two pieces of the author's
+  text: `Intro`, token, `More`); `top` above every heading; `nth` where the heading
+  is not the first of its text; `gap` where the way `new` puts a token in would not
+  write the blank lines it had), so `reinstate` gives the layout back byte for
+  byte. Above every heading there is no `line`: a token that stands there between
+  two pieces of text comes back behind the rule above it, else at the top.
 - **The divider.** A rule file ends with a blank line, `---` and a blank line;
   the generator copies the lines of a rule file as they are, so this is what
   keeps the rules of a document apart. `new` writes it itself: a `text` that

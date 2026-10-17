@@ -408,13 +408,16 @@ local function place_words(place)
     return "before " .. place.before
   elseif place.section then
     local nth = (type(place.nth) == "number" and place.nth > 1) and (" (the %d. of that name)"):format(place.nth) or ""
+    if type(place.line) == "number" then
+      return ('line %d of the section "%s"%s'):format(place.line, place.section, nth)
+    end
     return ('the %s of the section "%s"%s'):format(place.first and "start" or "end", place.section, nth)
   end
   return "the top"
 end
 
 ---The flags of `:Rules reinstate` that say a place in a layout; nil where the command line has no word for it (the top
----of a layout, the n-th section of one name).
+---of a layout, the n-th section of one name, a line of a section).
 ---@param layout string
 ---@param place table
 ---@return string|nil flags
@@ -424,7 +427,7 @@ local function reinstate_flags(layout, place)
     return head .. " --after=" .. M.escape(place.after)
   elseif type(place.before) == "string" then
     return head .. " --before=" .. M.escape(place.before)
-  elseif type(place.section) == "string" and not (type(place.nth) == "number" and place.nth > 1) then
+  elseif type(place.section) == "string" and place.line == nil and not (type(place.nth) == "number" and place.nth > 1) then
     return head .. " --section=" .. M.escape(place.section) .. (place.first and " --first" or "")
   end
   return nil
@@ -435,9 +438,9 @@ end
 ---back into ONE layout, the first (in the order of the layout names) that the command line can say: `--layout=<file>`
 ---with `--after=<ID>`, `--before=<ID>` or `--section=<heading> [--first]`, each value written as one word. What it
 ---cannot say goes into `notes`: the other layouts that held the rule (the command takes one place, so the rest is
----left to the author or to `rules-ops/1`), the top of a layout and the n-th section of one name (no flag for them),
----and the blank lines around the old place (`gap`, not part of the command line). Layout names are the ones the door
----gives, relative to the ruleset: no machine path. Nothing is checked or written.
+---left to the author or to `rules-ops/1`), the top of a layout, the n-th section of one name and a line of a section (no
+---flag for them), and the blank lines around the old place (`gap`, not part of the command line). Layout names are the
+---ones the door gives, relative to the ruleset: no machine path. Nothing is checked or written.
 ---@param id string
 ---@param inverse table|nil
 ---@return Rules.ReinstateHint

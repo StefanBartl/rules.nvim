@@ -350,6 +350,16 @@ describe("rules.cmdline.reinstate_hint", function()
     assert.are.equal(1, #hint.notes)
   end)
 
+  it("has no line for a line of a section, and names it in the note", function()
+    local hint =
+      cmdline.reinstate_hint("DEP-02", inverse({ ["a.md"] = { section = "Core", line = 3 }, ["b.md"] = { after = "DEP-01" } }))
+    assert.are.equal(":Rules reinstate DEP-02 --layout=b.md --after=DEP-01", hint.command)
+    assert.is_truthy(hint.notes[1]:find('a.md (line 3 of the section "Core")', 1, true))
+    -- alone: no --section line that would put it at the end of the section instead
+    hint = cmdline.reinstate_hint("DEP-02", inverse({ ["a.md"] = { section = "Core", line = 3 } }))
+    assert.is_nil(hint.command)
+  end)
+
   it("tells that the blank lines around the old place are not part of the line", function()
     local hint = cmdline.reinstate_hint("DEP-02", inverse({ ["a.md"] = { after = "DEP-01", gap = { above = 2, below = 0 } } }))
     assert.are.equal(":Rules reinstate DEP-02 --layout=a.md --after=DEP-01", hint.command)

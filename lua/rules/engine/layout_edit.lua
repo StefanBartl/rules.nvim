@@ -14,6 +14,10 @@
 --- one after it, and so is the end of a section with no token at all. `{ top = true }` is the start of the layout: before
 --- the first rule that stands above every heading, else right under the frontmatter.
 ---
+--- `line = n` on a section place puts the token behind the n-th line of that section, its heading being line 1 (what
+--- `retire` and `move` answer for a token that stood between two pieces of the author's text, where no other place
+--- says the spot); `first` does not go with it. The slot must lie inside the section and outside a fence or a comment.
+---
 --- `gap = { above = n, below = m }` on any place says how many blank lines stood above and below the token when it was
 --- taken out: the token goes back with exactly those (what `retire` and `move` answer to restore a layout byte for byte).
 ---
@@ -262,10 +266,11 @@ end
 ---@param name string
 ---@param nth integer
 ---@param first boolean
+---@param line integer|nil  behind the line-th line of the section (its heading is line 1), when given
 ---@return integer|nil slot  the token goes before this line
----@return boolean|nil blank_before  a blank line goes in front of the token
+---@return boolean|string|nil blank_before  a blank line goes in front of the token; with a nil slot: why there is none
 ---@return boolean|nil blank_after  a blank line goes behind it
-local function section_slot(lines, idx, name, nth, first)
+local function section_slot(lines, idx, name, nth, first, line)
   local start, level
   local count = 0
   for i = 1, #lines do
@@ -279,7 +284,7 @@ local function section_slot(lines, idx, name, nth, first)
     end
   end
   if not start then
-    return nil
+    return nil, ("the layout has no section %q"):format(name)
   end
   local stop = #lines + 1
   -- the first heading of any level below the section's own: where its introduction ends
@@ -293,6 +298,12 @@ local function section_slot(lines, idx, name, nth, first)
         break
       end
     end
+  end
+  if line then
+    if start + line > stop then
+      return nil, ("the section %q has no line %d"):format(name, line)
+    end
+    return start + line, false, false
   end
   local own_first, last_token
   for i = start + 1, stop - 1 do
@@ -353,6 +364,7 @@ end
 ---@field first boolean|nil
 ---@field nth integer|nil  the n-th section of that heading text (default 1)
 ---@field top boolean|nil
+---@field line integer|nil  with `section`: behind the n-th line of the section, its heading being line 1
 ---@field gap { above?: integer, below?: integer }|nil  the blank lines around the token, exactly
 
 ---Put the token of `id` at a place.
@@ -383,9 +395,10 @@ function M.place(text, id, where)
     end
     slot = where.after and (at + 1) or at
   elseif where.section then
-    slot, blank_before, blank_after = section_slot(lines, idx, where.section, where.nth or 1, where.first == true)
+    local nth, first = where.nth or 1, where.first == true
+    slot, blank_before, blank_after = section_slot(lines, idx, where.section, nth, first, where.line)
     if not slot then
-      return nil, ("the layout has no section %q"):format(where.section)
+      return nil, tostring(blank_before)
     end
   elseif where.top then
     slot = top_slot(lines, idx)
@@ -423,11 +436,16 @@ function M.place(text, id, where)
   for n, line in ipairs(put) do
     table.insert(lines, slot + n - 1, line)
   end
+  -- a slot given by a line number can lie in a fence or a comment, where the token would be text, not a rule
+  if where.line and not find(lines, index(lines), id) then
+    return nil, ("line %d of the section %q is in a code block or a comment"):format(where.line, where.section)
+  end
   return join(lines, eol, final), nil
 end
 
 ---Where the token of `id` stands now, as a place that puts it back: `{ after }`, `{ section, first, nth? }`,
----`{ before }` or `{ top }`, with `gap` when the token stood between blank lines that `place` would not write on its own.
+---`{ before }`, `{ section, nth? }`, `{ section, nth?, line }` (between two pieces of the author's text) or `{ top }`,
+---with `gap` when the token stood between blank lines that `place` would not write on its own.
 ---The place is the first of these that gives back the layout byte for byte once the token is out; where none does
 ---(the author put text between the token and the rule above it, say) it is the first one, with the `gap`. The place is
 ---always inside the section the token stands in. Nil when the layout does not hold the token.
@@ -481,9 +499,6 @@ function M.where(text, id)
   if nxt then
     cands[#cands + 1] = { before = nxt }
   end
-  if head then
-    cands[#cands + 1] = section(false)
-  end
   -- the blank lines directly around the token
   local above, below = 0, 0
   while lines[at - above - 1] == "" do
@@ -491,6 +506,14 @@ function M.where(text, id)
   end
   while lines[at + below + 1] == "" do
     below = below + 1
+  end
+  if head then
+    cands[#cands + 1] = section(false)
+    -- last, for a token between two pieces of the author's text: behind the line above its blank lines, counted from
+    -- the heading (line 1); taking the token out leaves those lines where they are
+    local behind = section(false)
+    behind.line = at - above - head
+    cands[#cands + 1] = behind
   end
   local gap = above <= 100 and below <= 100 and { above = above, below = below } or nil
   local rest = M.remove(text, id)

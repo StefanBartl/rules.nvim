@@ -266,7 +266,8 @@ writes a ruleset in the one-file-per-rule form ([RULESET-FORMAT.md](RULESET-FORM
     others by hand or through `reinstate` with `places` in `rules-ops/1`. What the
     command line has no word for is a note and not a line: the **top** of a layout
     (the note gives the two steps, `:Rules reinstate <id>`, then `:Rules move <id>
-    --to=<layout>`) and the **n-th** section of one heading text. The blank lines
+    --to=<layout>`), the **n-th** section of one heading text and a **line** of a
+    section (a rule that stood between two pieces of text). The blank lines
     around the old place (`gap`) are not part of the line either, which the note
     says when they matter: the rule is back at its place, the layout may read a
     little different. A dry run, a declined question and a refusal tell no line.

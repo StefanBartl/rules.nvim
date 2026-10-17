@@ -7,8 +7,8 @@
 --- One rule is one file (`<ruleset>/_rules/<FAMILY>/<ID>.md`), so a rule is changed, created or retired without
 --- touching another rule's text; where it stands in a generated document is the layout's business (`{{rule ID}}`).
 ---
----  - `new` { family, title, severity, text?, check?, agent?, after? | before? | (layout, section, first?, nth?), ruleset? }
----    creates the file with the next free id (loaded and retired ids count: an id is never given twice) under the
+---  - `new` { family, title, severity, text?, check?, agent?, after? | before? | (layout, section, first? | line?, nth?),
+---    ruleset? } creates the file with the next free id (loaded and retired ids count: an id is never given twice) under the
 ---    ruleset's lock, and puts the rule in a layout when a place is given. `inverse`: `retire`. The entry may carry
 ---    `warnings` (a list of texts): the vault is behind its upstream, so another machine may make the same id.
 ---    A warning, not a refusal; the engine never pulls, commits or pushes.
@@ -20,7 +20,7 @@
 ---    `inverse`: `reinstate` with `places` (every layout that held the rule).
 ---  - `reinstate` { id, place? | places? } brings a retired rule back, to where it came from. `places` is
 ---    `{ [layout output] = place }`. `inverse`: `retire`.
----  - `move` { id, after? | before? | (layout, section, first?, nth?) } moves the `{{rule ID}}` line of a rule, within a
+---  - `move` { id, after? | before? | (layout, section, first? | line?, nth?) } moves the `{{rule ID}}` line of a rule, within a
 ---    layout or to another one; the rule's file is not touched. `inverse`: `move` back.
 ---
 ---  - `waive` { id, reason, expires?, paths?, project?, if_match? }, `renew` { id, expires | no_expiry, reason?, project?,
@@ -356,6 +356,7 @@ local PLACE_FIELDS = {
   first = "boolean",
   top = "boolean",
   nth = "integer",
+  line = "integer",
   gap = "object",
 }
 
@@ -395,13 +396,13 @@ end
 
 ---The place of a placement request: where in which layout.
 ---@param op table
----@return table|nil where   { after?, before?, section?, first?, nth?, layout?, top?, gap? }
+---@return table|nil where   { after?, before?, section?, first?, nth?, line?, layout?, top?, gap? }
 ---@return string|nil why
 local function placement(op)
   local n = (op.after and 1 or 0) + (op.before and 1 or 0) + (op.section and 1 or 0) + (op.top and 1 or 0)
   if n == 0 then
-    if op.layout ~= nil or op.first ~= nil or op.nth ~= nil or op.gap ~= nil then
-      return nil, "layout, first, nth and gap need a place"
+    if op.layout ~= nil or op.first ~= nil or op.nth ~= nil or op.line ~= nil or op.gap ~= nil then
+      return nil, "layout, first, nth, line and gap need a place"
     end
     return nil, nil
   end
@@ -413,6 +414,12 @@ local function placement(op)
   end
   if (op.after or op.before or op.top) and (op.first ~= nil or op.nth ~= nil) then
     return nil, "first and nth go with a section"
+  end
+  if op.line ~= nil and not op.section then
+    return nil, "line goes with a section"
+  end
+  if op.line ~= nil and op.first ~= nil then
+    return nil, "line and first exclude each other: line is the spot in the section"
   end
   if op.gap ~= nil then
     local why = gap_error(op.gap)
@@ -426,6 +433,7 @@ local function placement(op)
     section = op.section,
     first = op.first,
     nth = op.nth,
+    line = op.line,
     layout = op.layout,
     top = op.top,
     gap = op.gap,
@@ -451,9 +459,10 @@ local function placements(op)
     or op.first ~= nil
     or op.top ~= nil
     or op.nth ~= nil
+    or op.line ~= nil
     or op.gap ~= nil
   then
-    return nil, "places goes alone, without after, before, section, layout, first, nth, gap or top"
+    return nil, "places goes alone, without after, before, section, layout, first, nth, line, gap or top"
   end
   local outputs = vim.tbl_keys(op.places)
   table.sort(outputs)
@@ -465,7 +474,8 @@ local function placements(op)
     end
     for key, value in pairs(one) do
       if not (PLACE_FIELDS[key] and key ~= "layout" and place_field_ok(key, value)) then
-        return nil, "an entry of places has after, before, section, first, nth, gap or top, not " .. tostring(key):sub(1, 40)
+        return nil,
+          "an entry of places has after, before, section, first, nth, line, gap or top, not " .. tostring(key):sub(1, 40)
       end
     end
     local where, why = placement(vim.tbl_extend("force", one, { layout = output }))
@@ -551,8 +561,8 @@ local function place_all(ctx, tx, root, op, wheres)
 end
 
 ---Where the token of `id` stands now, as a `place` that brings it back byte for byte (`layout_edit.where`): `{ layout,
----after }`, `{ layout, before }`, `{ layout, section, first?, nth? }` or `{ layout, top }`, with `gap` (the blank lines
----around it) where `place` would not write them on its own; `nil` when the layout does not hold it.
+---after }`, `{ layout, before }`, `{ layout, section, first? | line?, nth? }` or `{ layout, top }`, with `gap` (the blank
+---lines around it) where `place` would not write them on its own; `nil` when the layout does not hold it.
 ---@param layout Rules.Layout
 ---@param id string
 ---@return table|nil
@@ -1299,6 +1309,7 @@ local function do_move(op, ctx)
         section = old.section,
         first = old.first,
         nth = old.nth,
+        line = old.line,
         top = old.top,
         gap = old.gap and json.object(old.gap) or nil,
       })
