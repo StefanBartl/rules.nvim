@@ -632,6 +632,34 @@ function M.rule(id, opts)
   return d.seal(doc, view.rev), nil
 end
 
+---Where the file of a rule is: its absolute path and the ruleset it was loaded from (the longest configured ruleset
+---that holds it; for a ruleset that is a file, that file). This is the one place that maps the name a document
+---gives (`source`: `<ruleset name>/<path>`, with the folder above on a clash and `#n` after that) back to a place:
+---a client must not rebuild the naming rule. It is for a program on this machine (`scripts/rules.lua locate`), never
+---part of a document: the contract keeps the paths of this machine out of them.
+---@param id string
+---@param opts Rules.Contract.Opts|nil
+---@return { file: string, root: string|nil }|nil
+---@return table|nil err
+function M.locate(id, opts)
+  local view, err = M.view(opts)
+  if not view then
+    return nil, err
+  end
+  local file = view.abs[id]
+  if not file then
+    return nil, errors.fail("not_found", ("no rule with the id %s"):format(id))
+  end
+  local normal = vim.fs.normalize(vim.fn.fnamemodify(file, ":p"))
+  local root, root_len = nil, -1
+  for _, candidate in ipairs(view.paths) do
+    local inside = d.relative(candidate, normal) ~= nil or normal:lower() == candidate:lower()
+    if inside and #candidate > root_len then
+      root, root_len = candidate, #candidate
+    end
+  end
+  return { file = normal, root = root }, nil
+end
 ---The largest whole number a JSON number carries exactly (2^53 - 1).
 local MAX_SAFE = 9007199254740991
 

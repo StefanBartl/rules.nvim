@@ -14,6 +14,8 @@
 --
 -- call   one method of the contract (`hello`, `snapshot`, `list`, `rule`, `next_id`, `sources`, `ops`); the document goes
 --        to stdout. `--params` is the JSON of the method's parameters (`-` reads it from stdin).
+-- locate `locate <id>`: where the file of a rule is, as two plain lines (the file, then the ruleset it was loaded
+--        from); not a document, since no document carries a path of this machine. Exit 1 for an id nobody holds.
 -- list   `rules.list` with the parameters as flags; `--format=json` is the only format.
 --
 -- Exit code: 0 an answer, 1 an error document (also on stdout), 2 wrong usage or no lib.nvim.
@@ -58,14 +60,14 @@ vim.opt.rtp:append(vim.fn.escape(lib, ","))
 
 local function usage()
   io.stderr:write(
-    "usage: rules.lua call <method> [--params=<json>|-] | list --format=json [--family=F] [--severity=S] "
+    "usage: rules.lua call <method> [--params=<json>|-] | locate <id> | list --format=json [--family=F] [--severity=S] "
       .. "[--limit=N] [--offset=N]   (options: --ruleset=PATH --gate=NAME=FAM,FAM --vault=DIR --project=DIR --trust=DIR)\n"
   )
   os.exit(2)
 end
 
 local command = _G.arg[1]
-if command ~= "call" and command ~= "list" then
+if command ~= "call" and command ~= "list" and command ~= "locate" then
   usage()
 end
 
@@ -118,6 +120,23 @@ if #trust > 0 then
 end
 if flags.project then
   opts.project = flags.project
+end
+
+if command == "locate" then
+  -- `locate <id>`: the absolute file of a rule and the ruleset it came from, one per line. Plain text, not a
+  -- document: a path of this machine is never part of `rules-export/1`. Exit 1 (reason on stderr) for an id no
+  -- loaded ruleset holds.
+  if #positional ~= 1 then
+    usage()
+  end
+  local found, err = require("rules.contract").locate(positional[1], opts)
+  if not found then
+    io.stderr:write("error: ", type(err) == "table" and tostring(err.code or "failed") or tostring(err), "\n")
+    os.exit(1)
+  end
+  io.stdout:write(found.file, "\n", found.root or "", "\n")
+  io.stdout:flush()
+  os.exit(0)
 end
 
 local method, request

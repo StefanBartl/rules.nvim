@@ -628,3 +628,94 @@ describe("rules.env", function()
     assert.are.same({}, env.parse_gates("garbage"))
   end)
 end)
+
+describe("rules.contract.locate", function()
+  local function rule_file(path, id, title)
+    write_raw(
+      path,
+      table.concat({
+        "# x",
+        "",
+        "### `" .. id .. "` — " .. title,
+        "",
+        "```rule",
+        'id = "' .. id .. '",',
+        'severity = "recommended",',
+        "```",
+        "",
+        "text",
+        "",
+      }, "\n")
+    )
+  end
+
+  ---Three rulesets: two called `Checklists` (so a name needs the folder above) and a third that clashes with the
+  ---second as well (`#2`), all outside any vault; plus a folder of the same name that is not loaded.
+  local function layout()
+    local base = vim.fs.normalize(tmp_dir())
+    local one, two = base .. "/one/Checklists", base .. "/two/Checklists"
+    rule_file(one .. "/a.md", "AAA-01", "first")
+    rule_file(two .. "/b.md", "BBB-01", "second")
+    rule_file(base .. "/three/two/Checklists/c.md", "CCC-01", "third")
+    -- a folder that is not configured but has a name a document will use
+    rule_file(base .. "/vault/rulesets/one/Checklists/a.md", "ZZZ-01", "not loaded")
+    return base, { one, two, base .. "/three/two/Checklists" }
+  end
+
+  it("names the file and the ruleset, whatever name the document gives the ruleset", function()
+    local base, sets = layout()
+    local opts = { rulesets = sets }
+    for id, want in pairs({
+      ["AAA-01"] = { file = base .. "/one/Checklists/a.md", root = sets[1] },
+      ["BBB-01"] = { file = base .. "/two/Checklists/b.md", root = sets[2] },
+      ["CCC-01"] = { file = base .. "/three/two/Checklists/c.md", root = sets[3] },
+    }) do
+      local found, err = contract.locate(id, opts)
+      assert.is_nil(err)
+      assert.are.equal(vim.fs.normalize(vim.fn.fnamemodify(want.file, ":p")), found.file, id)
+      assert.are.equal(vim.fs.normalize(vim.fn.fnamemodify(want.root, ":p")):gsub("/+$", ""), found.root, id)
+    end
+    -- the documents name the three rulesets differently, none by its place: this is what a client cannot invert
+    local sources = {}
+    for _, id in ipairs({ "AAA-01", "BBB-01", "CCC-01" }) do
+      sources[#sources + 1] = contract.rule(id, opts).rule.source
+    end
+    assert.are.same({ "one/Checklists/a.md", "two/Checklists/b.md", "two/Checklists#2/c.md" }, sources)
+    for _, source in ipairs(sources) do
+      assert.is_nil(source:match("^%a:") or source:match("^/"), "a path of this machine in a document")
+    end
+  end)
+
+  it("knows nothing of a ruleset that is not loaded, however it is called", function()
+    local _, sets = layout()
+    local found, err = contract.locate("ZZZ-01", { rulesets = sets })
+    assert.is_nil(found)
+    assert.are.equal("not_found", err.code)
+  end)
+
+  it("answers on the command line as two plain lines, and 1 for an id nobody holds", function()
+    if not vim.env.LIB_NVIM_DIR or vim.env.LIB_NVIM_DIR == "" then
+      pending("LIB_NVIM_DIR is not set: the script cannot find lib.nvim")
+    end
+    local script = vim.fs.dirname(
+      vim.fs.dirname(
+        vim.fs.normalize(vim.fn.fnamemodify(vim.api.nvim_get_runtime_file("lua/rules/contract.lua", false)[1], ":p"))
+      )
+    )
+    script = vim.fs.dirname(script) .. "/scripts/rules.lua"
+    local _, sets = layout()
+    local function run(args)
+      local cmd = { vim.v.progpath, "--headless", "-u", "NONE", "-i", "NONE", "-n", "-l", script }
+      vim.list_extend(cmd, args)
+      return vim.system(cmd, { text = true, env = { LIB_NVIM_DIR = vim.env.LIB_NVIM_DIR } }):wait(20000)
+    end
+    local ok = run({ "locate", "BBB-01", "--ruleset=" .. sets[1], "--ruleset=" .. sets[2] })
+    assert.are.equal(0, ok.code, ok.stderr)
+    local lines = vim.split(vim.trim(ok.stdout), "\n", { plain = true })
+    assert.are.equal(2, #lines)
+    assert.is_truthy(lines[1]:find("two/Checklists/b.md", 1, true))
+    local missing = run({ "locate", "NOPE-01", "--ruleset=" .. sets[1] })
+    assert.are.equal(1, missing.code)
+    assert.are.equal(2, run({ "locate" }).code)
+  end)
+end)
