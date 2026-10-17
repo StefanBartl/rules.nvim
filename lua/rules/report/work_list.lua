@@ -129,7 +129,9 @@ end
 ---@return table doc
 function M.build(results, meta)
   local rulesets = meta.rulesets or {}
-  local relative = waivers.relativizer(meta.target)
+  -- absolute: `rule_id` plus `target.path` is the key a consumer finds its task by, "." would collide across projects
+  local target = (vim.fs.normalize(vim.fn.fnamemodify(meta.target, ":p")):gsub("/+$", ""))
+  local relative = waivers.relativizer(target)
   local ruleset_of = ruleset_finder(rulesets)
 
   local entries = {}
@@ -169,7 +171,7 @@ function M.build(results, meta)
     schema_version = M.SCHEMA_VERSION,
     generated_at = M.clock(),
     rulesets = canonical.array(list),
-    target = { path = vim.fs.normalize(meta.target), commit = M.commit_of(meta.target) },
+    target = { path = target, commit = M.commit_of(target) },
     scope = meta.scope,
     entries = canonical.array(entries),
   }

@@ -148,4 +148,15 @@ describe("rules.engine.gate.diff_files/scope_to_diff", function()
     assert.are.equal("pass", scoped[2].status)
     assert.are.equal("waived", scoped[3].status)
   end)
+
+  it("keeps an error: a check that could not run is never a pass, whatever the diff", function()
+    local dir = tmp_dir()
+    local finding = { file = dir, line = 1, text = "unknown check type: nope" }
+    local results = { { rule = { id = "X-01" }, status = "error", findings = { finding } } }
+
+    local scoped = gate.scope_to_diff(results, {})
+
+    assert.are.equal("error", scoped[1].status)
+    assert.are.same({ finding }, scoped[1].findings)
+  end)
 end)

@@ -447,7 +447,9 @@ this change introduce a problem", not "does this repo have any standing
 problems" (that's what an unscoped gate, or `:Rules check`, is for). A
 finding that isn't tied to one specific file (e.g. a repo-wide `git status`
 check) can never be "inside" a diff, so `--diff` always reports it `pass` —
-scope a rule like that to an unscoped gate instead.
+scope a rule like that to an unscoped gate instead. A check that could not
+run (status `error`) is never narrowed: it judged no file, so `--diff` keeps
+it an error.
 
 ## Waivers
 

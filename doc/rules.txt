@@ -125,8 +125,8 @@ COMMANDS                                                        *rules-commands*
     Runs every family configured for gate {name} (see |rules-gates|) as one
     combined report. --diff={ref} narrows findings to files changed since
     that git ref (tracked + untracked); a rule left with no findings inside
-    the diff reports "pass". --format=json and --format=work-list behave
-    like :Rules check's.
+    the diff reports "pass"; a check that could not run stays an error.
+    --format=json and --format=work-list behave like :Rules check's.
 
     --diff={REF}          optional, e.g. --diff=main
     --format={FORMAT}     optional, "json" or "work-list"

@@ -46,7 +46,7 @@ are `nil` and `err` says why. `:Rules stats` is not affected.
 | `schema_version` | `1`; raised when a field is removed, renamed or changes its meaning. A new optional field does not raise it: a reader ignores fields it does not know |
 | `generated_at` | when the run was made, UTC, `YYYY-MM-DDTHH:MM:SSZ` |
 | `rulesets` | the rulesets of the run (a project may load several): `name` as it was named (`@vault/lua`, a folder name), `source` its folder or file, `origin` where it was named (`call`, `setup`, `project`, `vault`) |
-| `target.path` | the folder that was checked, `/`-separated |
+| `target.path` | the folder that was checked, absolute, `/`-separated |
 | `target.commit` | the commit checked out there; absent when it is no git work tree |
 | `scope` | `{ kind = "family", family }` or `{ kind = "gate", gate, families, diff? }` |
 | `entries` | one per rule of the run, in the order of the run |
@@ -92,7 +92,7 @@ are `nil` and `err` says why. `:Rules stats` is not affected.
 | `pass` | the check ran and found nothing (inside the diff, for a gate with `diff`) |
 | `fail` | the check found something no waiver covers |
 | `waived` | the check found something and a waiver covers all of it |
-| `unchecked` | nobody judged the rule: it is manual (`kind = "manual"`, never counted by the exit code), or its check could not run (`error` says why; a `critical` one makes the exit code `1`, as with `--format=json`). Never a pass |
+| `unchecked` | nobody judged the rule: it is manual (`kind = "manual"`, never counted by the exit code), or its check could not run (`error` says why; a `critical` one makes the exit code `1`, as with `--format=json`). Never a pass, also not in a gate with `diff` |
 
 ## For a consumer
 
