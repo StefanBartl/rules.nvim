@@ -143,18 +143,20 @@ function M.setup()
         {
           name = "format",
           type = "STRING",
-          values = { "json" },
-          desc = "Print results as JSON (no quickfix, no report buffer)",
+          values = { "json", "work-list" },
+          desc = "Print JSON, or the work list rules-work-list/1 (no quickfix, no buffer)",
         },
       },
-      desc = "Sweep one rule family (--family=PREFIX) across PATH (default: cwd), --format=json for machine-readable output",
+      desc = "Sweep one rule family (--family=PREFIX) across PATH (default: cwd), --format=json|work-list: machine-readable",
       run = function(ctx)
         if not ctx.flags.family then
           notify.error(":Rules check needs --family=<PREFIX>, e.g. --family=DEP")
           return
         end
-        if ctx.flags.format == "json" then
-          local json, _, _, err = require("rules").check_family_json(ctx.flags.family, ctx.args.path)
+        if ctx.flags.format == "json" or ctx.flags.format == "work-list" then
+          local rules = require("rules")
+          local run = ctx.flags.format == "json" and rules.check_family_json or rules.check_family_work_list
+          local json, _, _, err = run(ctx.flags.family, ctx.args.path)
           if err then
             notify.error(err)
           else
@@ -176,8 +178,8 @@ function M.setup()
         {
           name = "format",
           type = "STRING",
-          values = { "json" },
-          desc = "Print results as JSON (no quickfix, no report buffer)",
+          values = { "json", "work-list" },
+          desc = "Print JSON, or the work list rules-work-list/1 (no quickfix, no buffer)",
         },
       },
       desc = "Run a configured gate (setup({ gates = {...} })), --diff=<git-ref> to scope to that diff",
@@ -186,8 +188,10 @@ function M.setup()
           notify.error(":Rules gate needs a name, e.g. :Rules gate release")
           return
         end
-        if ctx.flags.format == "json" then
-          local json, _, _, err = require("rules").run_gate_json(ctx.args.name, ctx.args.path, ctx.flags.diff)
+        if ctx.flags.format == "json" or ctx.flags.format == "work-list" then
+          local rules = require("rules")
+          local run = ctx.flags.format == "json" and rules.run_gate_json or rules.run_gate_work_list
+          local json, _, _, err = run(ctx.args.name, ctx.args.path, ctx.flags.diff)
           if err then
             notify.error(err)
           else

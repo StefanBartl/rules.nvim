@@ -52,6 +52,7 @@ provide — the same way you'd point ESLint at your own `.eslintrc`.
 - [Ruleset format](docs/RULESET-FORMAT.md) — how a rule and its `check` are written.
 - [Bindings](docs/BINDINGS.md) — the `:Rules` command and its subcommands, including the form of `:Rules new`, and `:RulesVault` (find a rule, a family or a ruleset in the vault; make a vault).
 - [Settings files and the rules-vault](docs/CONFIG.md) — `.rules.json` in a project and in a vault, which place wins, `vault` / `$RULES_VAULT`, `@vault/<name>`.
+- [Work list](docs/WORK-LIST.md) — `rules-work-list/1`, one run as JSON for a task tool: verdicts, rule text, waivers, the manual rules as `unchecked`.
 - [Agent-run manual rules](docs/AGENT.md) — planned, not built: how the rules with no `check` could be worked by an agent, as proposals a person reviews.
 - [Machine contract](docs/CONTRACT.md) — `rules-export/1` (the ruleset as JSON documents for apps, agents and CI) and `rules-ops/1` (create, change, retire and move a rule through the engine). A TypeScript client imports the types in
   [`schemas/rules-export/1/rules-export.d.ts`](schemas/rules-export/1/rules-export.d.ts), generated from the JSON Schema next to
@@ -170,7 +171,9 @@ Then:
 
 Add `--format=json` for machine-readable output (see
 [docs/BINDINGS.md](docs/BINDINGS.md) for the headless/CI recipe with a real
-exit code).
+exit code), or `--format=work-list` for the work list `rules-work-list/1`: every rule of the run with its verdict, its
+text and its waiver, the manual ones as `unchecked`, for a tool that turns them into tasks
+([docs/WORK-LIST.md](docs/WORK-LIST.md)).
 
 A project can carry its own defaults in a `.rules.json` at its root (`rulesets`, `gates`, `agent`), and your
 rulesets can live in a vault of their own (`setup({ vault = "~/rules-vault" })` or `$RULES_VAULT`; every folder under
