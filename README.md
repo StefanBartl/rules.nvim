@@ -121,6 +121,14 @@ and checking. Your own rules — however you already write them down — are a
 is published by installing it, and nothing here is imposed on you by
 installing it either.
 
+It does not replace the ready-made analyses of
+[insights.nvim](https://github.com/StefanBartl/insights.nvim) (git conflicts,
+unused imports, code metrics) or
+[recommender.nvim](https://github.com/StefanBartl/recommender.nvim) (repeated
+dotted chains worth aliasing): a `grep` or `lua_predicate` check can cover
+similar ground, but with your own IDs, severities and thresholds, and as a
+separate pass over the tree with no shared cache.
+
 ## Requirements
 
 | | |
