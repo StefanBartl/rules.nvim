@@ -11,6 +11,7 @@
     { "$ref": "#/$defs/next_id" },
     { "$ref": "#/$defs/sources" },
     { "$ref": "#/$defs/waivers" },
+    { "$ref": "#/$defs/rulesets" },
     { "$ref": "#/$defs/result" },
     { "$ref": "#/$defs/error" }
   ],
@@ -236,6 +237,32 @@
             "kind": { "const": "rules.sources" },
             "items": { "type": "array", "items": { "$ref": "#/$defs/source_file" } },
             "load_errors": { "type": "array", "items": { "type": "string" } }
+          }
+        }
+      ]
+    },
+    "rulesets": {
+      "title": "rules.rulesets: the rulesets that are loaded, and the ones in the archive of the vault.",
+      "allOf": [
+        { "$ref": "#/$defs/head" },
+        {
+          "type": "object",
+          "required": ["kind", "items", "archived", "rev", "digest"],
+          "properties": {
+            "kind": { "const": "rules.rulesets" },
+            "items": {
+              "type": "array",
+              "items": {
+                "type": "object",
+                "required": ["name", "folder", "in_vault"],
+                "properties": {
+                  "name": { "type": "string", "description": "how the engine calls the ruleset in a source (the last folder, or the folder above it too when two share a name)" },
+                  "folder": { "type": "string", "description": "the folder name; what create_ruleset, archive_ruleset and restore_ruleset take" },
+                  "in_vault": { "type": "boolean", "description": "a folder under rulesets/ of the vault: only those can be archived" }
+                }
+              }
+            },
+            "archived": { "type": "array", "items": { "type": "string" }, "description": "folder names under archive/rulesets/ of the vault; restore_ruleset brings one back" }
           }
         }
       ]

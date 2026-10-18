@@ -537,7 +537,7 @@ end
 function M.hello(opts)
   local doc = d.head(d.kind("hello"), M.root_of(opts))
   doc.schemas = json.array({ M.SCHEMA })
-  doc.capabilities = json.array({ "hello", "snapshot", "list", "rule", "next_id", "sources", "waivers", "ops" })
+  doc.capabilities = json.array({ "hello", "snapshot", "list", "rule", "next_id", "sources", "waivers", "rulesets", "ops" })
   doc.limits = json.object({
     list_items = M.MAX_LIST_ITEMS,
     request_bytes = 256 * 1024,
@@ -822,6 +822,14 @@ end
 ---@return Lib.Contract.Error|nil err
 function M.waivers(params, opts)
   return require("rules.waiver_ops").document(params, opts)
+end
+
+---`rules.rulesets`: the rulesets that are loaded and the ones in the archive of the vault; see `rules.ruleset_ops`.
+---@param opts Rules.Contract.Opts|nil
+---@return table|nil doc
+---@return Lib.Contract.Error|nil err
+function M.ruleset_list(opts)
+  return require("rules.ruleset_ops").document(opts)
 end
 
 ---The error document of a failure (the root is hidden in the message).

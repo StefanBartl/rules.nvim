@@ -6,7 +6,7 @@
 --- `{ rulesets?, gates?, vault?, project?, trust?, today? }` (default: `rules.settings`: `setup()`, the project file, the
 --- vault; `today` is the date waivers are judged against, default the real one), hidden in every error text.
 ---
---- Methods: `hello`, `snapshot`, `list`, `rule`, `next_id`, `sources`, `waivers` (read), `ops` (the write door,
+--- Methods: `hello`, `snapshot`, `list`, `rule`, `next_id`, `sources`, `waivers`, `rulesets` (read), `ops` (the write door,
 --- `rules.ops`).
 ---
 ---```lua
@@ -66,6 +66,12 @@ local api = api_mod.make({
       params = { project = "string" },
       run = function(params, opts)
         return contract.waivers(params, opts)
+      end,
+    },
+    rulesets = {
+      params = {},
+      run = function(_, opts)
+        return contract.ruleset_list(opts)
       end,
     },
     ops = require("rules.ops").method(),

@@ -502,6 +502,7 @@ describe("rules-export/1 golden files", function()
     expect_golden("rule", (api.call("rule", '{"params":{"id":"DEP-01"}}', opts)))
     expect_golden("next_id", (api.call("next_id", '{"params":{"family":"DEP"}}', opts)))
     expect_golden("sources", (api.call("sources", nil, opts)))
+    expect_golden("rulesets", (api.call("rulesets", nil, opts)))
     expect_golden("error", (api.call("rule", '{"params":{"id":"NOPE-1"}}', opts)))
     local request =
       '{"client_op_id":"c-1","dry_run":true,"ops":[{"op":"new","family":"DEP","title":"golden","severity":"critical"}]}'

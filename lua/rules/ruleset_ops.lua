@@ -369,6 +369,60 @@ local function done(entry, name, inverse, outcome)
   return entry
 end
 
+-- ── the document ────────────────────────────────────────────────────────────────
+
+---`rules.rulesets`: the rulesets that are loaded (an empty one too, which has no rule to show them by) and the ones
+---in the archive of the vault. `name` is how the engine calls a ruleset in a `source` (`Checklists`, or `one/Checklists`
+---when two share a name), `folder` the folder name the operations above take, `in_vault` whether it is a folder under
+---`<vault>/rulesets/` (only those can be archived). No path.
+---@param opts Rules.Contract.Opts|nil
+---@return table|nil doc
+---@return Lib.Contract.Error|nil err
+function M.document(opts)
+  local view, err = contract.view(opts)
+  if not view then
+    return nil, err
+  end
+  local paths, engine_names = contract.rulesets(opts)
+  local root = vault.root({ vault = opts and opts.vault, project = opts and opts.project })
+  local items, archived = {}, {}
+  for _, path in ipairs(paths) do
+    local inside = false
+    if root then
+      inside = vault_ops.same_path(vim.fs.dirname(path), root .. "/rulesets")
+    end
+    items[#items + 1] = { name = engine_names[path] or vim.fs.basename(path), folder = vim.fs.basename(path), in_vault = inside }
+  end
+  table.sort(items, function(a, b)
+    return json.bytes_less(a.name, b.name)
+  end)
+  if root then
+    local handle = uv.fs_scandir(root .. "/" .. M.ARCHIVE)
+    while handle do
+      local entry, kind = uv.fs_scandir_next(handle)
+      if not entry then
+        break
+      end
+      if kind == "directory" or kind == nil then
+        archived[#archived + 1] = entry
+      end
+    end
+    table.sort(archived, json.bytes_less)
+  end
+  local d = contract.doc
+  local doc = d.head(d.kind("rulesets"), view.paths[1])
+  doc.items = json.array(items)
+  doc.archived = json.array(archived)
+  local parts = { "rules	" .. view.rev }
+  for _, item in ipairs(items) do
+    parts[#parts + 1] = ("set	%s	%s	%s"):format(item.name, item.folder, tostring(item.in_vault))
+  end
+  for _, name in ipairs(archived) do
+    parts[#parts + 1] = "archived	" .. name
+  end
+  return d.seal(doc, d.rev_of(parts)), nil
+end
+
 -- ── the operations ──────────────────────────────────────────────────────────────
 
 ---@param op table

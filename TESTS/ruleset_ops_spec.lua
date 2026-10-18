@@ -294,3 +294,49 @@ describe("the operations in the door", function()
     assert.is_false(exists(root .. "/rulesets/beta"))
   end)
 end)
+
+describe("the rulesets document", function()
+  ---@param root string
+  ---@return table
+  local function document(root)
+    local text = require("rules.api").call("rulesets", nil, { vault = root })
+    return vim.json.decode(text)
+  end
+
+  it("lists the loaded rulesets, an empty one too, and the archive", function()
+    local root = make_vault({ "alpha", "beta" })
+    local doc = document(root)
+    assert.are.equal("rules.rulesets", doc.kind)
+    assert.are.same(
+      { "alpha", "beta" },
+      vim.tbl_map(function(item)
+        return item.name
+      end, doc.items)
+    )
+    assert.is_true(doc.items[1].in_vault)
+    assert.are.same({}, doc.archived)
+    run(root, { op = "create_ruleset", name = "empty" })
+    run(root, { op = "archive_ruleset", name = "beta" })
+    local after = document(root)
+    assert.are.same(
+      { "alpha", "empty" },
+      vim.tbl_map(function(item)
+        return item.folder
+      end, after.items)
+    )
+    assert.are.same({ "beta" }, after.archived)
+    assert.is_not.equal(doc.rev, after.rev)
+  end)
+
+  it("names no path", function()
+    local root = make_vault({ "alpha", "beta" })
+    run(root, { op = "archive_ruleset", name = "beta" })
+    local text = require("rules.api").call("rulesets", nil, { vault = root })
+    assert.is_nil(text:find(root, 1, true))
+    assert.is_nil(text:find("archive/", 1, true))
+  end)
+
+  it("is in hello", function()
+    assert.is_true(vim.tbl_contains(contract.hello().capabilities, "rulesets"))
+  end)
+end)
