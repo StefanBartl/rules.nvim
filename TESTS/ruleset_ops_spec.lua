@@ -113,9 +113,13 @@ describe("create_ruleset", function()
     assert.is_false(exists(root .. "/rulesets/beta"))
   end)
 
-  it("refuses a name that is taken, in any letter case, and a name that is not one", function()
+  it("refuses a name that is taken (in any letter case where the file system folds it) and a name that is not one", function()
     local root = make_vault({ "alpha" })
-    for _, name in ipairs({ "alpha", "ALPHA" }) do
+    local taken = { "alpha" }
+    if require("rules.vault_ops").CASE_BLIND then
+      taken[#taken + 1] = "ALPHA"
+    end
+    for _, name in ipairs(taken) do
       local entry = run(root, { op = "create_ruleset", name = name })
       assert.is_false(entry.ok)
       assert.are.equal("conflict", entry.error.code)
