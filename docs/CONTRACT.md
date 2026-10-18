@@ -349,8 +349,9 @@ nvim --headless -u NONE -i NONE -n -l scripts/rules.lua call snapshot --ruleset=
 nvim --headless -u NONE -i NONE -n -l scripts/rules.lua call rule --params='{"id":"DEP-06"}' --ruleset=...
 nvim --headless -u NONE -i NONE -n -l scripts/rules.lua list --format=json --family=DEP --ruleset=...
 # not a document: where the file of a rule is, two plain lines (the file, the ruleset it came from), for a program on
-# this machine; the name in `source` cannot be turned back into a place by a client
-nvim --headless -u NONE -i NONE -n -l scripts/rules.lua locate DEP-06 --ruleset=...
+# this machine; the name in `source` cannot be turned back into a place by a client. A client puts the id after `--`:
+# a rule id may look like a flag, and what follows `--` is always the id
+nvim --headless -u NONE -i NONE -n -l scripts/rules.lua locate --ruleset=... -- DEP-06
 ```
 
 `--ruleset=<path>` (repeatable, default `$RULES_RULESETS`; `@vault/<name>` is a ruleset of the vault) and
