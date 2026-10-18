@@ -81,6 +81,7 @@ left out. At most 256 KiB.
 | `next_id` | `family` (letters) | `rules.next_id`: the next free id of a family, or of every family. |
 | `sources` | none | `rules.sources`: the files, each with its `etag`. |
 | `waivers` | `project` | `rules.waivers`: the waivers of a project, each with `expired` and `known`, see [Waivers](#waivers). |
+| `rulesets` | none | `rules.rulesets`: the loaded rulesets (`name`, `folder`, `in_vault`; an empty one too) and the `archived` folder names of the vault, see [Rulesets](#rulesets). No path. |
 | `ops` | `client_op_id`, `dry_run`, `ops` (flat: the fields are the request's own) | `rules.result`: one entry per operation, see [rules-ops/1](#rules-ops1-write). |
 
 ### `etag` and `etag_scope`
