@@ -1016,7 +1016,19 @@ describe("rules-export/1 waivers", function()
 
     assert.are.equal("invalid_argument", bad.code)
     assert.is_true(vim.tbl_contains(hello.capabilities, "waivers"))
-    assert.are.same({ "new", "set", "retire", "reinstate", "move", "waive", "renew", "remove" }, hello.ops)
+    assert.are.same({
+      "new",
+      "set",
+      "retire",
+      "reinstate",
+      "move",
+      "waive",
+      "renew",
+      "remove",
+      "create_ruleset",
+      "archive_ruleset",
+      "restore_ruleset",
+    }, hello.ops)
   end)
 
   it("a waiver written by the door is in the document", function()

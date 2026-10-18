@@ -1177,7 +1177,19 @@ describe("rules-ops/1 the whole request", function()
   it("hello lists the operations and says it is not read only", function()
     local doc = contract.hello({ rulesets = {} })
     assert.is_false(doc.read_only)
-    assert.are.same({ "new", "set", "retire", "reinstate", "move", "waive", "renew", "remove" }, doc.ops)
+    assert.are.same({
+      "new",
+      "set",
+      "retire",
+      "reinstate",
+      "move",
+      "waive",
+      "renew",
+      "remove",
+      "create_ruleset",
+      "archive_ruleset",
+      "restore_ruleset",
+    }, doc.ops)
     assert.is_true(vim.tbl_contains(doc.capabilities, "ops"))
   end)
 end)

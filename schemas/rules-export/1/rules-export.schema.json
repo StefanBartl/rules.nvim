@@ -292,10 +292,11 @@
                 "required": ["n", "op", "ok", "changed_ids"],
                 "properties": {
                   "n": { "type": "integer", "minimum": 1 },
-                  "op": { "enum": ["new", "set", "retire", "reinstate", "move", "waive", "renew", "remove"] },
+                  "op": { "enum": ["new", "set", "retire", "reinstate", "move", "waive", "renew", "remove", "create_ruleset", "archive_ruleset", "restore_ruleset"] },
                   "ok": { "type": "boolean" },
                   "id": { "type": "string" },
-                  "outcome": { "type": "string", "description": "created, changed, unchanged, retired, reinstated, moved, waived, renewed, removed, would_*, conflict, failed" },
+                  "ruleset": { "type": "string", "description": "create_ruleset, archive_ruleset, restore_ruleset: the folder name of the ruleset (an entry of those operations has no id)" },
+                  "outcome": { "type": "string", "description": "created, changed, unchanged, retired, reinstated, moved, waived, renewed, removed, archived, restored, would_*, conflict, failed" },
                   "etag_before": { "type": "string" },
                   "etag_after": { "type": "string" },
                   "changed_ids": { "type": "array", "items": { "type": "string" } },

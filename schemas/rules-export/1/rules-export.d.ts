@@ -153,14 +153,18 @@ export type Result = Head & {
     inverse?: { [k: string]: unknown };
     n: number;
     ok: boolean;
-    op: "new" | "set" | "retire" | "reinstate" | "move" | "waive" | "renew" | "remove";
+    op: "new" | "set" | "retire" | "reinstate" | "move" | "waive" | "renew" | "remove" | "create_ruleset" | "archive_ruleset" | "restore_ruleset";
     /**
-     * created, changed, unchanged, retired, reinstated, moved, waived, renewed, removed, would_*, conflict, failed
+     * created, changed, unchanged, retired, reinstated, moved, waived, renewed, removed, archived, restored, would_*, conflict, failed
      */
     outcome?: string;
     placed?: {
       layout?: string;
     };
+    /**
+     * create_ruleset, archive_ruleset, restore_ruleset: the folder name of the ruleset (an entry of those operations has no id)
+     */
+    ruleset?: string;
     /**
      * things to know that did not stop the operation; absent when there are none. new: the rules-vault is behind its upstream, so another machine may make the same id. waive, renew: expires is before today, so the waiver is expired from the start
      */

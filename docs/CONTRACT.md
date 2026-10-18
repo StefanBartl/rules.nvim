@@ -158,6 +158,9 @@ is true only if all entries are. `dry_run` checks everything and writes nothing.
 | `waive` | `id`, `reason`, `expires`?, `paths`?, `project`?, `if_match`? | Adds the waiver of a project's `.rules-waivers.json` (not a ruleset file). `inverse`: `remove`. See [Waivers](#waivers). |
 | `renew` | `id`, `expires` or `no_expiry`, `reason`?, `project`?, `if_match`? | Gives a waiver a new last day. `inverse`: `renew` back. |
 | `remove` | `id`, `project`?, `if_match`? | Drops a waiver. `inverse`: `waive` with the old values. |
+| `create_ruleset` | `name` | Makes a ruleset in the vault: `rulesets/<name>/_rules/.gitkeep` and `_layouts/.gitkeep`, and adds `rulesets/<name>` to the `rulesets` list of the vault's `.rules.json` when that file has a list that does not offer it. `name`: letters, digits, `.`, `_`, `-`, starting with a letter or digit, no Windows device name. A folder of that name in any letter case is `conflict`. `inverse`: `archive_ruleset`. See [Rulesets](#rulesets). |
+| `archive_ruleset` | `name` | MOVES `rulesets/<name>` to `archive/rulesets/<name>` and takes it out of the `.rules.json` list. Never deletes. The last ruleset of the vault is not archived (`invalid_argument`); a name already in the archive is `conflict`. `inverse`: `restore_ruleset`. |
+| `restore_ruleset` | `name` | Moves `archive/rulesets/<name>` back and lists it again. `inverse`: `archive_ruleset`. |
 
 A **place** is `after` or `before` (an id that stands in a layout; the layout
 is the one that holds it, or the one named by `layout`), `section` (a heading
@@ -256,6 +259,20 @@ a `line` without `around` is put behind that line unchecked.
   an error, for its own ruleset. A ruleset whose operation started to write is
   made again also when the operation failed after it started to write (a step
   back that fails leaves files half changed).
+
+## Rulesets
+
+`create_ruleset`, `archive_ruleset` and `restore_ruleset` change the **vault** (which rulesets it holds), not a ruleset's rules.
+They work in the vault the engine was started with (`$RULES_VAULT`, `setup({ vault })`) and name a ruleset by its folder
+name only: no path comes from the request and none is echoed. An entry of these operations has `ruleset` (the folder name)
+and no `id`, and `changed_ids` is empty. A request needs at least one ruleset to be loaded, so the first ruleset of a
+vault is made with `:RulesVault create`, not here.
+
+The vault's `.rules.json` is edited as text: only the `rulesets` list changes, the rest of the file stays byte for byte.
+A file without a list offers every folder under `rulesets/`, and is not touched. A `.rules.json` the engine cannot read refuses the
+whole request before anything moves. One writer at a time over the vault (a hidden lock file beside the vault's `.rules.json`,
+removed again); an operation that fails half way puts back what it moved. Archived rulesets lie under `archive/rulesets/` in the vault:
+outside `rulesets/`, so no scan reads them, and still inside the repository, so git keeps their history.
 
 ## Waivers
 

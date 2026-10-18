@@ -545,7 +545,19 @@ function M.hello(opts)
   })
   doc.enums = json.object({ severity = json.array(vim.deepcopy(M.SEVERITIES)) })
   doc.read_only = false
-  doc.ops = json.array({ "new", "set", "retire", "reinstate", "move", "waive", "renew", "remove" })
+  doc.ops = json.array({
+    "new",
+    "set",
+    "retire",
+    "reinstate",
+    "move",
+    "waive",
+    "renew",
+    "remove",
+    "create_ruleset",
+    "archive_ruleset",
+    "restore_ruleset",
+  })
   return doc
 end
 

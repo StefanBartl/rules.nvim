@@ -53,6 +53,7 @@ local catalog = require("rules.engine.catalog")
 local fswalk = require("rules.engine.fswalk")
 local waivers = require("rules.engine.waivers")
 local wops = require("rules.waiver_ops")
+local rsops = require("rules.ruleset_ops")
 
 local M = {}
 
@@ -1341,9 +1342,39 @@ end
 
 door = ops_lib.make({
   doc = contract.doc,
-  order = { "new", "set", "retire", "reinstate", "move", "waive", "renew", "remove" },
+  order = {
+    "new",
+    "set",
+    "retire",
+    "reinstate",
+    "move",
+    "waive",
+    "renew",
+    "remove",
+    "create_ruleset",
+    "archive_ruleset",
+    "restore_ruleset",
+  },
   types = wops.TYPES,
   ops = {
+    create_ruleset = {
+      fields = { name = "string" },
+      run = function(op, ctx)
+        return rsops.create(op, ctx, door)
+      end,
+    },
+    archive_ruleset = {
+      fields = { name = "string" },
+      run = function(op, ctx)
+        return rsops.archive(op, ctx, door)
+      end,
+    },
+    restore_ruleset = {
+      fields = { name = "string" },
+      run = function(op, ctx)
+        return rsops.restore(op, ctx, door)
+      end,
+    },
     waive = {
       fields = {
         id = "string",
