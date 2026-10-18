@@ -25,6 +25,7 @@ local with_lock = require("lib.nvim.fs.with_lock")
 local write_atomic = require("lib.nvim.fs.write.atomic")
 local read = require("lib.nvim.fs.read")
 local json = require("lib.nvim.json.canonical")
+local errors = require("lib.nvim.contract.errors")
 
 local contract = require("rules.contract")
 local scaffold = require("rules.vault_scaffold")
@@ -117,11 +118,12 @@ local function scan_list(text)
     return false, "its .rules.json is not an object"
   end
   i = i + 1
+  local found = nil
   while true do
     i = skip_ws(text, i)
     local c = text:sub(i, i)
     if c == "}" or c == "" then
-      return nil
+      return found
     end
     if c == "," then
       i = i + 1
@@ -135,6 +137,9 @@ local function scan_list(text)
       i = skip_ws(text, i + 1)
       local stop = value_end(text, i)
       if key == "rulesets" then
+        if found then
+          return false, "its .rules.json names the rulesets twice"
+        end
         if text:sub(i, i) ~= "[" then
           return false, "the rulesets of its .rules.json are not a list"
         end
@@ -155,7 +160,7 @@ local function scan_list(text)
             j = e
           end
         end
-        return list
+        found = list
       end
       i = stop
     else
@@ -379,11 +384,13 @@ end
 ---@return table|nil doc
 ---@return Lib.Contract.Error|nil err
 function M.document(opts)
-  local view, err = contract.view(opts)
-  if not view then
-    return nil, err
+  local paths, engine_names, err = contract.rulesets(opts)
+  if err then
+    return nil, errors.fail("invalid_argument", err)
   end
-  local paths, engine_names = contract.rulesets(opts)
+  if #paths == 0 then
+    return nil, errors.fail("not_found", "no ruleset is configured (rulesets is empty)")
+  end
   local root = vault.root({ vault = opts and opts.vault, project = opts and opts.project })
   local items, archived = {}, {}
   for _, path in ipairs(paths) do
@@ -403,17 +410,17 @@ function M.document(opts)
       if not entry then
         break
       end
-      if kind == "directory" or kind == nil then
+      if kind == "directory" or kind == "link" or kind == nil then
         archived[#archived + 1] = entry
       end
     end
     table.sort(archived, json.bytes_less)
   end
   local d = contract.doc
-  local doc = d.head(d.kind("rulesets"), view.paths[1])
+  local doc = d.head(d.kind("rulesets"), paths[1])
   doc.items = json.array(items)
   doc.archived = json.array(archived)
-  local parts = { "rules	" .. view.rev }
+  local parts = { "rulesets" }
   for _, item in ipairs(items) do
     parts[#parts + 1] = ("set	%s	%s	%s"):format(item.name, item.folder, tostring(item.in_vault))
   end
@@ -458,6 +465,7 @@ function M.create(op, ctx, door)
       return entry
     end
     local made = {}
+    local made_rulesets_dir = lstat(dir) == nil
     local function undo()
       for index = #made, 1, -1 do
         os.remove(made[index])
@@ -465,6 +473,10 @@ function M.create(op, ctx, door)
       uv.fs_rmdir(dir .. "/" .. name .. "/_rules")
       uv.fs_rmdir(dir .. "/" .. name .. "/_layouts")
       uv.fs_rmdir(dir .. "/" .. name)
+      -- the folder this operation made: a vault that had none must not start offering "every folder under it"
+      if made_rulesets_dir then
+        uv.fs_rmdir(dir)
+      end
     end
     for _, rel in ipairs(files) do
       local path = root .. "/" .. rel
@@ -501,11 +513,25 @@ local function move(from, to)
   return true, nil
 end
 
+---@class Rules.RulesetShift
+---@field from_dir string   where the ruleset is now, relative to the vault (`rulesets` or the archive)
+---@field to_dir string     where it goes
+---@field list_edit function  `list_remove` or `list_add`
+---@field would string      the outcome of a dry run
+---@field outcome string    the outcome of the move
+---@field inverse string    the operation that moves it back
+---@field missing string    the reason when the ruleset is not in `from_dir` (one `%q`)
+---@field taken string      the reason when `to_dir` has the name already (one `%q`)
+---@field guard? fun(root: string, ctx: Rules.OpsCtx): string|nil  a reason to refuse before anything else
+
+---The move of a ruleset between `rulesets/` and the archive: the checks, the list of `.rules.json`, the move, and the step
+---back when the list cannot be written.
 ---@param op table
 ---@param ctx Rules.OpsCtx
 ---@param door table
+---@param spec Rules.RulesetShift
 ---@return table
-function M.archive(op, ctx, door)
+local function shift(op, ctx, door, spec)
   local name, bad = name_of(op, door)
   if not name then
     return bad
@@ -515,30 +541,34 @@ function M.archive(op, ctx, door)
     return none
   end
   return locked(ctx, door, root, function()
-    local real = folder_named(root .. "/rulesets", name)
+    local real = folder_named(root .. "/" .. spec.from_dir, name)
     if not real then
-      return door.refuse("not_found", ("the vault has no ruleset called %q"):format(name))
+      return door.refuse("not_found", spec.missing:format(name))
     end
-    local offered = vault.rulesets({ vault = root, project = ctx.opts.project })
-    if #offered <= 1 then
-      return door.refuse("invalid_argument", "the last ruleset of the vault is not archived")
+    local reason = spec.guard and spec.guard(root, ctx)
+    if reason then
+      return door.refuse("invalid_argument", reason)
     end
-    local from = root .. "/rulesets/" .. real
-    local to = root .. "/" .. M.ARCHIVE .. "/" .. real
-    if folder_named(root .. "/" .. M.ARCHIVE, real) or lstat(to) then
-      return door.refuse("conflict", ("the archive holds a ruleset called %q already"):format(name))
+    local from = root .. "/" .. spec.from_dir .. "/" .. real
+    local to = root .. "/" .. spec.to_dir .. "/" .. real
+    if folder_named(root .. "/" .. spec.to_dir, real) or lstat(to) then
+      return door.refuse("conflict", spec.taken:format(name))
     end
-    local layout_err = scaffold.check_layout(root, { M.ARCHIVE .. "/" .. real .. "/_rules/.gitkeep" })
+    -- both ends: a link on the way, in the folder it leaves or the one it enters, must not lead out of the vault
+    local layout_err = scaffold.check_layout(root, {
+      spec.from_dir .. "/" .. real .. "/_rules/.gitkeep",
+      spec.to_dir .. "/" .. real .. "/_rules/.gitkeep",
+    })
     if layout_err then
       return door.refuse("invalid_argument", layout_err)
     end
-    local list_text, why, has_file = edited_list(root, list_remove, real)
+    local list_text, why, has_file = edited_list(root, spec.list_edit, real)
     if has_file and list_text == nil then
       return door.refuse("invalid_argument", why or "its .rules.json cannot be used")
     end
     local entry = { ok = true, ruleset = real, changed_ids = {} }
     if ctx.dry then
-      entry.outcome = "would_archive"
+      entry.outcome = spec.would
       return entry
     end
     local moved, err = move(from, to)
@@ -552,7 +582,7 @@ function M.archive(op, ctx, door)
         return door.refuse("io", rewrite_why or "its .rules.json could not be written")
       end
     end
-    return done(entry, real, "restore_ruleset", "archived")
+    return done(entry, real, spec.inverse, spec.outcome)
   end)
 end
 
@@ -560,47 +590,40 @@ end
 ---@param ctx Rules.OpsCtx
 ---@param door table
 ---@return table
-function M.restore(op, ctx, door)
-  local name, bad = name_of(op, door)
-  if not name then
-    return bad
-  end
-  local root, none = vault_root(ctx, door)
-  if not root then
-    return none
-  end
-  return locked(ctx, door, root, function()
-    local real = folder_named(root .. "/" .. M.ARCHIVE, name)
-    if not real then
-      return door.refuse("not_found", ("the archive holds no ruleset called %q"):format(name))
-    end
-    local from = root .. "/" .. M.ARCHIVE .. "/" .. real
-    local to = root .. "/rulesets/" .. real
-    if folder_named(root .. "/rulesets", real) or lstat(to) then
-      return door.refuse("conflict", ("a ruleset called %q is there already"):format(name))
-    end
-    local list_text, why, has_file = edited_list(root, list_add, real)
-    if has_file and list_text == nil then
-      return door.refuse("invalid_argument", why or "its .rules.json cannot be used")
-    end
-    local entry = { ok = true, ruleset = real, changed_ids = {} }
-    if ctx.dry then
-      entry.outcome = "would_restore"
-      return entry
-    end
-    local moved, err = move(from, to)
-    if not moved then
-      return door.refuse("io", "the ruleset could not be moved: " .. tostring(err))
-    end
-    if has_file then
-      local back, rewrite_why = rewrite(root .. "/.rules.json", list_text)
-      if not back then
-        move(to, from)
-        return door.refuse("io", rewrite_why or "its .rules.json could not be written")
+function M.archive(op, ctx, door)
+  return shift(op, ctx, door, {
+    from_dir = "rulesets",
+    to_dir = M.ARCHIVE,
+    list_edit = list_remove,
+    would = "would_archive",
+    outcome = "archived",
+    inverse = "restore_ruleset",
+    missing = "the vault has no ruleset called %q",
+    taken = "the archive holds a ruleset called %q already",
+    guard = function(root, c)
+      local offered = vault.rulesets({ vault = root, project = c.opts.project })
+      if #offered <= 1 then
+        return "the last ruleset of the vault is not archived"
       end
-    end
-    return done(entry, real, "archive_ruleset", "restored")
-  end)
+    end,
+  })
+end
+
+---@param op table
+---@param ctx Rules.OpsCtx
+---@param door table
+---@return table
+function M.restore(op, ctx, door)
+  return shift(op, ctx, door, {
+    from_dir = M.ARCHIVE,
+    to_dir = "rulesets",
+    list_edit = list_add,
+    would = "would_restore",
+    outcome = "restored",
+    inverse = "archive_ruleset",
+    missing = "the archive holds no ruleset called %q",
+    taken = "a ruleset called %q is there already",
+  })
 end
 
 return M
