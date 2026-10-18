@@ -558,7 +558,10 @@ function M.create(ctx)
       return
     end
     local current = require("rules.vault").root()
-    if current and not flags.force and not ops.same_path(current, target.root) then
+    -- another vault is in use: asked in the confirmation below; with --yes (no question) or nobody to ask, --force is
+    -- the only way, as it always was
+    local switching = current ~= nil and not flags.force and not ops.same_path(current, target.root)
+    if switching and (flags.yes or not has_ui()) then
       notify.warn(("A vault is in use already (%s). :RulesVault create --force <dir> makes another one"):format(current))
       return
     end
@@ -574,7 +577,13 @@ function M.create(ctx)
       notify.error("create asks before it writes, and there is nobody to ask: run it with --yes")
       return
     end
-    require("rules.ui.confirm").yesno(scaffold.plan_text(plan), "create it", function(accepted)
+    local question = scaffold.plan_text(plan)
+    if switching then
+      local note = "A vault is in use already (%s). This makes another one; the one in use stays until setup() or"
+        .. " $RULES_VAULT points to the new one.\n\n"
+      question = note:format(current) .. question
+    end
+    require("rules.ui.confirm").yesno(question, switching and "make another vault" or "create it", function(accepted)
       if accepted then
         make(target)
       else

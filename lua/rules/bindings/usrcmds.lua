@@ -257,33 +257,56 @@ function M.setup()
       },
       desc = "Build the reading documents of a one-file-per-rule ruleset from its layouts; --check for CI",
       run = function(ctx)
-        local results, errors, code = require("rules").catalog(ctx.args.path, { check = ctx.flags.check == true })
-        local counts = { written = 0, unchanged = 0, stale = 0, error = 0 }
-        for _, result in ipairs(results) do
-          counts[result.status] = counts[result.status] + 1
-          for _, problem in ipairs(result.problems) do
-            notify.error(problem)
+        ---Build (or check) and tell what came of it. Returns the documents that are out of date.
+        ---@param check boolean
+        ---@return string[] stale
+        local function report(check)
+          local results, errors, code = require("rules").catalog(ctx.args.path, { check = check })
+          local counts = { written = 0, unchanged = 0, stale = 0, error = 0 }
+          local stale = {}
+          for _, result in ipairs(results) do
+            counts[result.status] = counts[result.status] + 1
+            for _, problem in ipairs(result.problems) do
+              notify.error(problem)
+            end
+            if result.status == "stale" then
+              stale[#stale + 1] = result.output
+              notify.warn(("%s is out of date -- run :Rules catalog"):format(result.output))
+            end
+            for _, id in ipairs(result.unused or {}) do
+              notify.warn(("rule %s is in no layout"):format(id))
+            end
           end
-          if result.status == "stale" then
-            notify.warn(("%s is out of date -- run :Rules catalog"):format(result.output))
+          for _, err in ipairs(errors) do
+            notify.warn(err)
           end
-          for _, id in ipairs(result.unused or {}) do
-            notify.warn(("rule %s is in no layout"):format(id))
+          local summary = ("catalog: %d written, %d unchanged, %d stale, %d with errors"):format(
+            counts.written,
+            counts.unchanged,
+            counts.stale,
+            counts.error
+          )
+          if code == 0 then
+            notify.info(summary)
+          else
+            notify.warn(summary)
           end
+          return stale
         end
-        for _, err in ipairs(errors) do
-          notify.warn(err)
-        end
-        local summary = ("catalog: %d written, %d unchanged, %d stale, %d with errors"):format(
-          counts.written,
-          counts.unchanged,
-          counts.stale,
-          counts.error
-        )
-        if code == 0 then
-          notify.info(summary)
-        else
-          notify.warn(summary)
+
+        local check = ctx.flags.check == true
+        local stale = report(check)
+        -- `--check` only reports (it is what a CI runs); a person at the editor is asked whether to make them now
+        if check and #stale > 0 and #vim.api.nvim_list_uis() > 0 then
+          local question = ("%d generated document(s) out of date:\n%s\n\nMake them again now?"):format(
+            #stale,
+            table.concat(stale, "\n")
+          )
+          require("rules.ui.confirm").yesno(question, "make them again", function(accepted)
+            if accepted then
+              report(false)
+            end
+          end)
         end
       end,
     },

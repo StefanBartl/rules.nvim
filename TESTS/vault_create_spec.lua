@@ -739,7 +739,7 @@ describe(":RulesVault create", function()
       assert.are.same({}, asked)
     end)
 
-    it("another vault in use, unless --force or the folder is that vault", function()
+    it("another vault in use: asked in the plan, not refused; --yes and no one to ask still need --force", function()
       ui(true)
       local other = base .. "/other-vault"
       run("RulesVault create " .. in_command(other) .. " --yes")
@@ -747,19 +747,47 @@ describe(":RulesVault create", function()
       settings.reset()
       notes, asked = {}, {}
 
+      -- the question says another vault is in use, and No (the first answer) makes nothing
+      answer = 1
       run("RulesVault create " .. in_command(root))
+      assert.are.equal(1, #asked)
+      assert.is_truthy(asked[1].question:find("A vault is in use already", 1, true))
+      assert.is_truthy(asked[1].question:find("Create a rules vault", 1, true))
+      assert.are.equal("No", asked[1].choices[1])
+      assert.is_truthy(asked[1].choices[2]:find("another vault", 1, true))
+      assert.is_true(nothing_made())
+
+      -- Yes makes it
+      answer = 2
+      asked = {}
+      run("RulesVault create " .. in_command(root))
+      assert.are.equal(1, #asked)
+      assert.is_true(exists(root .. "/.rules.json"))
+
+      -- with --yes there is no question, so no vault is switched without --force
+      local third = base .. "/third-vault"
+      notes, asked = {}, {}
+      run("RulesVault create " .. in_command(third) .. " --yes")
       assert.is_true(told("A vault is in use already", vim.log.levels.WARN))
       assert.is_true(told("--force"))
       assert.are.same({}, asked)
-      assert.is_true(nothing_made())
+      assert.is_false(exists(third))
 
-      -- the vault in use itself: what is missing is made, without --force
+      -- nobody to ask: the same
+      ui(false)
+      notes = {}
+      run("RulesVault create " .. in_command(third))
+      assert.is_true(told("--force"))
+      assert.is_false(exists(third))
+      ui(true)
+
+      -- the vault in use itself: what is missing is made, without --force and without the extra question
       os.remove(other .. "/.gitignore")
       run("RulesVault create " .. in_command(other) .. " --yes")
       assert.is_true(exists(other .. "/.gitignore"))
 
-      run("RulesVault create " .. in_command(root) .. " --yes --force")
-      assert.is_true(exists(root .. "/.rules.json"))
+      run("RulesVault create " .. in_command(third) .. " --yes --force")
+      assert.is_true(exists(third .. "/.rules.json"))
     end)
 
     it("a workflow template that is not there, before anything is made", function()
