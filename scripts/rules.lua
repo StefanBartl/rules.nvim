@@ -14,7 +14,7 @@
 --
 -- call   one method of the contract (`hello`, `snapshot`, `list`, `rule`, `next_id`, `sources`, `ops`); the document goes
 --        to stdout. `--params` is the JSON of the method's parameters (`-` reads it from stdin).
--- locate `locate <id>`: where the file of a rule is, as two plain lines (the file, then the ruleset it was loaded
+-- locate `locate [--] <id>`: where the file of a rule is, as two plain lines (the file, then the ruleset it was loaded
 --        from); not a document, since no document carries a path of this machine. Exit 1 for an id nobody holds.
 -- list   `rules.list` with the parameters as flags; `--format=json` is the only format.
 --
@@ -60,7 +60,7 @@ vim.opt.rtp:append(vim.fn.escape(lib, ","))
 
 local function usage()
   io.stderr:write(
-    "usage: rules.lua call <method> [--params=<json>|-] | locate <id> | list --format=json [--family=F] [--severity=S] "
+    "usage: rules.lua call <method> [--params=<json>|-] | locate [--] <id> | list --format=json [--family=F] [--severity=S] "
       .. "[--limit=N] [--offset=N]   (options: --ruleset=PATH --gate=NAME=FAM,FAM --vault=DIR --project=DIR --trust=DIR)\n"
   )
   os.exit(2)
@@ -85,9 +85,13 @@ local KNOWN = {
   trust = "value",
 }
 local flags, rulesets, gates, trust, positional = {}, {}, {}, {}, {}
+local flags_done = false
 for i = 2, #_G.arg do
   local a = _G.arg[i]
-  if a:sub(1, 2) == "--" then
+  if not flags_done and a == "--" then
+    -- the end of the flags: what follows is positional, whatever it looks like (a rule id may start with `--`)
+    flags_done = true
+  elseif not flags_done and a:sub(1, 2) == "--" then
     local key, value = a:match("^%-%-([^=]+)=(.*)$")
     if not key or not KNOWN[key] or value == "" then
       usage()
