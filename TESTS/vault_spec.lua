@@ -411,6 +411,49 @@ describe("rules.vault", function()
       assert.is_truthy(line_with(lines, "agent settings: batch_size (project)"))
     end)
 
+    it("says nothing about verdicts in a project that keeps none", function()
+      config.setup({ vault = make_vault() })
+
+      local lines = health(tmp_dir())
+
+      assert.is_nil(line_with(lines, "start: rules.nvim: verdicts"))
+    end)
+
+    it("reports a verdict of a rule that no loaded rule has as orphaned, and the others as matching", function()
+      local project = tmp_dir()
+      local entry = { verdict = "compliant", date = "2026-10-22", by = "S", evidence = {} }
+      write_raw(project .. "/.rules-verdicts.json", vim.json.encode({ ["DEP-01"] = entry, ["GONE-07"] = entry }))
+      config.setup({ vault = make_vault() })
+
+      local lines = health(project)
+
+      assert.is_truthy(line_with(lines, "start: rules.nvim: verdicts"))
+      assert.is_truthy(line_with(lines, "warn: 2 verdict(s) in cwd, 1 orphaned"))
+      assert.is_truthy(line_with(lines, "GONE-07"))
+    end)
+
+    it("says all verdicts match a rule when they do", function()
+      local project = tmp_dir()
+      local entry = { verdict = "compliant", date = "2026-10-22", by = "S", evidence = {} }
+      write_raw(project .. "/.rules-verdicts.json", vim.json.encode({ ["DEP-01"] = entry }))
+      config.setup({ vault = make_vault() })
+
+      local lines = health(project)
+
+      assert.is_truthy(line_with(lines, "ok: 1 verdict(s) in cwd, all match a loaded rule"))
+    end)
+
+    it("warns about a verdicts file it cannot use", function()
+      local project = tmp_dir()
+      write_raw(project .. "/.rules-verdicts.json", "{ not json")
+      config.setup({ vault = make_vault() })
+
+      local lines = health(project)
+
+      assert.is_truthy(line_with(lines, "warn: "))
+      assert.is_truthy(line_with(lines, "could not parse"))
+    end)
+
     it("reports a broken project file as an error and loads nothing from it", function()
       local project = tmp_dir()
       write_raw(project .. "/.rules.json", '{"rulesets": 5}')

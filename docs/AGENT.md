@@ -129,8 +129,10 @@ bad path, a list instead of an object) is an error, never "no verdicts". `requir
   (the result of `validate`) and replaces an earlier one of the same rule. It refuses a list (there is no
   accept-all), an `unclear` proposal (no answer is not a verdict), anything that is not marked `proposed`, and a
   proposal that says `verified`. `by` comes from the caller, never from the proposal; the verdict is the
-  proposal's `status`, a person who disagrees rejects and nothing is written. Evidence defaults to the
-  findings (`file`, `line`) or the `checked` files. An existing unusable file or a link stops it.
+  proposal's `status`, a person who disagrees rejects and nothing is written (a file whose `from_proposal.status`
+  differs from `verdict` is refused on load too). Evidence defaults to the findings (`file`, `line`) or the `checked`
+  files, at most 50; more are counted in `evidence_omitted`. A date after today is refused. An existing unusable
+  file or a link stops it, and so does a file another session changed between the read and the write.
 - `load(root)`, `parse(raw, label)`, `encode(entries)`: strict like the waivers file; sorted keys, LF.
 - `orphaned(entries, rules)`: verdicts of rules that no longer exist. `:checkhealth rules` has a section for a
   project that keeps a verdicts file.

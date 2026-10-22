@@ -75,7 +75,7 @@ describe("rules.engine.verdicts.accept", function()
       verdicts.accept(
         root,
         proposal({ rule_id = "A-01", status = "compliant", findings = {} }),
-        { by = "Ann", date = "2026-10-23" }
+        { by = "Ann", date = "2026-10-21" }
       )
     )
 
@@ -323,5 +323,79 @@ describe("rules.engine.verdicts.stale", function()
 
   it("needs no changes at all", function()
     assert.are.same({}, verdicts.stale(entries, {}))
+  end)
+end)
+
+describe("rules.engine.verdicts review follow-ups", function()
+  it("keeps the first 50 files as the default evidence of a big compliant answer and counts the rest", function()
+    local root = tmp_root()
+    local checked = {}
+    for n = 1, 60 do
+      checked[n] = ("lua/f%02d.lua"):format(n)
+    end
+
+    local ok, err = verdicts.accept(root, proposal({ status = "compliant", findings = {}, checked = checked }), ACCEPT)
+    local entry = verdicts.load(root)["DEP-01"]
+
+    assert.is_true(ok, err)
+    assert.are.equal(verdicts.MAX_EVIDENCE, #entry.evidence)
+    assert.are.equal(10, entry.evidence_omitted)
+  end)
+
+  it("does not count omitted evidence when the person names the evidence", function()
+    local root = tmp_root()
+
+    assert.is_true(verdicts.accept(root, proposal(), vim.tbl_extend("force", ACCEPT, { evidence = { { file = "x.lua" } } })))
+
+    assert.is_nil(verdicts.load(root)["DEP-01"].evidence_omitted)
+  end)
+
+  it("refuses a date after today: a verdict dated ahead would never go stale", function()
+    local root = tmp_root()
+
+    local ok, err = verdicts.accept(root, proposal(), { by = "S", date = "2999-01-01" })
+
+    assert.is_false(ok)
+    assert.is_truthy(err:find("future", 1, true))
+    assert.are.equal(0, vim.fn.filereadable(verdicts.path(root)))
+  end)
+
+  it("refuses a file whose from_proposal disagrees with the verdict", function()
+    local root = tmp_root()
+    local doc =
+      { ["DEP-01"] = { verdict = "compliant", date = "2026-10-22", by = "S", from_proposal = { status = "violation" } } }
+    vim.fn.writefile({ vim.json.encode(doc) }, verdicts.path(root))
+
+    local loaded, err = verdicts.load(root)
+
+    assert.are.same({}, loaded)
+    assert.is_truthy(err:find("a person accepts what was proposed", 1, true))
+  end)
+
+  it("does not replace a file another session changed while the verdict was being accepted", function()
+    local root = tmp_root()
+    assert.is_true(verdicts.accept(root, proposal({ rule_id = "A-01" }), ACCEPT))
+    local original_encode = verdicts.encode
+    verdicts.encode = function(entries)
+      local text = original_encode(entries)
+      -- the other session accepts B-01 between our read and our write
+      local other = original_encode({
+        ["A-01"] = entries["A-01"],
+        ["B-01"] = { verdict = "compliant", date = "2026-10-22", by = "Ann", evidence = {} },
+      })
+      local fh = assert(io.open(verdicts.path(root), "wb"))
+      fh:write(other)
+      fh:close()
+      return text
+    end
+
+    local ok, err = pcall(verdicts.accept, root, proposal({ rule_id = "C-01" }), ACCEPT)
+    verdicts.encode = original_encode
+
+    assert.is_true(ok)
+    assert.is_false(err)
+    local loaded = verdicts.load(root)
+    assert.is_truthy(loaded["B-01"])
+    assert.is_nil(loaded["C-01"])
   end)
 end)

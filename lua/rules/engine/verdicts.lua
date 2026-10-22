@@ -35,7 +35,7 @@ M.FILE = ".rules-verdicts.json"
 
 M.MAX_VERDICTS = 1000
 M.MAX_EVIDENCE = 50
-M.MAX_NOTE_LEN = 500
+M.MAX_NOTE_LEN = waivers.MAX_REASON_LEN
 M.MAX_BY_LEN = 100
 
 ---@class Rules.Verdict.Evidence
@@ -47,13 +47,14 @@ M.MAX_BY_LEN = 100
 ---@field date string  `YYYY-MM-DD`: the day it was accepted
 ---@field by string  the person
 ---@field evidence Rules.Verdict.Evidence[]  where the answer was found (may be empty)
+---@field evidence_omitted? integer  how many more files the proposal named than `evidence` keeps (`M.MAX_EVIDENCE`)
 ---@field note? string
 ---@field from_proposal? { status: "compliant"|"violation", model?: string }  what was accepted
 
 ---@alias Rules.Verdicts table<string, Rules.Verdict>
 
 local VERDICTS = { compliant = true, violation = true }
-local KEYS = { "by", "date", "evidence", "from_proposal", "note", "verdict" }
+local KEYS = { "by", "date", "evidence", "evidence_omitted", "from_proposal", "note", "verdict" }
 local EVIDENCE_KEYS = { "file", "line" }
 local PROPOSAL_KEYS = { "model", "status" }
 
@@ -160,8 +161,16 @@ function M.entry(id, value)
     end
   end
 
+  if value.evidence_omitted ~= nil then
+    local omitted = value.evidence_omitted
+    if type(omitted) ~= "number" or omitted % 1 ~= 0 or omitted < 1 then
+      return nil, ("evidence_omitted for %s must be a whole number of 1 or more"):format(id)
+    end
+    entry.evidence_omitted = omitted
+  end
+
   if value.note ~= nil then
-    local why = line_error(value.note, M.MAX_NOTE_LEN)
+    local why = waivers.reason_error(value.note)
     if why then
       return nil, ("note for %s %s"):format(id, why)
     end
@@ -182,6 +191,14 @@ function M.entry(id, value)
     end
     if origin.model ~= nil and line_error(origin.model, M.MAX_BY_LEN) then
       return nil, ("from_proposal.model for %s must be one line of at most %d characters"):format(id, M.MAX_BY_LEN)
+    end
+    if origin.status ~= value.verdict then
+      return nil,
+        ("from_proposal.status for %s is %s but the verdict is %s: a person accepts what was proposed"):format(
+          id,
+          origin.status,
+          value.verdict
+        )
     end
     entry.from_proposal = { status = origin.status, model = origin.model }
   end
@@ -267,6 +284,7 @@ function M.encode(entries)
       date = entry.date,
       by = entry.by,
       evidence = json.array(evidence),
+      evidence_omitted = entry.evidence_omitted,
       note = entry.note,
       from_proposal = entry.from_proposal
           and json.object({ status = entry.from_proposal.status, model = entry.from_proposal.model })
@@ -278,6 +296,19 @@ end
 
 -- ── accepting ───────────────────────────────────────────────────────────────────
 
+--- The bytes of a file, nil when there is none.
+---@param path string
+---@return string|nil
+local function read_bytes(path)
+  local fh = io.open(path, "rb")
+  if not fh then
+    return nil
+  end
+  local text = fh:read("*a")
+  fh:close()
+  return text
+end
+
 ---@class Rules.Verdict.Accept
 ---@field by string  the person who accepts; required, and never taken from the proposal
 ---@field date? string  `YYYY-MM-DD`; default: today
@@ -285,9 +316,10 @@ end
 ---@field evidence? Rules.Verdict.Evidence[]  default: the proposal's findings (file, line), or its `checked` files
 ---@field model? string  the model that made the proposal, kept as the origin
 
---- The evidence a proposal carries by itself.
+--- The evidence a proposal carries by itself, at most `M.MAX_EVIDENCE` entries.
 ---@param proposal table
----@return Rules.Verdict.Evidence[]
+---@return Rules.Verdict.Evidence[] evidence
+---@return integer|nil omitted  how many more it names
 local function evidence_of(proposal)
   local out, seen = {}, {}
   for _, finding in ipairs(proposal.findings or {}) do
@@ -302,7 +334,11 @@ local function evidence_of(proposal)
       out[#out + 1] = { file = file }
     end
   end
-  return out
+  if #out > M.MAX_EVIDENCE then
+    local omitted = #out - M.MAX_EVIDENCE
+    return { unpack(out, 1, M.MAX_EVIDENCE) }, omitted
+  end
+  return out, nil
 end
 
 --- Turn one proposal into a verdict entry, without writing anything.
@@ -331,11 +367,19 @@ function M.accepted(proposal, accept)
   if not today then
     return nil, nil, today_err
   end
+  if today > waivers.clock() then
+    return nil, nil, "the date is in the future: a verdict dated ahead would never go stale"
+  end
+  local evidence, omitted = accept.evidence, nil
+  if not evidence then
+    evidence, omitted = evidence_of(proposal)
+  end
   local entry, why = M.entry(proposal.rule_id, {
     verdict = proposal.status,
     date = today,
     by = accept.by,
-    evidence = accept.evidence or evidence_of(proposal),
+    evidence = evidence,
+    evidence_omitted = omitted,
     note = accept.note,
     from_proposal = { status = proposal.status, model = accept.model },
   })
@@ -363,6 +407,7 @@ function M.accept(root, proposal, accept)
   if stat and stat.type == "link" then
     return false, M.FILE .. " is a link: edit the file it points to by hand, the engine does not write through a link"
   end
+  local before = read_bytes(path)
   local entries, load_err = M.load(root)
   if load_err then
     return false, load_err
@@ -371,7 +416,12 @@ function M.accept(root, proposal, accept)
     return false, ("%s already has %d verdicts"):format(M.FILE, M.MAX_VERDICTS)
   end
   entries[id] = entry
-  local ok = require("lib.nvim.fs.write.atomic")(path, M.encode(entries))
+  local text = M.encode(entries)
+  -- Another session may have accepted a verdict since the read: do not replace what we did not see.
+  if read_bytes(path) ~= before then
+    return false, M.FILE .. " changed while the verdict was being accepted; accept again"
+  end
+  local ok = require("lib.nvim.fs.write.atomic")(path, text)
   if not ok then
     return false, path .. ": could not write"
   end
