@@ -5,8 +5,10 @@
 --- (the type and size judged on the stat and again on the open descriptor, a FIFO cannot block it, a link is
 --- refused). The desktop host runs the engine under the shim of `documentation.nvim`'s standalone build, whose `uv` has
 --- no `fs_open`, `fs_fstat` or `fs_read`: there the file is checked with `lstat` (not a link, a regular file), opened
---- with `io.open` and measured before it is read. The two paths answer the same; the second has no protection against a
---- file swapped between the check and the open, which the first has.
+--- with `io.open` and read at most `max_bytes + 1` bytes. The two paths give the same answers for a file that stays
+--- as it is. The second has **no** protection against a file swapped between the check and the open (a link is then
+--- followed, a FIFO blocks the open), which the first has: a host that reads a repository it does not control should
+--- not rely on it for that.
 ---
 --- A link is never read, and a file over the limit is not read at all.
 
@@ -46,16 +48,15 @@ function M.file(path, max_bytes, portable)
   if not fh then
     return nil, "open failed: " .. path
   end
-  local size = fh:seek("end")
-  if not size or size > max_bytes then
-    fh:close()
-    return nil, ("too large (%s > %d bytes): %s"):format(tostring(size), max_bytes, path)
-  end
-  fh:seek("set", 0)
-  local content = fh:read("*a")
+  -- At most one byte past the limit is asked for: seeing it means the file is too big, or grew since the check.
+  local content = fh:read(max_bytes + 1)
   fh:close()
   if content == nil then
-    return nil, "read failed: " .. path
+    -- nothing to read: an empty file reads as nil at its end
+    return "", nil
+  end
+  if #content > max_bytes then
+    return nil, ("too large (more than %d bytes): %s"):format(max_bytes, path)
   end
   return content, nil
 end
