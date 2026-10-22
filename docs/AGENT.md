@@ -1,9 +1,9 @@
 # Agent-run manual rules (planned)
 
-Status: a plan, with its first three steps built. The parser, the sandboxed
-block evaluation and the two pure engine functions `plan` and `validate`
-(items 1 to 3 below) exist; the store and the commands (items 4 and 5) do not,
-so nothing sends a request yet. None of it changes what `:Rules check` and
+Status: a plan, with its first four steps built. The parser, the sandboxed
+block evaluation, the two pure engine functions `plan` and `validate` and the
+verdict store (items 1 to 4 below) exist; the commands (item 5) do not, so
+nothing sends a request yet. None of it changes what `:Rules check` and
 `:Rules gate` report.
 
 A rule with no `check` is a `manual` result: a worklist entry for "a human or
@@ -42,7 +42,8 @@ An agent's answer is a proposal, never a verdict:
 3. ~~`engine/agent/plan.lua` and `engine/agent/validate.lua`.~~ **Built.** Pure
    functions with no `vim.api` and no network; sending a request is the host's
    job (see "The two functions" below).
-4. A verdict store next to `.rules-waivers.json`, written only by an accept.
+4. ~~A verdict store next to `.rules-waivers.json`, written only by an accept.~~
+   **Built** (`engine/verdicts.lua`, see "The verdict store" below).
 5. Commands: `:Rules agent <id> | --family=<PREFIX> --manual` (with `--dry-run`
    to print the plan and a size estimate without sending anything) and
    `:Rules review`. The transport is `ai.nvim`'s provider registry, as a soft
@@ -107,6 +108,37 @@ that names no file it looked at or comes with findings. `sent` is required: with
 the list of files the request carried, the answer cannot be judged.
 
 Neither function touches `check_family`, and a proposal is never counted as a pass.
+
+## The verdict store
+
+`.rules-verdicts.json` at the project root, committed, next to `.rules-waivers.json`. It holds what a
+person accepted from a proposal, and nothing else writes it:
+
+```json
+{ "DEP-01": { "verdict": "compliant", "date": "2026-10-22", "by": "Stefan",
+              "evidence": [ { "file": "lua/a.lua", "line": 12 }, { "file": "lua/b.lua" } ],
+              "note": "checked the two entry points",
+              "from_proposal": { "status": "compliant", "model": "..." } } }
+```
+
+`verdict` is `compliant` or `violation`; `evidence` are plain relative files (no glob), `line` is optional;
+`note` is one line of at most 500 characters. A file that exists but cannot be used (unknown key, bad date,
+bad path, a list instead of an object) is an error, never "no verdicts". `require("rules.engine.verdicts")`:
+
+- `accept(root, proposal, { by, date?, note?, evidence?, model? })` writes the verdict of **one** proposal
+  (the result of `validate`) and replaces an earlier one of the same rule. It refuses a list (there is no
+  accept-all), an `unclear` proposal (no answer is not a verdict), anything that is not marked `proposed`, and a
+  proposal that says `verified`. `by` comes from the caller, never from the proposal; the verdict is the
+  proposal's `status`, a person who disagrees rejects and nothing is written. Evidence defaults to the
+  findings (`file`, `line`) or the `checked` files. An existing unusable file or a link stops it.
+- `load(root)`, `parse(raw, label)`, `encode(entries)`: strict like the waivers file; sorted keys, LF.
+- `orphaned(entries, rules)`: verdicts of rules that no longer exist. `:checkhealth rules` has a section for a
+  project that keeps a verdicts file.
+- `stale(entries, { files = { [path] = "YYYY-MM-DD" }, rules = { [id] = "YYYY-MM-DD" } })`: pure. A verdict is stale
+  when the text of its rule, or a file of its evidence, changed after the day it was accepted. The caller fills the
+  days from the history (`git log -1 --format=%cs -- <path>`); the engine runs no git.
+
+A verdict changes nothing `:Rules check` or `:Rules gate` report, and never their exit code.
 
 ## Why the engine has to run without Neovim
 

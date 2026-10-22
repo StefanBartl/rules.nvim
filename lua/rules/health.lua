@@ -216,6 +216,29 @@ function M.check()
         warn(("%d waiver(s) in cwd expired and suppress nothing: %s"):format(#expired, table.concat(expired, ", ")))
       end
     end
+
+    -- Only a project that keeps accepted agent verdicts gets this section.
+    local verdicts = require("rules.engine.verdicts")
+    local repo_verdicts, verr = verdicts.load(vim.fn.getcwd())
+    if verr or next(repo_verdicts) ~= nil then
+      start("rules.nvim: verdicts")
+      if verr then
+        warn(verr)
+      else
+        local orphaned = verdicts.orphaned(repo_verdicts, rules)
+        if #orphaned == 0 then
+          ok(("%d verdict(s) in cwd, all match a loaded rule"):format(vim.tbl_count(repo_verdicts)))
+        else
+          warn(
+            ("%d verdict(s) in cwd, %d orphaned (no matching rule -- retired or mistyped id): %s"):format(
+              vim.tbl_count(repo_verdicts),
+              #orphaned,
+              table.concat(orphaned, ", ")
+            )
+          )
+        end
+      end
+    end
   end
 
   require("lib.nvim.bindings.usercmd.composer").checkhealth("Rules")
