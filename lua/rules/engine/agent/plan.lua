@@ -13,8 +13,9 @@
 --- **Deny.** Paths that must never leave the machine are dropped here, before any request exists, so the
 --- guarantee holds in every host: the built-in `DENY` list (environment files, private keys, credential
 --- stores) plus `agent.deny`. A deny glob without a `/` names a file at any depth (`*.pem`), one with a `/`
---- is relative to the root (`secrets/**`); a glob that matches a directory denies everything below it. The
---- built-in list cannot be switched off.
+--- is relative to the root (`secrets/**`); a glob that matches a directory denies everything below it. Case is
+--- ignored, and a symbolic link is never sent: a link named `notes.txt` can point at a key. The built-in list
+--- cannot be switched off.
 ---
 --- **Size.** A rule whose files are more than `agent.max_context_bytes` is never cut down quietly: it
 --- becomes `unclear` with the reason "context exceeds limit". `agent.max_files` of a rule caps its file list
@@ -67,9 +68,11 @@ M.DENY = {
 ---@field agent? Rules.Agent.PlanConfig  the merged `agent` block (`rules.config`); absent fields take their defaults
 ---@field files? string[]  every file of the tree, relative and "/"-separated; default: the walk of `root` (`fswalk`)
 ---@field size? fun(path: string): integer|nil  byte size of a relative path; default: `stat` under `root`
+---@field is_link? fun(path: string): boolean  whether a relative path is a symbolic link; default: `lstat` under `root`
 
 ---@class Rules.Agent.BatchRule
 ---@field rule Rules.ParsedRule
+---@field source "rule"|"family"  where this rule's files came from
 ---@field truncated? { total: integer, kept: integer }  the rule's own `max_files` cut its file list
 
 ---@class Rules.Agent.Batch
@@ -77,7 +80,6 @@ M.DENY = {
 ---@field files string[]  relative paths the request carries, sorted
 ---@field bytes integer  their size together
 ---@field rules Rules.Agent.BatchRule[]  1 to `batch_size`, sorted by rule id
----@field scope "rule"|"family"  where the files came from (every rule of a batch has the same files, not always the same source)
 
 ---@class Rules.Agent.Skipped
 ---@field rule Rules.ParsedRule
@@ -97,7 +99,7 @@ local function compile_deny(patterns)
     local normalized = pattern:gsub("\\", "/")
     -- Without a slash a glob names a file at any depth (like a gitignore line).
     local anchored = normalized:find("/", 1, true) and normalized or ("**/" .. normalized)
-    compiled[#compiled + 1] = glob.compile(anchored)
+    compiled[#compiled + 1] = glob.compile(anchored:lower())
   end
   return compiled
 end
@@ -107,9 +109,14 @@ end
 ---@param parts string[]
 ---@return boolean
 local function is_denied(compiled, parts)
+  -- Case does not decide: `KEY.PEM` and `.ENV` are the same files on NTFS and APFS.
+  local lowered = {}
+  for index, part in ipairs(parts) do
+    lowered[index] = part:lower()
+  end
   for _, segments in ipairs(compiled) do
-    for depth = 1, #parts do
-      if glob.match(segments, { unpack(parts, 1, depth) }) then
+    for depth = 1, #lowered do
+      if glob.match(segments, { unpack(lowered, 1, depth) }) then
         return true
       end
     end
@@ -156,12 +163,12 @@ end
 function M.plan(rules, root, opts)
   opts = opts or {}
   local cfg = opts.agent or {}
-  local batch_size = cfg.batch_size or M.DEFAULT_BATCH_SIZE
+  local batch_size = math.max(1, math.floor(tonumber(cfg.batch_size) or M.DEFAULT_BATCH_SIZE))
   local max_bytes = cfg.max_context_bytes or M.DEFAULT_MAX_CONTEXT_BYTES
   local scopes = cfg.scopes or {}
   local deny = compile_deny(vim.list_extend(vim.deepcopy(M.DENY), cfg.deny or {}))
 
-  local files = opts.files or walk(root)
+  local files = opts.files and vim.list_extend({}, opts.files) or walk(root)
   table.sort(files)
   local sizes = {}
   local function size_of(path)
@@ -178,16 +185,30 @@ function M.plan(rules, root, opts)
     return sizes[path]
   end
 
-  local split, denied_path = {}, {}
+  local split = {}
   for _, path in ipairs(files) do
     split[path] = glob.split(path)
-    denied_path[path] = is_denied(deny, split[path])
+  end
+  local function link_of(path)
+    if opts.is_link then
+      return opts.is_link(path)
+    end
+    local stat = uv.fs_lstat(root .. "/" .. path)
+    return stat ~= nil and stat.type == "link"
+  end
+  -- Judged only for a file some scope reaches, once.
+  local denied_path = {}
+  local function is_denied_path(path)
+    if denied_path[path] == nil then
+      denied_path[path] = is_denied(deny, split[path]) or link_of(path)
+    end
+    return denied_path[path]
   end
 
   local denied_set = {}
   ---@type Rules.Agent.Skipped[]
   local skipped = {}
-  ---@type table<string, { files: string[], bytes: integer, entries: Rules.Agent.BatchRule[], scope: "rule"|"family" }>
+  ---@type table<string, { files: string[], bytes: integer, entries: Rules.Agent.BatchRule[] }>
   local groups = {}
   ---@type string[]
   local group_order = {}
@@ -215,7 +236,7 @@ function M.plan(rules, root, opts)
       for _, path in ipairs(files) do
         for _, segments in ipairs(compiled) do
           if glob.match(segments, split[path]) then
-            if denied_path[path] then
+            if is_denied_path(path) then
               denied_set[path] = true
               denied_here = denied_here + 1
             else
@@ -253,11 +274,11 @@ function M.plan(rules, root, opts)
           local key = table.concat(matched, "\n")
           local group = groups[key]
           if not group then
-            group = { files = matched, bytes = bytes, entries = {}, scope = source }
+            group = { files = matched, bytes = bytes, entries = {} }
             groups[key] = group
             group_order[#group_order + 1] = key
           end
-          group.entries[#group.entries + 1] = { rule = rule, truncated = truncated }
+          group.entries[#group.entries + 1] = { rule = rule, source = source, truncated = truncated }
         end
       end
     end
@@ -273,7 +294,6 @@ function M.plan(rules, root, opts)
         files = group.files,
         bytes = group.bytes,
         rules = { unpack(group.entries, first, math.min(first + batch_size - 1, #group.entries)) },
-        scope = group.scope,
       }
     end
   end

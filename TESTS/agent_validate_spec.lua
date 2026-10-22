@@ -276,3 +276,49 @@ describe("rules.engine.agent.validate what is never a guess", function()
     assert.are.equal("unclear", validate.validate(RULE, text, root, { sent = sent }).status)
   end)
 end)
+
+describe("rules.engine.agent.validate weak evidence", function()
+  it("drops a quote too short to prove anything", function()
+    local root, sent = tree()
+    local entry = violation({ findings = { { file = "lua/a.lua", line = 2, quote = "end" } } })
+
+    local result = validate.validate(RULE, answer({ entry }), root, { sent = sent })
+
+    assert.are.equal("unclear", result.status)
+    assert.is_truthy(result.dropped[1].reason:find("shorter than", 1, true))
+  end)
+
+  it("lists the sent files a compliant answer does not name", function()
+    local root, sent = tree()
+    local entry = { rule = "DEP-01", verdict = "compliant", checked = { "lua/b.lua" } }
+
+    local result = validate.validate(RULE, answer({ entry }), root, { sent = sent })
+
+    assert.are.equal("compliant", result.status)
+    assert.are.same({ "lua/a.lua" }, result.unchecked)
+  end)
+
+  it("has no unchecked files when everything that was sent is named", function()
+    local root, sent = tree()
+    local entry = { rule = "DEP-01", verdict = "compliant", checked = { "lua/a.lua", "lua/b.lua" } }
+
+    assert.are.same({}, validate.validate(RULE, answer({ entry }), root, { sent = sent }).unchecked)
+  end)
+
+  it("does not read through a symbolic link", function()
+    local root, sent = tree()
+    vim.fn.writefile({ "SECRET=hunter2" }, root .. "/outside.dat")
+    local linked = vim.uv.fs_symlink(root .. "/outside.dat", root .. "/lua/link.lua")
+    if not linked then
+      pending("symlink creation not permitted on this machine")
+      return
+    end
+    table.insert(sent, "lua/link.lua")
+    local entry = violation({ findings = { { file = "lua/link.lua", line = 1, quote = "SECRET=hunter2" } } })
+
+    local result = validate.validate(RULE, answer({ entry }), root, { sent = sent })
+
+    assert.are.equal("unclear", result.status)
+    assert.is_truthy(result.dropped[1].reason:find("cannot be read", 1, true))
+  end)
+end)

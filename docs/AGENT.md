@@ -68,7 +68,9 @@ absent fields take their defaults. It returns `{ batches, skipped, denied }`.
   `.git-credentials`, `credentials.json`) plus `agent.deny`; the built-in list cannot
   be switched off. A glob without a `/` names a file or directory at any depth, one
   with a `/` is relative to the root, and a directory that matches denies everything
-  below it. `denied` lists what a scope reached and the list removed.
+  below it. Case is ignored (`KEY.PEM` is a key on NTFS and APFS), and a symbolic link
+  is never sent, whatever its name: a link called `notes.txt` can point at a key.
+  `denied` lists what a scope reached and the list removed.
 - **Size.** A rule whose files add up to more than `agent.max_context_bytes` is not
   cut down; it is in `skipped` as `unclear`, reason `context exceeds limit`. The
   `max_files` of a rule caps its list on purpose, and its batch entry says so
@@ -91,9 +93,12 @@ fenced block is allowed, nothing else around it):
 
 `verdict` is `violation`, `compliant` or `unclear`. Every finding is looked up in the
 file as it is now: its quote must occur literally (outer whitespace and line endings
-aside) within 3 lines of `line`, in a file that was sent; a finding that fails is
+aside) within 3 lines of `line`, in a file that was sent (a symbolic link is not read),
+and be at least 4 bytes long (`end` would be found anywhere); a finding that fails is
 dropped and listed in `dropped`. The result carries `status`, `findings`, `checked`,
-`dropped`, `reason`, and always `proposed = true`, `verified = false`.
+`unchecked` (the sent files the answer does not name: a `compliant` that leaves some
+says less than it seems to), `dropped`, `reason`, and always `proposed = true`,
+`verified = false`.
 
 What does not hold up is `unclear`, never a guess: text that is not this JSON (the raw
 text is attached as `raw`), a rule the answer leaves out or names twice, a `checked`

@@ -33,6 +33,8 @@ local M = {}
 M.WINDOW = 3
 --- A file bigger than this is not read; a finding in it is dropped.
 M.MAX_FILE_BYTES = 2 * 1024 * 1024
+--- A quote shorter than this proves nothing (`end`, `x` occur in any window).
+M.MIN_QUOTE_BYTES = 4
 
 ---@class Rules.Agent.Finding
 ---@field file string  relative, "/"-separated; one of the files that were sent
@@ -51,6 +53,8 @@ M.MAX_FILE_BYTES = 2 * 1024 * 1024
 ---@field verified false
 ---@field findings Rules.Agent.Finding[]  only the ones that hold; empty unless `violation`
 ---@field checked string[]  files the model says it looked at (all of them were sent)
+---@field unchecked string[]  sent files the model does not say it looked at; a `compliant` that leaves some says
+---   less than it seems to
 ---@field dropped Rules.Agent.Dropped[]  findings that did not hold up
 ---@field reason? string  why `unclear`, or the model's own words
 ---@field raw? string  the answer as received, attached when it could not be read
@@ -119,7 +123,7 @@ end
 ---@param file string
 ---@return string[]|nil
 local function read_lines(root, file)
-  local content = read_bounded(root .. "/" .. file, M.MAX_FILE_BYTES)
+  local content = read_bounded(root .. "/" .. file, M.MAX_FILE_BYTES, { follow_symlinks = false })
   if not content then
     return nil
   end
@@ -159,6 +163,9 @@ local function check_finding(finding, sent_set, root, window, cache)
   if quote == "" then
     return nil, "`quote` is empty"
   end
+  if #quote < M.MIN_QUOTE_BYTES then
+    return nil, ("`quote` is shorter than %d bytes"):format(M.MIN_QUOTE_BYTES)
+  end
   if cache[file] == nil then
     cache[file] = read_lines(root, file) or false
   end
@@ -178,13 +185,12 @@ local function check_finding(finding, sent_set, root, window, cache)
   return { file = file, line = line, quote = quote, why = type(finding.why) == "string" and finding.why or nil }, nil
 end
 
---- Turn the answer of an agent into a proposal for `rule`.
 ---@param rule Rules.ParsedRule|{ id: string }
----@param text string  the answer as received
----@param root string  the tree the files were sent from
+---@param text string
+---@param root string
 ---@param opts Rules.Agent.ValidateOpts
 ---@return Rules.Agent.Result
-function M.validate(rule, text, root, opts)
+local function judge(rule, text, root, opts)
   local id = rule.id
   if type(text) ~= "string" then
     return unclear(id, "the answer is not text")
@@ -290,6 +296,40 @@ function M.validate(rule, text, root, opts)
     dropped = dropped,
     reason = model_reason,
   }
+end
+
+--- The sent files that `checked` does not name.
+---@param sent any
+---@param checked string[]
+---@return string[]
+local function unchecked_of(sent, checked)
+  if not is_list(sent) then
+    return {}
+  end
+  local seen = {}
+  for _, path in ipairs(checked) do
+    seen[path] = true
+  end
+  local out = {}
+  for _, path in ipairs(sent) do
+    local normalized = norm_path(path)
+    if not seen[normalized] then
+      out[#out + 1] = normalized
+    end
+  end
+  return out
+end
+
+--- Turn the answer of an agent into a proposal for `rule`.
+---@param rule Rules.ParsedRule|{ id: string }
+---@param text string  the answer as received
+---@param root string  the tree the files were sent from
+---@param opts Rules.Agent.ValidateOpts
+---@return Rules.Agent.Result
+function M.validate(rule, text, root, opts)
+  local result = judge(rule, text, root, opts)
+  result.unchecked = unchecked_of(opts and opts.sent, result.checked)
+  return result
 end
 
 return M

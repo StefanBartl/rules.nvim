@@ -66,7 +66,7 @@ describe("rules.engine.agent.plan scope", function()
 
     assert.are.equal(1, #plan.batches)
     assert.are.same({ "a.lua" }, plan.batches[1].files)
-    assert.are.equal("family", plan.batches[1].scope)
+    assert.are.equal("family", plan.batches[1].rules[1].source)
   end)
 
   it("prefers the scope of the rule over the one of its family", function()
@@ -75,7 +75,7 @@ describe("rules.engine.agent.plan scope", function()
     })
 
     assert.are.same({ "b.txt" }, plan.batches[1].files)
-    assert.are.equal("rule", plan.batches[1].scope)
+    assert.are.equal("rule", plan.batches[1].rules[1].source)
   end)
 
   it("does not use the scope of another family", function()
@@ -275,5 +275,81 @@ describe("rules.engine.agent.plan on a real tree", function()
     assert.are.same({ "lua/a.lua" }, plan.batches[1].files)
     assert.are.equal(4, plan.batches[1].bytes)
     assert.are.same({ ".env" }, plan.denied)
+  end)
+end)
+
+describe("rules.engine.agent.plan deny edge cases", function()
+  local scopes = { A = { include = { "**" } } }
+
+  it("ignores case: KEY.PEM and .ENV are the same files on NTFS and APFS", function()
+    local plan = plan_of({ rule("A-01") }, { ["a.lua"] = 1, ["KEY.PEM"] = 1, [".ENV"] = 1, ["x/ID_RSA"] = 1 }, {
+      scopes = scopes,
+      deny = { "*.PRIVATE" },
+    })
+
+    assert.are.same({ "a.lua" }, plan.batches[1].files)
+  end)
+
+  it("never sends a symbolic link, whatever its name", function()
+    local plan = plan_lib.plan({ rule("A-01") }, "/nowhere", {
+      agent = { scopes = scopes },
+      files = { "a.lua", "docs/notes.txt" },
+      size = function()
+        return 1
+      end,
+      is_link = function(path)
+        return path == "docs/notes.txt"
+      end,
+    })
+
+    assert.are.same({ "a.lua" }, plan.batches[1].files)
+    assert.are.same({ "docs/notes.txt" }, plan.denied)
+  end)
+
+  it("finds a real symbolic link on the disk", function()
+    local dir = vim.fn.tempname()
+    vim.fn.mkdir(dir, "p")
+    vim.fn.writefile({ "KEY" }, dir .. "/target.dat")
+    vim.fn.writefile({ "x" }, dir .. "/a.lua")
+    local linked = vim.uv.fs_symlink(dir .. "/target.dat", dir .. "/notes.txt")
+    if not linked then
+      pending("symlink creation not permitted on this machine")
+      return
+    end
+
+    local plan = plan_lib.plan({ rule("A-01") }, dir, { agent = { scopes = scopes } })
+
+    assert.is_false(vim.tbl_contains(plan.batches[1].files, "notes.txt"))
+    assert.is_true(vim.tbl_contains(plan.denied, "notes.txt"))
+  end)
+
+  it("does not reorder the list of files it was given", function()
+    local given = { "z.lua", "a.lua" }
+
+    plan_lib.plan({ rule("A-01") }, "/nowhere", {
+      agent = { scopes = scopes },
+      files = given,
+      size = function()
+        return 1
+      end,
+    })
+
+    assert.are.same({ "z.lua", "a.lua" }, given)
+  end)
+
+  it("treats a batch_size below 1 as 1 instead of failing", function()
+    local plan = plan_of({ rule("A-01"), rule("A-02") }, { ["a.lua"] = 1 }, { scopes = scopes, batch_size = 0 })
+
+    assert.are.equal(2, #plan.batches)
+  end)
+
+  it("names the source of the files on each rule of a batch", function()
+    local plan = plan_of({ rule("A-01", { agent = { include = { "*.lua" } } }), rule("A-02") }, { ["a.lua"] = 1 }, {
+      scopes = { A = { include = { "*.lua" } } },
+    })
+
+    assert.are.equal(1, #plan.batches)
+    assert.are.equal("rule", plan.batches[1].rules[1].source)
+    assert.are.equal("family", plan.batches[1].rules[2].source)
   end)
 end)
