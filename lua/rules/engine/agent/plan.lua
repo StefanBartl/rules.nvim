@@ -30,6 +30,20 @@ local runner = require("rules.engine.runner")
 
 local uv = vim.uv or vim.loop
 
+--- `list[first..last]` as a new list (`unpack` is `table.unpack` on Lua 5.2 and later).
+---@generic T
+---@param list T[]
+---@param first integer
+---@param last integer
+---@return T[]
+local function slice(list, first, last)
+  local out = {}
+  for index = first, math.min(last, #list) do
+    out[#out + 1] = list[index]
+  end
+  return out
+end
+
 local M = {}
 
 M.DEFAULT_BATCH_SIZE = 8
@@ -116,7 +130,7 @@ local function is_denied(compiled, parts)
   end
   for _, segments in ipairs(compiled) do
     for depth = 1, #lowered do
-      if glob.match(segments, { unpack(lowered, 1, depth) }) then
+      if glob.match(segments, slice(lowered, 1, depth)) then
         return true
       end
     end
@@ -258,7 +272,7 @@ function M.plan(rules, root, opts)
         local cap = rule.agent and rule.agent.max_files
         if cap and #matched > cap then
           truncated = { total = #matched, kept = cap }
-          matched = { unpack(matched, 1, cap) }
+          matched = slice(matched, 1, cap)
         end
         local bytes = 0
         for _, path in ipairs(matched) do
@@ -293,12 +307,15 @@ function M.plan(rules, root, opts)
         id = "b" .. (#batches + 1),
         files = group.files,
         bytes = group.bytes,
-        rules = { unpack(group.entries, first, math.min(first + batch_size - 1, #group.entries)) },
+        rules = slice(group.entries, first, first + batch_size - 1),
       }
     end
   end
 
-  local denied = vim.tbl_keys(denied_set)
+  local denied = {}
+  for path in pairs(denied_set) do
+    denied[#denied + 1] = path
+  end
   table.sort(denied)
   table.sort(skipped, function(a, b)
     return a.rule.id < b.rule.id

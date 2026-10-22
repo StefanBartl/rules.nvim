@@ -11,7 +11,7 @@
 --- and named in `unreadable`, and `sent` lists the files that did go in -- that list, not the plan's, is what
 --- `validate` checks an answer against.
 
-local read_bounded = require("lib.nvim.fs.read_bounded")
+local read_file = require("rules.engine.agent.read")
 
 local M = {}
 
@@ -96,7 +96,7 @@ end
 function M.build(batch, root)
   local blocks, sent, unreadable = {}, {}, {}
   for _, file in ipairs(batch.files) do
-    local content = read_bounded(root .. "/" .. file, M.MAX_FILE_BYTES, { follow_symlinks = false })
+    local content = read_file.file(root .. "/" .. file, M.MAX_FILE_BYTES)
     -- a file with a NUL byte is binary: it would break the encoding of the request and spend the budget on nothing
     if content and not content:find("%z") then
       sent[#sent + 1] = file

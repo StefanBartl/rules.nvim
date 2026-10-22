@@ -25,7 +25,7 @@
 --- Pure like `plan`: no `vim.api`, no network. The files a request carried must be passed as `opts.sent`;
 --- without that list `checked` and `file` cannot be judged and every answer is `unclear`.
 
-local read_bounded = require("lib.nvim.fs.read_bounded")
+local read_file = require("rules.engine.agent.read")
 
 local M = {}
 
@@ -97,7 +97,8 @@ end
 ---@param value any
 ---@return boolean
 local function is_list(value)
-  if type(value) ~= "table" then
+  -- `vim.NIL` is a userdata in the editor and an (empty) table under the standalone shim: a JSON null is no list in either
+  if type(value) ~= "table" or value == vim.NIL then
     return false
   end
   local n = 0
@@ -123,7 +124,7 @@ end
 ---@param file string
 ---@return string[]|nil
 local function read_lines(root, file)
-  local content = read_bounded(root .. "/" .. file, M.MAX_FILE_BYTES, { follow_symlinks = false })
+  local content = read_file.file(root .. "/" .. file, M.MAX_FILE_BYTES)
   if not content then
     return nil
   end

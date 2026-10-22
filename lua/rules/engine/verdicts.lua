@@ -146,7 +146,11 @@ function M.entry(id, value)
   local entry = { verdict = value.verdict, date = value.date, by = value.by, evidence = {} }
 
   if value.evidence ~= nil then
-    if type(value.evidence) ~= "table" or (next(value.evidence) ~= nil and not vim.islist(value.evidence)) then
+    if
+      type(value.evidence) ~= "table"
+      or value.evidence == vim.NIL
+      or (next(value.evidence) ~= nil and not vim.islist(value.evidence))
+    then
       return nil, ("evidence for %s must be a list"):format(id)
     end
     if #value.evidence > M.MAX_EVIDENCE then
@@ -336,7 +340,11 @@ local function evidence_of(proposal)
   end
   if #out > M.MAX_EVIDENCE then
     local omitted = #out - M.MAX_EVIDENCE
-    return { unpack(out, 1, M.MAX_EVIDENCE) }, omitted
+    local kept = {}
+    for index = 1, M.MAX_EVIDENCE do
+      kept[index] = out[index]
+    end
+    return kept, omitted
   end
   return out, nil
 end
@@ -412,7 +420,11 @@ function M.accept(root, proposal, accept)
   if load_err then
     return false, load_err
   end
-  if entries[id] == nil and vim.tbl_count(entries) >= M.MAX_VERDICTS then
+  local count = 0
+  for _ in pairs(entries) do
+    count = count + 1
+  end
+  if entries[id] == nil and count >= M.MAX_VERDICTS then
     return false, ("%s already has %d verdicts"):format(M.FILE, M.MAX_VERDICTS)
   end
   entries[id] = entry
