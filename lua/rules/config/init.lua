@@ -3,17 +3,45 @@
 ---@description
 --- This is the `setup()` layer only. What a run actually uses is `rules.settings.resolve()`: `setup()` on top of the
 --- `.rules.json` of the project and of the vault (ranked there, in one place), on top of these defaults.
+---
+--- `setup()` is validated by `rules.config.schema` (one schema for setup, the project file, the vault file and a
+--- call: scopes, strict JSON lists and objects, hints), and the part that passes is the one layer of a
+--- `lib.lua.config.new` object over `DEFAULTS` (`get()`). Its merge rules are the ones `rules.config.merge` states:
+--- a list is replaced whole, `gates` and `agent.scopes` merge by name, the keys of a UI by action. The object
+--- never sees a rejected value, so its own check (a schema inferred from `DEFAULTS`) has nothing to add; it is the
+--- `copy` of the defaults and the merge that it contributes.
+---
+--- `rules.settings.resolve()` does **not** read its layers from this object, on purpose: the files and the options of
+--- a call differ per run (a project root, a headless call), `rulesets` is not merged but taken from the highest layer
+--- that names it (with the vault as a special case), every value remembers the layer it came from (`origin`), and
+--- a file layer is checked with the strict JSON schema, which a schema inferred from `DEFAULTS` cannot say.
+--- `rules.config.merge` therefore stays: `resolve` stacks the layers with it.
 
 local DEFAULTS = require("rules.config.DEFAULTS")
 local schema = require("rules.config.schema")
-local merge = require("rules.config.merge")
 local keys_mod = require("rules.config.keys")
 local notify = require("rules.util.notify")
 
 local M = {}
 
----@type Rules.Opts
-local state = vim.deepcopy(DEFAULTS)
+---The one persistent layer, `setup()`, over the defaults. `vault` has no default (unset means `$RULES_VAULT`, then
+---a project file), the keys of the form take a key, a list of keys or `false`.
+local store = require("lib.lua.config").new(DEFAULTS, {
+  name = "rules",
+  schema = {
+    vault = "string",
+    ["keys.form.toggle"] = "keymap",
+    ["keys.form.accept"] = "keymap",
+    ["keys.form.submit"] = "keymap",
+    ["keys.form.close"] = "keymap",
+    ["keys.form.cancel"] = "keymap",
+    ["keys.form.help"] = "keymap",
+  },
+  merge = { gates = "entries", ["agent.scopes"] = "entries" },
+  notify = function(message)
+    notify.warn(("setup(): %s"):format(message))
+  end,
+})
 
 ---What `setup()` set, validated: only the keys it named. `settings.resolve` ranks these above the files; the
 ---defaults are not in here.
@@ -78,19 +106,8 @@ function M.setup(opts)
     opts = {}
   end
   explicit = validate(opts)
-  state = vim.deepcopy(DEFAULTS)
-  for key, value in pairs(explicit) do
-    if key == "agent" then
-      state.agent = merge.agent(DEFAULTS.agent, value)
-    elseif key == "gates" then
-      state.gates = merge.gates(DEFAULTS.gates, value)
-    elseif key == "keys" then
-      state.keys = merge.keys(DEFAULTS.keys, value)
-    else
-      state[key] = vim.deepcopy(value)
-    end
-  end
-  warn_key_conflicts(state.keys.form)
+  store.setup(explicit)
+  warn_key_conflicts(store.get().keys.form)
   -- the settings of the last run were resolved with the old `setup()`
   require("rules.settings").reset()
 end
@@ -102,7 +119,7 @@ end
 --- plugin's live config for the rest of the session, so don't.
 ---@return Rules.Opts
 function M.get()
-  return state
+  return store.get()
 end
 
 --- The keys `setup()` set (validated), nothing from the defaults: the layer `rules.settings` ranks above the files.
