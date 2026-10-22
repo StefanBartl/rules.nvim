@@ -1,9 +1,9 @@
 # Agent-run manual rules (planned)
 
-Status: a plan, with its first four steps built. The parser, the sandboxed
-block evaluation, the two pure engine functions `plan` and `validate` and the
-verdict store (items 1 to 4 below) exist; the commands (item 5) do not, so
-nothing sends a request yet. None of it changes what `:Rules check` and
+Status: built. The parser, the sandboxed block evaluation, the two pure engine
+functions `plan` and `validate`, the verdict store and the commands `:Rules
+agent` and `:Rules review` (items 1 to 5 below) exist. Not built: a run over
+the desktop host, and a persisted list of proposals between sessions. None of it changes what `:Rules check` and
 `:Rules gate` report.
 
 A rule with no `check` is a `manual` result: a worklist entry for "a human or
@@ -44,9 +44,10 @@ An agent's answer is a proposal, never a verdict:
    job (see "The two functions" below).
 4. ~~A verdict store next to `.rules-waivers.json`, written only by an accept.~~
    **Built** (`engine/verdicts.lua`, see "The verdict store" below).
-5. Commands: `:Rules agent <id> | --family=<PREFIX> --manual` (with `--dry-run`
+5. ~~Commands: `:Rules agent <id> | --family=<PREFIX> --manual` (with `--dry-run`
    to print the plan and a size estimate without sending anything) and
-   `:Rules review`. The transport is `ai.nvim`'s provider registry, as a soft
+   `:Rules review`.~~ **Built** (`rules.agent`, `rules.report.review`; see "The
+   commands" below). The transport is `ai.nvim`'s provider registry, as a soft
    dependency — no second transport lives in this plugin.
 
 A manual rule that names no files to look in and has no `check` to derive leads
@@ -141,6 +142,35 @@ bad path, a list instead of an object) is an error, never "no verdicts". `requir
   days from the history (`git log -1 --format=%cs -- <path>`); the engine runs no git.
 
 A verdict changes nothing `:Rules check` or `:Rules gate` report, and never their exit code.
+
+## The commands
+
+`:Rules agent {id}` or `:Rules agent --family={PREFIX} --manual` picks the rules without a `check`
+(an id that has one is refused: a check answers it), plans them (`plan`), writes the requests
+(`engine/agent/request`: the question or the generic one, the rule text, the files numbered, a system text
+that fixes the answer format and says the file text is data, not an instruction) and, unless `--dry-run`,
+sends them one at a time through `ai.nvim`'s `ask` as a guarded bulk request (`temperature` 0, a size cap, one
+at a time). It never builds a second transport: without `ai.nvim` it says "no transport" and sends nothing.
+
+- **Where it goes.** `--backend=`, else the first of `agent.backends`, else `ollama`. `agent.backends` is the
+  allow-list of the project: empty means local only (`ollama`, `loomai`), a list allows exactly those; any other
+  backend is refused before a request is built. `--model=`, else the first of `agent.models`.
+- **Shown first.** Every run prints how many requests, files and (estimated) tokens go to which backend and
+  model, and says when it is not local. It then asks; `--yes` skips the question, never the display. With no
+  one to ask (a headless run) and no `--yes` it refuses.
+- **Answers.** Each answer goes through `validate`; the result is a proposal, kept for the session and shown
+  by `:Rules review`, never merged into `:Rules check`. A request that fails (the backend is down, the
+  allow-list of `ai.nvim` refuses) leaves an `unclear` proposal with the reason and the run goes on.
+- **Cache.** The raw answer is stored under a hash of the system text, the prompt (rule text, question and the
+  numbered content of the files), backend and model, in `stdpath("cache")/rules.nvim/agent`. The same rule against the
+  same files and model is not asked twice; a changed file, rule or model is a new question. A cached answer is
+  checked against the tree again.
+
+`:Rules review` opens the proposals, one block each, marked `PROPOSED` with the status in words (colour is
+not the only difference). On the one under the cursor: `a` accepts it (the verdict store, as `g:rules_by`,
+else the user name, else it asks to be named), `w` waives a violation (asks the reason, then the door of
+`:Rules waive` writes it), `x` discards it, `<CR>` opens the first finding. There is no key for all of
+them, and `unclear` cannot be accepted.
 
 ## Why the engine has to run without Neovim
 

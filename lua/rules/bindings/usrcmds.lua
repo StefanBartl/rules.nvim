@@ -311,6 +311,37 @@ function M.setup()
       end,
     },
     {
+      path = { "agent" },
+      args = { { name = "id", type = "RULES_ID", optional = true, desc = "A manual rule to ask a model about" } },
+      flags = {
+        { name = "family", type = "RULES_FAMILY", desc = "Every manual rule of this family (with --manual)" },
+        { name = "manual", bool = true, desc = "With --family: the rules without a check" },
+        { name = "dry-run", bool = true, desc = "Show the plan, the files and a token estimate; send nothing" },
+        { name = "yes", bool = true, desc = "Do not ask before sending (the destination is still shown)" },
+        { name = "backend", type = "STRING", desc = "ai.nvim backend (default: first of agent.backends, else ollama)" },
+        { name = "model", type = "STRING", desc = "Model (default: first of agent.models)" },
+      },
+      desc = "Ask a model (ai.nvim) about manual rules: an ID, or --family=PREFIX --manual; the answers go to :Rules review",
+      run = function(ctx)
+        require("rules.agent").run({
+          id = ctx.args.id,
+          family = ctx.flags.family,
+          manual = ctx.flags.manual == true,
+          dry_run = ctx.flags["dry-run"] == true,
+          yes = ctx.flags.yes == true,
+          backend = ctx.flags.backend,
+          model = ctx.flags.model,
+        })
+      end,
+    },
+    {
+      path = { "review" },
+      desc = "Look at what an agent proposed: accept (writes a verdict), waive, or discard one proposal at a time",
+      run = function()
+        require("rules.report.review").open()
+      end,
+    },
+    {
       path = { "messages" },
       desc = "Open this plugin's notify history (toast + :messages log)",
       run = function()

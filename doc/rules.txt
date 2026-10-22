@@ -146,6 +146,28 @@ COMMANDS                                                        *rules-commands*
 
     --format={FORMAT}     optional, only "json" is recognized
 
+                                                                  *:Rules_agent*
+:Rules agent [{id}] [--family={PREFIX} --manual] [--dry-run] [--yes]
+             [--backend={ID}] [--model={NAME}]
+    Asks a model, through ai.nvim, about rules that have no `check`, and keeps
+    the answers as proposals (never as results of a check). {id} must be a
+    rule without a check; --family needs --manual. --dry-run prints the plan,
+    the files, their size and a token estimate and sends nothing. Before
+    anything is sent the backend and the model are shown and you are asked
+    (--yes skips the question, not the display; with nobody to ask and no
+    --yes it refuses). The backend is --backend, else the first of
+    `agent.backends`, else ollama; `agent.backends` empty means local only.
+    Without ai.nvim the command says so and sends nothing. Answers are cached
+    by rule, files, backend and model. See |:Rules_review|.
+
+                                                                 *:Rules_review*
+:Rules review
+    The proposals of this session, one block each, marked PROPOSED, with the
+    status in words (violation, compliant, unclear). On the one under the
+    cursor: `a` accept (writes .rules-verdicts.json, as g:rules_by or the user
+    name), `w` waive a violation (asks for the reason), `x` discard, <CR> open
+    the first finding, `q` close. There is no key for all of them.
+
                                                                 *:Rules_catalog*
 :Rules catalog [{path}]
     For a ruleset in the one-file-per-rule form (see |rules-ruleset-format|):

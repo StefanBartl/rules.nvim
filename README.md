@@ -53,7 +53,7 @@ provide — the same way you'd point ESLint at your own `.eslintrc`.
 - [Bindings](docs/BINDINGS.md) — the `:Rules` command and its subcommands, including the form of `:Rules new`, and `:RulesVault` (find a rule, a family or a ruleset in the vault; make a vault).
 - [Settings files and the rules-vault](docs/CONFIG.md) — `.rules.json` in a project and in a vault, which place wins, `vault` / `$RULES_VAULT`, `@vault/<name>`.
 - [Work list](docs/WORK-LIST.md) — `rules-work-list/1`, one run as JSON for a task tool: verdicts, rule text, waivers, the manual rules as `unchecked`.
-- [Agent-run manual rules](docs/AGENT.md) — planned, partly built: how the rules with no `check` could be worked by an agent, as proposals a person reviews. The planner and the answer check exist as engine functions; nothing sends a request yet.
+- [Agent-run manual rules](docs/AGENT.md) — the rules with no `check`, worked by an agent through ai.nvim (`:Rules agent`, `--dry-run` first) and reviewed by a person (`:Rules review`): answers are proposals, never check results, and only an accept writes a verdict.
 - [Machine contract](docs/CONTRACT.md) — `rules-export/1` (the ruleset as JSON documents for apps, agents and CI) and `rules-ops/1` (create, change, retire and move a rule through the engine). A TypeScript client imports the types in
   [`schemas/rules-export/1/rules-export.d.ts`](schemas/rules-export/1/rules-export.d.ts), generated from the JSON Schema next to
   them: after a change to the schema run `nvim --headless -u NONE -i NONE -n -l scripts/contract-dts.lua --write` and commit the
