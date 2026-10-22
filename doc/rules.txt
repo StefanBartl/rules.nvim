@@ -148,7 +148,7 @@ COMMANDS                                                        *rules-commands*
 
                                                                   *:Rules_agent*
 :Rules agent [{id}] [--family={PREFIX} --manual] [--dry-run] [--yes]
-             [--backend={ID}] [--model={NAME}]
+             [--refresh] [--backend={ID}] [--model={NAME}]
     Asks a model, through ai.nvim, about rules that have no `check`, and keeps
     the answers as proposals (never as results of a check). {id} must be a
     rule without a check; --family needs --manual. --dry-run prints the plan,
@@ -158,7 +158,7 @@ COMMANDS                                                        *rules-commands*
     --yes it refuses). The backend is --backend, else the first of
     `agent.backends`, else ollama; `agent.backends` empty means local only.
     Without ai.nvim the command says so and sends nothing. Answers are cached
-    by rule, files, backend and model. See |:Rules_review|.
+    by rule, files, backend and model (--refresh asks again). See |:Rules_review|.
 
                                                                  *:Rules_review*
 :Rules review

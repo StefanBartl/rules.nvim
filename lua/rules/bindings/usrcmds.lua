@@ -318,6 +318,7 @@ function M.setup()
         { name = "manual", bool = true, desc = "With --family: the rules without a check" },
         { name = "dry-run", bool = true, desc = "Show the plan, the files and a token estimate; send nothing" },
         { name = "yes", bool = true, desc = "Do not ask before sending (the destination is still shown)" },
+        { name = "refresh", bool = true, desc = "Ask again even when an answer is cached" },
         { name = "backend", type = "STRING", desc = "ai.nvim backend (default: first of agent.backends, else ollama)" },
         { name = "model", type = "STRING", desc = "Model (default: first of agent.models)" },
       },
@@ -329,6 +330,7 @@ function M.setup()
           manual = ctx.flags.manual == true,
           dry_run = ctx.flags["dry-run"] == true,
           yes = ctx.flags.yes == true,
+          refresh = ctx.flags.refresh == true,
           backend = ctx.flags.backend,
           model = ctx.flags.model,
         })

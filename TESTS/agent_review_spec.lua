@@ -343,6 +343,34 @@ describe(":Rules review", function()
     end)
   end)
 
+  it("shows a model's multi-line text as one line instead of failing to open", function()
+    answers["DEP-01"] = vim.tbl_extend("force", answers["DEP-01"], {
+      findings = { { file = "lua/a.lua", line = 2, quote = "require('x')", why = "first line\nsecond line\r\nthird" } },
+    })
+    ask_family("DEP")
+
+    local buf = open()
+
+    assert.is_truthy(line_of(buf, "first line second line third"))
+    for _, text in ipairs(vim.api.nvim_buf_get_lines(buf, 0, -1, false)) do
+      assert.is_nil(text:find("\n", 1, true))
+    end
+  end)
+
+  it("tells that a waiver of a rule without a check does not change its result", function()
+    ask_family("DEP")
+    local buf = open()
+    local original_input = vim.ui.input
+    vim.ui.input = function(_, cb)
+      cb("known")
+    end
+
+    press(buf, "w", "PROPOSED violation DEP-01")
+    vim.ui.input = original_input
+
+    assert.is_true(told("still lists it as manual"))
+  end)
+
   it("renders without a window: what a host shows", function()
     ask_family("DEP")
 

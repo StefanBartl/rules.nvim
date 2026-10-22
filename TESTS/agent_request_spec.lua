@@ -167,3 +167,30 @@ describe("rules.engine.agent.cache", function()
     assert.is_nil(cache.get(dir, key))
   end)
 end)
+
+describe("rules.engine.agent.request.build binary files", function()
+  it("leaves a file with a NUL byte out and names it", function()
+    local root = tmp_dir()
+    vim.fn.writefile({ "x" }, root .. "/a.lua")
+    local fh = assert(io.open(root .. "/image.png", "wb"))
+    fh:write("PNG" .. string.char(0) .. "data")
+    fh:close()
+
+    local req = assert(request.build(batch({ "a.lua", "image.png" }, { rule("DEP-01") }), root))
+
+    assert.are.same({ "a.lua" }, req.sent)
+    assert.are.same({ "image.png" }, req.unreadable)
+    assert.is_nil(req.prompt:find("PNG", 1, true))
+  end)
+
+  it("gives nothing when the only file is binary", function()
+    local root = tmp_dir()
+    local fh = assert(io.open(root .. "/image.png", "wb"))
+    fh:write(string.char(0, 1, 2))
+    fh:close()
+
+    local req = request.build(batch({ "image.png" }, { rule("DEP-01") }), root)
+
+    assert.is_nil(req)
+  end)
+end)

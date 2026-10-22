@@ -156,21 +156,27 @@ at a time). It never builds a second transport: without `ai.nvim` it says "no tr
   allow-list of the project: empty means local only (`ollama`, `loomai`), a list allows exactly those; any other
   backend is refused before a request is built. `--model=`, else the first of `agent.models`.
 - **Shown first.** Every run prints how many requests, files and (estimated) tokens go to which backend and
-  model, and says when it is not local. It then asks; `--yes` skips the question, never the display. With no
-  one to ask (a headless run) and no `--yes` it refuses.
+  model, and says when it is not local. "Local" is the name of the backend (`ollama`, `loomai`): where it really
+  runs is the `host` set in `ai.nvim`, which this plugin does not read, so the line says "local backend" and no
+  more. It then asks; `--yes` skips the question, never the display. With no one to ask (a headless run) and no
+  `--yes` it refuses.
 - **Answers.** Each answer goes through `validate`; the result is a proposal, kept for the session and shown
   by `:Rules review`, never merged into `:Rules check`. A request that fails (the backend is down, the
   allow-list of `ai.nvim` refuses) leaves an `unclear` proposal with the reason and the run goes on.
 - **Cache.** The raw answer is stored under a hash of the system text, the prompt (rule text, question and the
   numbered content of the files), backend and model, in `stdpath("cache")/rules.nvim/agent`. The same rule against the
   same files and model is not asked twice; a changed file, rule or model is a new question. A cached answer is
-  checked against the tree again.
+  checked against the tree again. An answer that is not JSON is not kept, and `--refresh` asks again whatever is
+  cached. A file with a NUL byte (binary) is left out of the request and named as not readable; a batch none of
+  whose files can be read is not lost: each of its rules gets an `unclear` proposal that says so.
 
 `:Rules review` opens the proposals, one block each, marked `PROPOSED` with the status in words (colour is
 not the only difference). On the one under the cursor: `a` accepts it (the verdict store, as `g:rules_by`,
 else the user name, else it asks to be named), `w` waives a violation (asks the reason, then the door of
 `:Rules waive` writes it), `x` discards it, `<CR>` opens the first finding. There is no key for all of
-them, and `unclear` cannot be accepted.
+them, and `unclear` cannot be accepted. A waiver (`w`) of a rule without a check is recorded, but the
+runner applies a waiver to a failing check only: the rule stays `manual` in `:Rules check`, and the command says
+so. Accept records the violation in the verdict store.
 
 ## Why the engine has to run without Neovim
 

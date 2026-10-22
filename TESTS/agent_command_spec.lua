@@ -162,7 +162,7 @@ describe(":Rules agent", function()
       assert.is_truthy(told("dry run, nothing is sent"))
       assert.is_truthy(told("1 request(s), 1 file(s), ~"))
       assert.is_truthy(told("tokens, to ollama"))
-      assert.is_truthy(told("runs on this machine"))
+      assert.is_truthy(told("local backend"))
       assert.are.same({}, agent.list(vim.fn.getcwd()))
     end)
 
@@ -405,6 +405,64 @@ describe(":Rules agent", function()
 
       assert.are.equal(1, #calls)
       assert.are.equal("violation", agent.list(vim.fn.getcwd())[1].result.status)
+    end)
+  end)
+
+  describe("review findings", function()
+    it("does not cache an answer that is not JSON, so the next run asks again", function()
+      reply = "Looks fine to me!"
+
+      run("Rules agent DEP-01 --yes")
+      reply = violation_answer()
+      run("Rules agent DEP-01 --yes")
+
+      assert.are.equal(2, #calls)
+      assert.are.equal("violation", agent.list(vim.fn.getcwd())[1].result.status)
+    end)
+
+    it("asks again with --refresh although the answer is cached, and keeps the new answer", function()
+      run("Rules agent DEP-01 --yes")
+      reply = answer_of({ { rule = "DEP-01", verdict = "compliant", checked = { "lua/a.lua" } } })
+
+      run("Rules agent DEP-01 --yes --refresh")
+      run("Rules agent DEP-01 --yes")
+
+      assert.are.equal(2, #calls)
+      assert.are.equal("compliant", agent.list(vim.fn.getcwd())[1].result.status)
+    end)
+
+    it("does not lose the rules of a batch whose files cannot be read: they are unclear, with the reason", function()
+      pcall(vim.api.nvim_del_user_command, "Rules")
+      pcall(vim.api.nvim_del_user_command, "RulesVault")
+      require("rules").setup({
+        rulesets = { ruleset },
+        agent = { scopes = { DEP = { include = { "lua/a.lua" } } } },
+      })
+      -- DEP-02 looks only at a file that is binary: its batch cannot be sent
+      write_raw(project .. "/data.bin", "a" .. string.char(0) .. "b")
+      write_raw(
+        ruleset .. "/_rules/DEP/DEP-02.md",
+        rule_file("DEP-02", { 'id = "DEP-02",', 'severity = "recommended",', 'agent = { include = { "data.bin" } },' })
+      )
+      contract.clear_cache()
+      require("rules.ui.candidates").reset()
+
+      run("Rules agent --family=DEP --manual --yes")
+
+      local by_id = {}
+      for _, proposal in ipairs(agent.list(vim.fn.getcwd())) do
+        by_id[proposal.rule.id] = proposal
+      end
+      assert.are.equal(1, #calls)
+      assert.are.equal("unclear", by_id["DEP-02"].result.status)
+      assert.is_truthy(by_id["DEP-02"].result.reason:find("none of the files", 1, true))
+      assert.is_truthy(by_id["DEP-01"])
+    end)
+
+    it("does not say the destination is where it runs: the host of ai.nvim decides", function()
+      run("Rules agent DEP-01 --dry-run")
+
+      assert.is_truthy(told("local backend (the host set in ai.nvim decides where it really runs)"))
     end)
   end)
 

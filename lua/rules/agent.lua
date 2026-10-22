@@ -57,6 +57,7 @@ M.proposals = {}
 ---@field manual? boolean
 ---@field dry_run? boolean  plan and describe, send nothing
 ---@field yes? boolean  do not ask before sending
+---@field refresh? boolean  ask again even when an answer is cached (the new answer replaces it)
 ---@field backend? string
 ---@field model? string
 ---@field ask? fun(req: table, cb: fun(ok: boolean, res: any))  the transport; default `require("ai").ask`
@@ -207,7 +208,8 @@ local function describe(plan, requests, dest)
       tokens,
       dest.provider,
       dest.model or "the backend's default model",
-      dest.is_local and ", runs on this machine" or ", NOT local: the file content leaves this machine"
+      dest.is_local and ", local backend (the host set in ai.nvim decides where it really runs)"
+        or ", NOT local: the file content leaves this machine"
     )
   )
   return lines
@@ -227,9 +229,10 @@ end
 ---@param dest { provider: string, model: string|nil }
 ---@param cb fun(ok: boolean, text_or_err: string, from_cache: boolean)
 ---@param cache_dir string
-local function answer_of(transport, batch, req, dest, cb, cache_dir)
+---@param refresh? boolean
+local function answer_of(transport, batch, req, dest, cb, cache_dir, refresh)
   local key = cache.key(req, dest.provider, dest.model)
-  local hit = cache.get(cache_dir, key)
+  local hit = not refresh and cache.get(cache_dir, key) or nil
   if hit then
     cb(true, hit.text, true)
     return
@@ -251,7 +254,11 @@ local function answer_of(transport, batch, req, dest, cb, cache_dir)
       cb(false, ("%s: the backend answered without text"):format(batch.id), false)
       return
     end
-    cache.put(cache_dir, key, { text = text, provider = dest.provider, model = dest.model, date = os.date("%Y-%m-%d") })
+    -- only an answer that is JSON at all is worth keeping: prose would be a hit on every later run
+    local decoded_ok, decoded = pcall(vim.json.decode, text)
+    if decoded_ok and type(decoded) == "table" then
+      cache.put(cache_dir, key, { text = text, provider = dest.provider, model = dest.model, date = os.date("%Y-%m-%d") })
+    end
     cb(true, text, false)
   end)
 end
@@ -301,24 +308,16 @@ function M.run(opts)
       requests[batch.id] = req
     else
       unreadable_batches[batch.id] = build_err
+      -- not sent, and not lost: each of its rules says so in the review
+      for _, entry in ipairs(batch.rules) do
+        keep(root, { rule = entry.rule, batch = batch.id, result = validate.unclear(entry.rule.id, build_err) })
+        summary.unclear = summary.unclear + 1
+      end
     end
   end
   for _, skipped in ipairs(plan.skipped) do
     if skipped.status == "unclear" then
-      keep(root, {
-        rule = skipped.rule,
-        result = {
-          rule_id = skipped.rule.id,
-          status = "unclear",
-          proposed = true,
-          verified = false,
-          findings = {},
-          checked = {},
-          unchecked = {},
-          dropped = {},
-          reason = skipped.reason,
-        },
-      })
+      keep(root, { rule = skipped.rule, result = validate.unclear(skipped.rule.id, skipped.reason) })
       summary.unclear = summary.unclear + 1
     else
       summary.manual[#summary.manual + 1] = skipped.rule.id
@@ -386,17 +385,7 @@ function M.run(opts)
             keep(root, {
               rule = entry.rule,
               batch = batch.id,
-              result = {
-                rule_id = entry.rule.id,
-                status = "unclear",
-                proposed = true,
-                verified = false,
-                findings = {},
-                checked = {},
-                unchecked = {},
-                dropped = {},
-                reason = "the request failed: " .. text,
-              },
+              result = validate.unclear(entry.rule.id, "the request failed: " .. text),
             })
           end
           step()
@@ -417,7 +406,7 @@ function M.run(opts)
           end
         end
         step()
-      end, cache_dir)
+      end, cache_dir, opts.refresh)
     end
     step()
   end

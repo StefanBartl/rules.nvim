@@ -97,7 +97,8 @@ function M.build(batch, root)
   local blocks, sent, unreadable = {}, {}, {}
   for _, file in ipairs(batch.files) do
     local content = read_bounded(root .. "/" .. file, M.MAX_FILE_BYTES, { follow_symlinks = false })
-    if content then
+    -- a file with a NUL byte is binary: it would break the encoding of the request and spend the budget on nothing
+    if content and not content:find("%z") then
       sent[#sent + 1] = file
       blocks[#blocks + 1] = ("=== %s ===\n%s"):format(file, numbered(content))
     else

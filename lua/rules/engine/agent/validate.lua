@@ -298,6 +298,16 @@ local function judge(rule, text, root, opts)
   }
 end
 
+--- An `unclear` proposal for a rule, for a host that has no answer to check (the request failed, nothing was sent).
+---@param rule_id string
+---@param reason string
+---@return Rules.Agent.Result
+function M.unclear(rule_id, reason)
+  local result = unclear(rule_id, reason)
+  result.unchecked = {}
+  return result
+end
+
 --- The sent files that `checked` does not name.
 ---@param sent any
 ---@param checked string[]

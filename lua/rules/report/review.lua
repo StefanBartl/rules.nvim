@@ -23,6 +23,14 @@ local M = {}
 
 local BUF_NAME = "rules://review"
 
+--- Text of the model (or of a file) as one line: `nvim_buf_set_lines` refuses a newline, and a control character
+--- in a view is not what anyone meant to show.
+---@param text any
+---@return string
+local function one_line(text)
+  return (tostring(text):gsub("%c+", " "))
+end
+
 --- The lines of the view and which proposal each belongs to.
 ---@param proposals Rules.Agent.Proposal[]
 ---@return string[] lines
@@ -42,24 +50,27 @@ function M.render(proposals)
     local result = proposal.result
     local head = ("PROPOSED %-9s %s"):format(result.status, proposal.rule.id)
     if proposal.rule.title and proposal.rule.title ~= "" then
-      head = head .. " -- " .. proposal.rule.title
+      head = head .. " -- " .. one_line(proposal.rule.title)
     end
     local first = #lines + 1
     lines[#lines + 1] = head
     for _, finding in ipairs(result.findings) do
-      lines[#lines + 1] = ("    %s:%d  %s"):format(finding.file, finding.line, (finding.quote:gsub("\n", " ")))
+      lines[#lines + 1] = ("    %s:%d  %s"):format(one_line(finding.file), finding.line, one_line(finding.quote))
       if finding.why and finding.why ~= "" then
-        lines[#lines + 1] = "        " .. finding.why
+        lines[#lines + 1] = "        " .. one_line(finding.why)
       end
     end
     if result.status == "compliant" then
-      lines[#lines + 1] = ("    looked at: %s"):format(table.concat(result.checked, ", "))
+      lines[#lines + 1] = ("    looked at: %s"):format(one_line(table.concat(result.checked, ", ")))
       if #result.unchecked > 0 then
-        lines[#lines + 1] = ("    NOT looked at (%d sent): %s"):format(#result.unchecked, table.concat(result.unchecked, ", "))
+        lines[#lines + 1] = ("    NOT looked at (%d sent): %s"):format(
+          #result.unchecked,
+          one_line(table.concat(result.unchecked, ", "))
+        )
       end
     end
     if result.status == "unclear" and result.reason then
-      lines[#lines + 1] = "    " .. result.reason:gsub("\n", " ")
+      lines[#lines + 1] = "    " .. one_line(result.reason)
     end
     if #result.dropped > 0 then
       lines[#lines + 1] = ("    %d claim(s) of the model did not hold up against the files"):format(#result.dropped)
@@ -125,6 +136,13 @@ function M.waive(root, proposal, reason, after)
     local result = require("rules.ui.cmd").run({ { op = "waive", id = proposal.rule.id, reason = text } }, false)
     if result.ok then
       agent.drop(root, proposal.rule.id)
+      -- a waiver is applied to a failing check; this rule has none, so its result stays `manual`
+      notify.warn(
+        (
+          "%s has no check: the waiver is recorded, but :Rules check still lists it as manual."
+          .. " Accept (a) records the violation"
+        ):format(proposal.rule.id)
+      )
     end
     if after then
       after()
