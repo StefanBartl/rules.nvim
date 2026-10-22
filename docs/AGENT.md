@@ -1,8 +1,10 @@
 # Agent-run manual rules (planned)
 
-Status: a plan, with its first step built. The parser and the sandboxed block
-evaluation (items 1 and 2 below) exist; the agent itself (items 3 to 5) does
-not. None of it changes what `:Rules check` and `:Rules gate` report.
+Status: a plan, with its first three steps built. The parser, the sandboxed
+block evaluation and the two pure engine functions `plan` and `validate`
+(items 1 to 3 below) exist; the store and the commands (items 4 and 5) do not,
+so nothing sends a request yet. None of it changes what `:Rules check` and
+`:Rules gate` report.
 
 A rule with no `check` is a `manual` result: a worklist entry for "a human or
 an agent session". This page is what "an agent session" would concretely be,
@@ -37,16 +39,9 @@ An agent's answer is a proposal, never a verdict:
    its folder is in `setup({ trust })`, `--trust` or `$RULES_TRUST`
    ([CONFIG.md](CONFIG.md#a-word-on-trust)). A headless or agent run has no prompt:
    without `--trust` nothing a project file names runs Lua.
-3. `engine/agent/plan.lua` and `engine/agent/validate.lua`, pure functions with
-   no `vim.api` and no network. `plan(rules, root)` returns requests batched
-   per scope: several rules that look at the same files share one request, the
-   scope is set per family in `.rules.json` or `setup()` (both are read, checked and merged
-   today, [CONFIG.md](CONFIG.md): `agent.scopes`, `batch_size`, `max_context_bytes`,
-   `deny`, `backends`, `models`; nothing consumes them yet) and can be overridden
-   per rule. `validate(rule, text, root)` parses the answer and checks every
-   quoted line
-   against the tree as it is now, dropping what does not occur there. Sending
-   the request is the host's job.
+3. ~~`engine/agent/plan.lua` and `engine/agent/validate.lua`.~~ **Built.** Pure
+   functions with no `vim.api` and no network; sending a request is the host's
+   job (see "The two functions" below).
 4. A verdict store next to `.rules-waivers.json`, written only by an accept.
 5. Commands: `:Rules agent <id> | --family=<PREFIX> --manual` (with `--dry-run`
    to print the plan and a size estimate without sending anything) and
@@ -56,6 +51,57 @@ An agent's answer is a proposal, never a verdict:
 A manual rule that names no files to look in and has no `check` to derive leads
 from is not sent; it stays `manual`, with the reason. Asking a model about
 architecture with no code attached returns a confident answer built on nothing.
+
+## The two functions
+
+`require("rules.engine.agent.plan").plan(rules, root, opts)` decides, for every
+rule **without a `check`**, which files an agent would look at and which rules
+share a request. `opts.agent` is the merged `agent` block ([CONFIG.md](CONFIG.md));
+absent fields take their defaults. It returns `{ batches, skipped, denied }`.
+
+- **Scope.** The rule's own `agent.include`, else the `include` of its family in
+  `agent.scopes`, else none. A rule with none is not sent: it is in `skipped` as
+  `manual`, reason `no scope to look in`. So is a rule whose scope matches no file.
+- **Deny.** Dropped inside `plan`, so it holds in every host. A built-in list
+  (`.env*`, `*.pem`, `*.key`, `*.p12`, `*.pfx`, `*.jks`, `*.keystore`, `*.kdbx`,
+  `id_rsa*` and the other SSH keys, `.netrc`, `.npmrc`, `.pypirc`,
+  `.git-credentials`, `credentials.json`) plus `agent.deny`; the built-in list cannot
+  be switched off. A glob without a `/` names a file or directory at any depth, one
+  with a `/` is relative to the root, and a directory that matches denies everything
+  below it. `denied` lists what a scope reached and the list removed.
+- **Size.** A rule whose files add up to more than `agent.max_context_bytes` is not
+  cut down; it is in `skipped` as `unclear`, reason `context exceeds limit`. The
+  `max_files` of a rule caps its list on purpose, and its batch entry says so
+  (`truncated = { total, kept }`).
+- **Batches.** Rules that look at exactly the same files share a request, at most
+  `agent.batch_size` (8). Rules are ordered by id and files by path, so one tree
+  always gives one plan.
+
+`require("rules.engine.agent.validate").validate(rule, text, root, { sent = files })`
+turns the raw answer into a **proposal** for one rule. The answer is JSON (one
+fenced block is allowed, nothing else around it):
+
+```json
+{ "results": [
+  { "rule": "DEP-01", "verdict": "violation",
+    "checked": ["lua/a.lua"],
+    "findings": [ { "file": "lua/a.lua", "line": 12, "quote": "require(\"x\")", "why": "..." } ] }
+] }
+```
+
+`verdict` is `violation`, `compliant` or `unclear`. Every finding is looked up in the
+file as it is now: its quote must occur literally (outer whitespace and line endings
+aside) within 3 lines of `line`, in a file that was sent; a finding that fails is
+dropped and listed in `dropped`. The result carries `status`, `findings`, `checked`,
+`dropped`, `reason`, and always `proposed = true`, `verified = false`.
+
+What does not hold up is `unclear`, never a guess: text that is not this JSON (the raw
+text is attached as `raw`), a rule the answer leaves out or names twice, a `checked`
+entry that was not sent, a `violation` none of whose findings survive, a `compliant`
+that names no file it looked at or comes with findings. `sent` is required: without
+the list of files the request carried, the answer cannot be judged.
+
+Neither function touches `check_family`, and a proposal is never counted as a pass.
 
 ## Why the engine has to run without Neovim
 

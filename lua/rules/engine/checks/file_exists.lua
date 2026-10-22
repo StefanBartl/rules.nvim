@@ -14,6 +14,7 @@
 --- walk skips (`.git`, `.deps`, `.claude`).
 
 local fswalk = require("rules.engine.fswalk")
+local glob_lib = require("rules.engine.glob")
 
 local M = {}
 
@@ -26,38 +27,6 @@ local M = {}
 ---  `patterns` singular-or-list convention `grep` uses; `path` and `paths`
 ---  are mutually exclusive, `path` wins if both are somehow given.
 
---- One glob segment as an anchored Lua pattern: `*` is any run of characters,
---- everything else is literal.
----@param segment string
----@return string
-local function segment_pattern(segment)
-  return "^" .. vim.pesc(segment):gsub("%%%*", ".*") .. "$"
-end
-
---- Whether path segments `parts[pi..]` match glob segments `glob[gi..]`.
----@param glob string[]
----@param gi integer
----@param parts string[]
----@param pi integer
----@return boolean
-local function segments_match(glob, gi, parts, pi)
-  if gi > #glob then
-    return pi > #parts
-  end
-  if glob[gi] == "**" then
-    for skip = pi, #parts + 1 do
-      if segments_match(glob, gi + 1, parts, skip) then
-        return true
-      end
-    end
-    return false
-  end
-  if pi > #parts or not parts[pi]:find(segment_pattern(glob[gi])) then
-    return false
-  end
-  return segments_match(glob, gi + 1, parts, pi + 1)
-end
-
 --- The first file under `root` matching `glob`, or nil.
 ---@param glob string  relative, "/"-separated
 ---@param root string
@@ -65,22 +34,11 @@ end
 ---@return string|nil full
 local function first_glob_match(glob, root, ctx)
   local prefix = root:gsub("\\", "/"):gsub("/+$", "") .. "/"
-  -- Segments, not a string match: `\` is a separator here as it is for a
-  -- literal path, and `.` or an empty segment (`./lua/*/x.lua`, `lua//*/x`)
-  -- means nothing, exactly as the filesystem treats it for a literal path.
-  local glob_segments = {}
-  for _, segment in ipairs(vim.split((glob:gsub("\\", "/")), "/", { plain = true })) do
-    if segment ~= "" and segment ~= "." then
-      glob_segments[#glob_segments + 1] = segment
-    end
-  end
+  local glob_segments = glob_lib.compile(glob)
   for _, file in ipairs(fswalk.cached_files(root, ctx)) do
     if file:sub(1, #prefix) == prefix then
-      -- `trimempty`: a root given with a trailing separator (tab completion
-      -- of a directory, `fnamemodify(dir, ":p")`) comes back from the walk as
-      -- `root//lua/...`, whose first segment would otherwise be empty.
-      local parts = vim.split(file:sub(#prefix + 1), "/", { plain = true, trimempty = true })
-      if segments_match(glob_segments, 1, parts, 1) then
+      local parts = glob_lib.split(file:sub(#prefix + 1))
+      if glob_lib.match(glob_segments, parts) then
         return file
       end
     end

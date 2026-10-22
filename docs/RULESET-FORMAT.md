@@ -80,7 +80,9 @@ agent = {
 
 Optional, and only a hint — it changes nothing about `:Rules check`. `question`
 replaces the generic "does the code comply with the rule text", `include` says
-where to look, `max_files` caps how many files one request carries. An invalid
+where to look (globs relative to the root: `*` within a segment, `**` across them;
+it replaces the scope of the rule's family, see [AGENT.md](AGENT.md)), `max_files`
+caps how many files one request carries (the first ones by path; the plan says so). An invalid
 `agent` (an unknown key, an empty `question`, an `include` that is not a list of
 strings, a `max_files` that is not a positive integer, a `question` over 4000 bytes,
 an `include` with more than 50 entries or an entry over 200 bytes) is **dropped and

@@ -62,7 +62,8 @@ The same schema in a project and in a vault. Paths are relative to the file that
 | `agent.scopes` | object | family to `{ "include": [globs] }`; a family without a scope is not sent |
 | `vault` | string | the vault of this project (a project file only; see below) |
 
-The `agent` block is read, checked and merged here; the planner that uses it is described in [AGENT.md](AGENT.md).
+The `agent` block is read, checked and merged here; `rules.engine.agent.plan` consumes `scopes`, `batch_size`,
+`max_context_bytes` and `deny` (see [AGENT.md](AGENT.md)); `backends` and `models` are for the commands that send a request.
 `setup()` takes the same keys (`rulesets`, `gates`, `agent`, `vault`) plus `lua_predicates`, `trust` and `keys`.
 
 Only the file at the root being checked is read (`:Rules check` uses its `path` argument, else the working directory).

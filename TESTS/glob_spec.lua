@@ -1,0 +1,32 @@
+local glob = require("rules.engine.glob")
+
+describe("rules.engine.glob.matches", function()
+  it("matches a literal path and nothing else", function()
+    assert.is_true(glob.matches("lua/a.lua", "lua/a.lua"))
+    assert.is_false(glob.matches("lua/a.lua", "lua/b.lua"))
+    assert.is_false(glob.matches("lua/a.lua", "lua/a.lua/x"))
+  end)
+
+  it("lets * run within one segment only", function()
+    assert.is_true(glob.matches("lua/*.lua", "lua/a.lua"))
+    assert.is_false(glob.matches("lua/*.lua", "lua/sub/a.lua"))
+    assert.is_true(glob.matches("lua/*/x.lua", "lua/m/x.lua"))
+  end)
+
+  it("lets ** run across segments, none included", function()
+    assert.is_true(glob.matches("lua/**/*.lua", "lua/a/b/c.lua"))
+    assert.is_true(glob.matches("lua/**/*.lua", "lua/c.lua"))
+    assert.is_false(glob.matches("lua/**/*.lua", "other/c.lua"))
+  end)
+
+  it("treats . and empty segments as nothing, and a backslash as a separator", function()
+    assert.is_true(glob.matches("./lua//a.lua", "lua/a.lua"))
+    assert.is_true(glob.matches("lua\\a.lua", "lua/a.lua"))
+  end)
+
+  it("takes every other character literally", function()
+    assert.is_true(glob.matches("a.b", "a.b"))
+    assert.is_false(glob.matches("a.b", "axb"))
+    assert.is_false(glob.matches("a?b", "axb"))
+  end)
+end)
